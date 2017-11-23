@@ -1165,6 +1165,8 @@ static void set_volume (uint32_t *ptr, unsigned number)
    }
 }
 
+static float mouse_sensitivity = 1.25f;
+
 static void check_variables(void)
 {
    struct retro_variable var = {0};
@@ -1237,11 +1239,20 @@ static void check_variables(void)
          setting_rainbow_chromaip = 1;
    }
 
+   var.key = "pcfx_mouse_sensitivity";
+
+   if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+   {
+      mouse_sensitivity = atof(var.value);
+   }
+
 }
 
 #define MAX_PLAYERS 2
 #define MAX_BUTTONS 15
-static uint16_t input_buf[MAX_PLAYERS];
+static uint32_t input_type[MAX_PLAYERS] = {0};
+static uint16_t input_buf[MAX_PLAYERS] = {0};
+static uint32_t mousedata[MAX_PLAYERS][3] = {{0}};
 
 static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsigned depth = 0)
 {
@@ -1577,19 +1588,37 @@ static void update_input(void)
 
    for (unsigned j = 0; j < MAX_PLAYERS; j++)
    {
-      for (unsigned i = 0; i < MAX_BUTTONS; i++)
-         input_buf[j] |= map[i] != -1u &&
-            input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, map[i]) ? (1 << i) : 0;
+      switch (input_type[j])
+      {
+         case RETRO_DEVICE_JOYPAD:
+            for (unsigned i = 0; i < MAX_BUTTONS; i++)
+               input_buf[j] |= map[i] != -1u &&
+                  input_state_cb(j, RETRO_DEVICE_JOYPAD, 0, map[i]) ? (1 << i) : 0;
 
 #ifdef MSB_FIRST
-      union {
-         uint8_t b[2];
-         uint16_t s;
-      } u;
-      u.s = input_buf[j];
-      input_buf[j] = u.b[0] | u.b[1] << 8;
+            union {
+               uint8_t b[2];
+               uint16_t s;
+            } u;
+            u.s = input_buf[j];
+            input_buf[j] = u.b[0] | u.b[1] << 8;
 #endif
+            break;
+         case RETRO_DEVICE_MOUSE:
+            mousedata[j][2] = 0;
 
+            int _x = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
+            int _y = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
+
+            mousedata[j][0] = _x * mouse_sensitivity;
+            mousedata[j][1] = _y * mouse_sensitivity;
+
+            if (input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT))
+               mousedata[j][2] |= (1 << 0);
+            if (input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_RIGHT))
+               mousedata[j][2] |= (1 << 1);
+            break;
+      }
    }
 }
 
@@ -1757,10 +1786,14 @@ void retro_set_controller_port_device(unsigned in_port, unsigned device)
       switch(device)
       {
          case RETRO_DEVICE_JOYPAD:
+            input_type[in_port] = RETRO_DEVICE_JOYPAD;
             FXINPUT_SetInput(in_port, "gamepad", &input_buf[in_port]);
+            log_cb(RETRO_LOG_INFO," Port %d: gamepad\n", in_port +1);
             break;
          case RETRO_DEVICE_MOUSE:
-            FXINPUT_SetInput(in_port, "mouse", &input_buf[in_port]);
+            input_type[in_port] = RETRO_DEVICE_MOUSE;
+            FXINPUT_SetInput(in_port, "mouse", &mousedata[in_port]);
+            log_cb(RETRO_LOG_INFO," Port %d: mouse\n", in_port +1);
             break;
       }
    }
@@ -1779,12 +1812,13 @@ void retro_set_environment(retro_environment_t cb)
       { "pcfx_nospritelimit", "No Sprite Limit (Restart); disabled|enabled" },
       { "pcfx_initial_scanline", "Initial scanline; 4|5|6|7|8|9|10|11|12|13|14|15|16|17|18|19|20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|0|1|2|3" },
       { "pcfx_last_scanline", "Last scanline; 235|236|237|238|239|208|209|210|211|212|213|214|215|216|217|218|219|220|221|222|223|224|225|226|227|228|229|230|231|232|233|234" },
+      { "pcfx_mouse_sensitivity", "Mouse Sensitivity; 1.25|1.50|1.75|2.00|2.25|2.50|2.75|3.00|3.25|3.50|3.75|4.00|4.25|4.50|4.75|5.00|1.00" },
       { NULL, NULL },
    };
 
    static const struct retro_controller_description pads[] = {
       { "PCFX Joypad", RETRO_DEVICE_JOYPAD },
-      { "Mouse", RETRO_DEVICE_MOUSE },
+      { "PCFX Mouse", RETRO_DEVICE_MOUSE },
    };
 
    static const struct retro_controller_info ports[] = {
