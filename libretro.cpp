@@ -1252,7 +1252,7 @@ static void check_variables(void)
 #define MAX_BUTTONS 15
 static uint32_t input_type[MAX_PLAYERS] = {0};
 static uint16_t input_buf[MAX_PLAYERS] = {0};
-static uint32_t mousedata[MAX_PLAYERS][3] = {{0}};
+static int32_t  mousedata[MAX_PLAYERS][3] = {{0}, {0}};
 
 static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsigned depth = 0)
 {
@@ -1610,8 +1610,8 @@ static void update_input(void)
             int _x = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
             int _y = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
 
-            mousedata[j][0] = _x * mouse_sensitivity;
-            mousedata[j][1] = _y * mouse_sensitivity;
+            mousedata[j][0] = (int)round(_x * mouse_sensitivity);
+            mousedata[j][1] = (int)round(_y * mouse_sensitivity);
 
             if (input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT))
                mousedata[j][2] |= (1 << 0);
