@@ -2,9 +2,9 @@
 #define _GIT_H
 
 #include <string>
+#include <libretro.h>
 
 #include "video.h"
-#include "../libretro.h"
 
 typedef struct
 {

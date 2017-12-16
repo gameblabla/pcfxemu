@@ -1,5 +1,6 @@
 #include	<stdarg.h>
 #include <string/stdstring.h>
+#include <retro_timers.h>
 #include <streams/file_stream.h>
 #include "mednafen/mednafen.h"
 #include "mednafen/mempatcher.h"
@@ -88,9 +89,11 @@ class PtrLengthPair
       uint64 length;
 };
 
-static bool MDFN_DumpToFile(const char *filename, int compress, const std::vector<PtrLengthPair> &pearpairs)
+static bool MDFN_DumpToFile(const char *filename, int compress,
+      const std::vector<PtrLengthPair> &pearpairs)
 {
-   RFILE *fp = filestream_open(filename, RFILE_MODE_READ, -1);
+   RFILE *fp = filestream_open(filename, RETRO_VFS_FILE_ACCESS_READ, 
+         RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
    if (!fp)
       return 0;
@@ -1988,15 +1991,11 @@ void MDFND_WaitThread(MDFN_Thread *thr, int *val)
    sthread_join((sthread_t*)thr);
 
    if (val)
-   {
       *val = 0;
-      fprintf(stderr, "WaitThread relies on return value.\n");
-   }
 }
 
 void MDFND_KillThread(MDFN_Thread *)
 {
-   fprintf(stderr, "Killing a thread is a BAD IDEA!\n");
 }
 
 MDFN_Mutex *MDFND_CreateMutex()
@@ -2159,30 +2158,27 @@ void MDFN_printf(const char *format, ...)
 
 void MDFN_PrintError(const char *format, ...)
 {
- char *temp;
+   char *temp;
+   va_list ap;
 
- va_list ap;
+   va_start(ap, format);
+   temp = new char[4096];
+   vsnprintf(temp, 4096, format, ap);
+   MDFND_PrintError(temp);
+   free(temp);
 
- va_start(ap, format);
- temp = new char[4096];
- vsnprintf(temp, 4096, format, ap);
- MDFND_PrintError(temp);
- free(temp);
-
- va_end(ap);
+   va_end(ap);
 }
 
 void MDFN_DebugPrintReal(const char *file, const int line, const char *format, ...)
 {
- char *temp;
+   char *temp;
+   va_list ap;
 
- va_list ap;
+   va_start(ap, format);
+   temp = new char[4096];
+   vsnprintf(temp, 4096, format, ap);
+   free(temp);
 
- va_start(ap, format);
- temp = new char[4096];
- vsnprintf(temp, 4096, format, ap);
- fprintf(stderr, "%s:%d  %s\n", file, line, temp);
- free(temp);
-
- va_end(ap);
+   va_end(ap);
 }

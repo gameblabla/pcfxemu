@@ -15,13 +15,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <sys/stat.h>
-#include "mednafen.h"
-#include "FileWrapper.h"
-#include "Stream.h"
-
 #include <stdarg.h>
 #include <string.h>
+
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -29,15 +26,19 @@
 #include <unistd.h>
 #endif
 
+#include "mednafen.h"
+#include "FileWrapper.h"
+#include "Stream.h"
+
 // For special uses, IE in classes that take a path or a FileWrapper & in the constructor, and the FileWrapper non-pointer member
 // is in the initialization list for the path constructor but not the constructor with FileWrapper&
 
 FileWrapper::FileWrapper(const char *path, const int mode, const char *purpose) : OpenedMode(mode)
 {
  if(mode == MODE_WRITE)
-  fp = filestream_open(path, RFILE_MODE_READ_WRITE, -1);
+  fp = filestream_open(path, RETRO_VFS_FILE_ACCESS_READ_WRITE, RETRO_VFS_FILE_ACCESS_HINT_NONE);
  else
-  fp = filestream_open(path, RFILE_MODE_READ, -1);
+  fp = filestream_open(path, RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
  if(!fp)
  {

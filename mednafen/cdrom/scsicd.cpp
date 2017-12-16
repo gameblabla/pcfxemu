@@ -2798,10 +2798,7 @@ uint32_t SCSICD_Run(scsicd_timestamp_t system_timestamp)
  int32_t run_time = system_timestamp - lastts;
 
  if(system_timestamp < lastts)
- {
-  fprintf(stderr, "Meow: %d %d\n", system_timestamp, lastts);
   assert(system_timestamp >= lastts);
- }
 
  monotonic_timestamp += run_time;
 

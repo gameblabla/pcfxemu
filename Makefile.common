@@ -7,7 +7,7 @@ LIBRETRO_DIR := $(CORE_DIR)/libretro-common
 CDROM_DIR    := $(MEDNAFEN_DIR)/cdrom
 DEPS_DIR     	  := $(CORE_DIR)/deps
 
-INCFLAGS := -I$(CORE_DIR) -I$(MEDNAFEN_DIR) -I$(MEDNAFEN_DIR)/include -I$(MEDNAFEN_DIR)/intl -I$(MEDNAFEN_DIR)/hw_sound -I$(MEDNAFEN_DIR)/hw_cpu -I$(MEDNAFEN_DIR)/hw_misc -I$(LIBRETRO_DIR)/include -I$(DEPS_DIR)/zlib
+INCFLAGS := -I$(CORE_DIR) -I$(MEDNAFEN_DIR) -I$(MEDNAFEN_DIR)/include -I$(MEDNAFEN_DIR)/intl -I$(MEDNAFEN_DIR)/hw_sound -I$(MEDNAFEN_DIR)/hw_cpu -I$(MEDNAFEN_DIR)/hw_misc -I$(LIBRETRO_DIR)/include -I$(DEPS_DIR)/zlib -I$(LIBRETRO_DIR)/include
 
 ifneq ($(HAVE_GRIFFIN),1)
    SOURCES_CXX += \
@@ -203,7 +203,10 @@ SOURCES_C += \
 	$(LIBRETRO_DIR)/file/file_path.c \
 	$(LIBRETRO_DIR)/streams/file_stream.c \
 	$(LIBRETRO_DIR)/streams/file_stream_transforms.c \
-   $(LIBRETRO_DIR)/compat/compat_strl.c  \
-   $(LIBRETRO_DIR)/compat/compat_strcasestr.c  \
-   $(LIBRETRO_DIR)/string/stdstring.c 
+	$(LIBRETRO_DIR)/vfs/vfs_implementation.c \
+	$(LIBRETRO_DIR)/encodings/encoding_utf.c \
+	$(LIBRETRO_DIR)/compat/fopen_utf8.c \
+	$(LIBRETRO_DIR)/compat/compat_strl.c  \
+	$(LIBRETRO_DIR)/compat/compat_strcasestr.c  \
+	$(LIBRETRO_DIR)/string/stdstring.c 
 endif

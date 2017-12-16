@@ -24,8 +24,10 @@
 #include <assert.h>
 #include <limits.h>
 #include <algorithm>
+
+#include <libretro.h>
+
 #include "OwlResampler.h"
-#include "../../libretro.h"
 
 extern retro_get_cpu_features_t perf_get_cpu_features_cb;
 

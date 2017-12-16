@@ -17,16 +17,17 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <stdarg.h>
+#include <string.h>
+
+
 #include "mednafen.h"
 #include "Stream.h"
 #include "FileStream.h"
 
-#include <stdarg.h>
-#include <string.h>
-
 FileStream::FileStream(const char *path, const int mode): OpenedMode(mode)
 {
-   fp = filestream_open(path, (mode == MODE_WRITE || mode == MODE_WRITE_INPLACE) ? RFILE_MODE_WRITE : RFILE_MODE_READ, -1);
+   fp = filestream_open(path, (mode == MODE_WRITE || mode == MODE_WRITE_INPLACE) ? RETRO_VFS_FILE_ACCESS_WRITE : RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
    if (!fp)
    {

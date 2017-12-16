@@ -15,11 +15,12 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "mednafen.h"
-#include "error.h"
 #include <string.h>
 #include <stdarg.h>
-#include "../libretro.h"
+#include <libretro.h>
+
+#include "mednafen.h"
+#include "error.h"
 
 extern retro_log_printf_t log_cb;
 
