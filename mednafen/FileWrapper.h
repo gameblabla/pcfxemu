@@ -2,7 +2,6 @@
 #define __MDFN_FILEWRAPPER_H
 
 #include <streams/file_stream.h>
-#include <file/file_path.h>
 
 // A stdio FILE wrapper(with some BSD and POSIXisms, and a little dash of Win32, thrown in for special behaviors)
 class FileWrapper
