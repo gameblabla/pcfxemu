@@ -238,6 +238,10 @@ endif
 else ifneq (,$(findstring windows_msvc2017,$(platform)))
 
     NO_GCC := 1
+    CFLAGS += -DNOMINMAX
+    CXXFLAGS += -DNOMINMAX
+
+    HAVE_CHD = 0
 
 	PlatformSuffix = $(subst windows_msvc2017_,,$(platform))
 	ifneq (,$(findstring desktop,$(PlatformSuffix)))

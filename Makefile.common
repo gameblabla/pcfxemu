@@ -14,6 +14,8 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(CORE_EMU_DIR)/king.cpp \
 	$(CORE_EMU_DIR)/soundbox.cpp \
 	$(CORE_EMU_DIR)/interrupt.cpp \
+    $(CORE_EMU_DIR)/huc6273.cpp \
+    $(CORE_EMU_DIR)/fxscsi.cpp \
 	$(CORE_EMU_DIR)/input.cpp \
 	$(CORE_EMU_DIR)/timer.cpp \
 	$(CORE_EMU_DIR)/rainbow.cpp \
