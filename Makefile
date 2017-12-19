@@ -240,8 +240,7 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
     NO_GCC := 1
     CFLAGS += -DNOMINMAX
     CXXFLAGS += -DNOMINMAX
-
-    HAVE_CHD = 0
+    WINDOWS_VERSION = 1
 
 	PlatformSuffix = $(subst windows_msvc2017_,,$(platform))
 	ifneq (,$(findstring desktop,$(PlatformSuffix)))
@@ -254,6 +253,8 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
 		MSVC2017CompileFlags = -DWINAPI_FAMILY=WINAPI_FAMILY_APP -DWINDLL -D_UNICODE -DUNICODE -DWRL_NO_DEFAULT_LIB -FS
 		LDFLAGS += -APPCONTAINER -NXCOMPAT -DYNAMICBASE -MANIFEST:NO -LTCG -OPT:REF -SUBSYSTEM:CONSOLE -MANIFESTUAC:NO -OPT:ICF -ERRORREPORT:PROMPT -NOLOGO -TLBID:1 -DEBUG:FULL -WINMD:NO
 		LIBS += WindowsApp.lib
+
+        HAVE_CHD = 0
 	endif
 
 	CFLAGS += $(MSVC2017CompileFlags)
@@ -332,6 +333,7 @@ else ifeq ($(platform), emscripten)
    TARGET := $(TARGET_NAME)_libretro_$(platform).bc
    STATIC_LINKING = 1
 
+# Windows
 else
    TARGET := $(TARGET_NAME)_libretro.dll
    CC = gcc
@@ -340,6 +342,7 @@ else
    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
    LDFLAGS += -static-libgcc -static-libstdc++ -lwinmm
    FLAGS += -DHAVE__MKDIR
+   WINDOWS_VERSION = 1
 endif
 
 include Makefile.common
