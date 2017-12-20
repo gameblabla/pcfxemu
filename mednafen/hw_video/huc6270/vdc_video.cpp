@@ -1866,7 +1866,7 @@ int VDC::StateAction(StateMem *sm, int load, int data_only, const char *sname)
 	SFEND
   };
 
-  ret &= MDFNSS_StateAction(sm, load, data_only, StateRegs, sname);
+  ret &= MDFNSS_StateAction(sm, load, data_only, StateRegs, sname, false);
 
   if(load)
   {

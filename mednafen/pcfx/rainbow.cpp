@@ -1022,7 +1022,7 @@ int RAINBOW_StateAction(StateMem *sm, int load, int data_only)
    SFEND
  };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "RBOW");
+ int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "RBOW", false);
 
  if(load)
  {

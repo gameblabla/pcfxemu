@@ -96,7 +96,7 @@ class PCFX_Input_Mouse : public PCFX_Input_Device
    SFVAR(button),
    SFEND
   };
-  int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name);
+  int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name, false);
 
   return(ret);
  }

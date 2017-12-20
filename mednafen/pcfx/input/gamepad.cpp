@@ -102,7 +102,7 @@ class PCFX_Input_Gamepad : public PCFX_Input_Device
    SFVAR(mode2),
    SFEND
   };
-  int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name);
+  int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name, false);
 
   return(ret);
  }
@@ -124,7 +124,7 @@ int PCFX_Input_Gamepad::StateAction(StateMem *sm, int load, int data_only, const
  {
   SFEND
  };
- int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name);
+ int ret =  MDFNSS_StateAction(sm, load, data_only, StateRegs, section_name, false);
 
  return(ret);
  #endif

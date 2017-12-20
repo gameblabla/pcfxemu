@@ -333,7 +333,7 @@ int FXINPUT_StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "INPUT");
+ int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "INPUT", false);
 
  for(int i = 0; i < TOTAL_PORTS; i++)
  {

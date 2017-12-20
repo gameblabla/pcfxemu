@@ -922,7 +922,7 @@ int StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "MAIN");
+ int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "MAIN", false);
 
  for(int i = 0; i < 2; i++)
   ret &= fx_vdc_chips[i]->StateAction(sm, load, data_only, i ? "VDC1" : "VDC0");

@@ -3216,7 +3216,7 @@ int SCSICD_StateAction(StateMem* sm, const unsigned load, const bool data_only, 
   SFEND
  };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, sname);
+ int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, sname, false);
 
  if(load)
  {

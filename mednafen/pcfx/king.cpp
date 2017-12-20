@@ -3102,9 +3102,9 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, KINGStateRegs, "KING");
+ int ret = MDFNSS_StateAction(sm, load, data_only, KINGStateRegs, "KING", false);
  
- ret &= MDFNSS_StateAction(sm, load, data_only, VCEStateRegs, "VCE");
+ ret &= MDFNSS_StateAction(sm, load, data_only, VCEStateRegs, "VCE", false);
 
  if(load)
  {

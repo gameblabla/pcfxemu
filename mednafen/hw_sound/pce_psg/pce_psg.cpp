@@ -842,7 +842,7 @@ int PCE_PSG::StateAction(StateMem *sm, int load, int data_only)
    SFEND
   };
   tmpstr[3] = '0' + ch;
-  ret &= MDFNSS_StateAction(sm, load, data_only, CH_StateRegs, tmpstr);
+  ret &= MDFNSS_StateAction(sm, load, data_only, CH_StateRegs, tmpstr, false);
  }
 
  SFORMAT PSG_StateRegs[] =
@@ -858,7 +858,7 @@ int PCE_PSG::StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
  
- ret &= MDFNSS_StateAction(sm, load, data_only, PSG_StateRegs, "PSG");
+ ret &= MDFNSS_StateAction(sm, load, data_only, PSG_StateRegs, "PSG", false);
 
  if(load)
  {

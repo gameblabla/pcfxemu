@@ -544,7 +544,7 @@ int SoundBox_StateAction(StateMem *sm, int load, int data_only)
       SFEND
    };
 
-   ret &= MDFNSS_StateAction(sm, load, data_only, SoundBox_StateRegs, "SBOX");
+   ret &= MDFNSS_StateAction(sm, load, data_only, SoundBox_StateRegs, "SBOX", false);
 
    if(load)
    {
