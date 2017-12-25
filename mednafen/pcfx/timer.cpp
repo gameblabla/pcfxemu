@@ -18,7 +18,6 @@
  TODO: Determine if the interrupt request bit can be manually set even if timer enable and/or timer int enable bits are 0.
 */
 
-
 #include "pcfx.h"
 #include "interrupt.h"
 #include "timer.h"

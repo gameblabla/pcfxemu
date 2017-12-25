@@ -1,7 +1,7 @@
-/* Copyright  (C) 2010-2015 The RetroArch team
+/* Copyright  (C) 2010-2017 The RetroArch team
  *
  * ---------------------------------------------------------------------------------------
- * The following license statement only applies to this file (rsemaphore.h).
+ * The following license statement only applies to this file (compat_snprintf.c).
  * ---------------------------------------------------------------------------------------
  *
  * Permission is hereby granted, free of charge,
@@ -20,35 +20,51 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef __LIBRETRO_SDK_SEMAPHORE_H
-#define __LIBRETRO_SDK_SEMAPHORE_H
+/* THIS FILE HAS NOT BEEN VALIDATED ON PLATFORMS BESIDES MSVC */
+#ifdef _MSC_VER
 
-#ifdef __cplusplus
-extern "C" {
+#include <retro_common.h>
+
+#include <stdio.h>
+#include <stdarg.h>
+
+/* http://stackoverflow.com/questions/2915672/snprintf-and-visual-studio-2010 */
+
+int c99_vsnprintf_retro__(char *outBuf, size_t size, const char *format, va_list ap)
+{
+   int count = -1;
+
+   if (size != 0)
+#if (_MSC_VER <= 1310)
+       count = _vsnprintf(outBuf, size, format, ap);
+#else
+       count = _vsnprintf_s(outBuf, size, _TRUNCATE, format, ap);
 #endif
+   if (count == -1)
+       count = _vscprintf(format, ap);
 
-typedef struct ssem ssem_t;
+   return count;
+}
 
-/**
- * ssem_create:
- * @value                   : initial value for the semaphore
- *
- * Create a new semaphore.
- *
- * Returns: pointer to new semaphore if successful, otherwise NULL.
- */
-ssem_t *ssem_new(int value);
+int c99_snprintf_retro__(char *outBuf, size_t size, const char *format, ...)
+{
+   int count;
+   va_list ap;
 
-void ssem_free(ssem_t *semaphore);
+   va_start(ap, format);
+   count = c99_vsnprintf_retro__(outBuf, size, format, ap);
+   va_end(ap);
 
-int ssem_get(ssem_t *semaphore);
+   return count;
+}
 
-void ssem_wait(ssem_t *semaphore);
-
-void ssem_signal(ssem_t *semaphore);
-
-#ifdef __cplusplus
+int c89_vscprintf_retro__(const char *format, va_list pargs)
+{
+   int retval;
+   va_list argcopy;
+   va_copy(argcopy, pargs);
+   retval = vsnprintf(NULL, 0, format, argcopy);
+   va_end(argcopy);
+   return retval;
 }
 #endif
-
-#endif /* __LIBRETRO_SDK_SEMAPHORE_H */

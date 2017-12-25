@@ -34,6 +34,10 @@
 #include <string.h>
 #include <math.h>
 
+#ifdef _MSC_VER
+#include <compat/msvc.h>
+#endif
+
 static MDFNGI *game;
 
 struct retro_perf_callback perf_cb;
@@ -1613,8 +1617,8 @@ static void update_input(void)
             int _x = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_X);
             int _y = input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_Y);
 
-            mousedata[j][0] = (int)round(_x * mouse_sensitivity);
-            mousedata[j][1] = (int)round(_y * mouse_sensitivity);
+            mousedata[j][0] = (int)roundf(_x * mouse_sensitivity);
+            mousedata[j][1] = (int)roundf(_y * mouse_sensitivity);
 
             if (input_state_cb(j, RETRO_DEVICE_MOUSE, 0, RETRO_DEVICE_ID_MOUSE_LEFT))
                mousedata[j][2] |= (1 << 0);
