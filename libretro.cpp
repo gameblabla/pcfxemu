@@ -96,7 +96,7 @@ class PtrLengthPair
 static bool MDFN_DumpToFile(const char *filename, int compress,
       const std::vector<PtrLengthPair> &pearpairs)
 {
-   RFILE *fp = filestream_open(filename, RETRO_VFS_FILE_ACCESS_READ, 
+   RFILE *fp = filestream_open(filename, RETRO_VFS_FILE_ACCESS_WRITE, 
          RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
    if (!fp)
