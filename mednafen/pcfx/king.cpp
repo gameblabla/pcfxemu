@@ -733,11 +733,14 @@ uint8 KING_Read8(const v810_timestamp_t timestamp, uint32 A)
  return(ret);
 }
 
-void KING_EndFrame(v810_timestamp_t timestamp, v810_timestamp_t ts_base)
+void KING_EndFrame(v810_timestamp_t timestamp)
 {
  PCFX_SetEvent(PCFX_EVENT_KING, KING_Update(timestamp));
  scsicd_ne = SCSICD_Run(timestamp);
+}
 
+void KING_ResetTS(v810_timestamp_t ts_base)
+{
  SCSICD_ResetTS(ts_base);
 
  king->lastts = ts_base;
@@ -2278,7 +2281,7 @@ static uint32 INLINE YUV888_TO_YCbCr888(uint32 yuv)
 static VDC **vdc_chips;
 static MDFN_Surface *surface;
 static MDFN_Rect *DisplayRect;
-static MDFN_Rect *LineWidths;
+static int32 *LineWidths;
 static int skip;
 
 void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surface *arg_surface, MDFN_Rect *arg_DisplayRect, MDFN_Rect *arg_LineWidths, int arg_skip)
@@ -2293,8 +2296,7 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
  //MDFN_DispMessage("%d %d\n", SCSICD_GetACK(), SCSICD_GetREQ());
 
  // For the case of interlaced mode(clear ~0 state)
- LineWidths[0].x = 0;
- LineWidths[0].w = 0;
+ LineWidths[0] = 0;
 
  // These 2 should be overwritten in the big loop below.
  DisplayRect->x = 0;
@@ -2770,9 +2772,9 @@ static void MixLayers(void)
 
 	// FIXME
     if(fx_vce.frame_interlaced)
-     LineWidths[(fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field] = *DisplayRect;
+     LineWidths[(fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field] = DisplayRect->w;
     else
-     LineWidths[fx_vce.raster_counter - 22] = *DisplayRect;
+     LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
 }
 
 static INLINE void RunVDCs(const int master_cycles, uint16 *pixels0, uint16 *pixels1)

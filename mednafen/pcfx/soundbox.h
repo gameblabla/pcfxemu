@@ -5,6 +5,7 @@ bool SoundBox_SetSoundRate(uint32 rate);
 int32 SoundBox_Flush(const v810_timestamp_t timestamp, v810_timestamp_t* new_base_timestamp, int16 *SoundBuf, const int32 MaxSoundFrames);
 void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp);
 int SoundBox_Init(bool arg_EmulateBuggyCodec, bool arg_ResetAntiClickEnabled);
+void SoundBox_Kill(void);
 
 void SoundBox_Reset(const v810_timestamp_t timestamp);
 

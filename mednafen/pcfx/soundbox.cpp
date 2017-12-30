@@ -119,7 +119,6 @@ int SoundBox_Init(bool arg_EmulateBuggyCodec, bool arg_ResetAntiClickEnabled)
    EmulateBuggyCodec = arg_EmulateBuggyCodec;
    ResetAntiClickEnabled = arg_ResetAntiClickEnabled;
 
-
    for(unsigned i = 0; i < 2; i++)
    {
       FXsbuf[i] = new OwlBuffer();
@@ -170,6 +169,11 @@ void SoundBox_Kill(void)
       }
    }
 
+   if(FXres)
+   {
+      delete FXres;
+      FXres = NULL;
+   }
 }
 
 /* Macro to access currently selected PSG channel */
