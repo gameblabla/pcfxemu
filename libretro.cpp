@@ -1029,7 +1029,7 @@ static Deinterlacer deint;
 
 #define MEDNAFEN_CORE_NAME_MODULE "pcfx"
 #define MEDNAFEN_CORE_NAME "Mednafen PC-FX"
-#define MEDNAFEN_CORE_VERSION "v0.9.33.3"
+#define MEDNAFEN_CORE_VERSION "v0.9.36.5"
 #define MEDNAFEN_CORE_EXTENSIONS "cue|ccd|toc|chd"
 #define MEDNAFEN_CORE_TIMING_FPS 59.94
 #define MEDNAFEN_CORE_GEOMETRY_BASE_W (game->nominal_width)
