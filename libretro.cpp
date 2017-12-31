@@ -164,7 +164,9 @@ static bool WantHuC6273 = FALSE;
 VDC *fx_vdc_chips[2];
 
 static uint16 BackupControl;
-static uint8 BackupRAM[0x8000], ExBackupRAM[0x8000];
+static uint8 SaveRAM[2 * 0x8000]; // BackupRAM + ExBackupRAM
+static uint8* BackupRAM = (uint8*)(SaveRAM + (0x8000 * 0));
+static uint8* ExBackupRAM = (uint8*)(SaveRAM + (0x8000 * 1));
 static uint8 ExBusReset; // I/O Register at 0x0700
 
 static bool BRAMDisabled;	// Cached at game load, don't remove this caching behavior or save game loss may result(if we ever get a GUI).
@@ -569,9 +571,8 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
  if(!BRAMDisabled)
  {
-  // Initialize backup RAM
-  memset(BackupRAM, 0, sizeof(BackupRAM));
-  memset(ExBackupRAM, 0, sizeof(ExBackupRAM));
+  // Initialize Save RAM
+  memset(SaveRAM, 0, sizeof(SaveRAM));
 
   static const uint8 BRInit00[] = { 0x24, 0x8A, 0xDF, 0x50, 0x43, 0x46, 0x58, 0x53, 0x72, 0x61, 0x6D, 0x80,
                                    0x00, 0x01, 0x01, 0x00, 0x01, 0x40, 0x00, 0x00, 0x01, 0xF9, 0x03, 0x00,
@@ -592,13 +593,14 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
   memcpy(ExBackupRAM + 0x00, ExBRInit00, sizeof(ExBRInit00));
   memcpy(ExBackupRAM + 0x80, ExBRInit80, sizeof(ExBRInit80));
 
-  FILE *savefp;
+  // Disabled - use libretro API for SaveRAM instead
+  /*FILE *savefp;
   if((savefp = gzopen(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), "rb")))
   {
    gzread(savefp, BackupRAM, 0x8000);
    gzread(savefp, ExBackupRAM, 0x8000);
    gzclose(savefp);
-  }
+  }*/
  }
 
  // Default to 16-bit bus.
@@ -862,12 +864,13 @@ static void CloseGame(void)
 {
  if(!BRAMDisabled)
  {
-  std::vector<PtrLengthPair> EvilRams;
+  // Disabled - use libretro api for SaveRAM instead
+  /*std::vector<PtrLengthPair> EvilRams;
  
   EvilRams.push_back(PtrLengthPair(BackupRAM, 0x8000));
   EvilRams.push_back(PtrLengthPair(ExBackupRAM, 0x8000));
 
-  MDFN_DumpToFile(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), 0, EvilRams);
+  MDFN_DumpToFile(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), 0, EvilRams);*/
  }
 
  for(int i = 0; i < 2; i++)
@@ -1923,14 +1926,34 @@ bool retro_unserialize(const void *data, size_t size)
    return MDFNSS_LoadSM(&st, 0, 0);
 }
 
-void *retro_get_memory_data(unsigned)
+void *retro_get_memory_data(unsigned type)
 {
+   switch (type)
+   {
+      case RETRO_MEMORY_SAVE_RAM:
+         return (uint8_t*)SaveRAM;
+      case RETRO_MEMORY_SYSTEM_RAM:
+         return RAM;
+      default:
+         break;
+   }
+
    return NULL;
 }
 
-size_t retro_get_memory_size(unsigned)
+size_t retro_get_memory_size(unsigned type)
 {
-   return 0;
+   switch (type)
+   {
+      case RETRO_MEMORY_SAVE_RAM:
+         return sizeof(SaveRAM);
+      case RETRO_MEMORY_SYSTEM_RAM:
+         return (2048 * 1024);
+      default:
+         break;
+   }
+
+   return NULL;
 }
 
 void retro_cheat_reset(void)
