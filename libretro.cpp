@@ -593,14 +593,14 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
   memcpy(ExBackupRAM + 0x00, ExBRInit00, sizeof(ExBRInit00));
   memcpy(ExBackupRAM + 0x80, ExBRInit80, sizeof(ExBRInit80));
 
-  // Disabled - use libretro API for SaveRAM instead
-  /*FILE *savefp;
+  /* Disabled - use libretro API for SaveRAM instead
+  FILE *savefp;
   if((savefp = gzopen(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), "rb")))
   {
    gzread(savefp, BackupRAM, 0x8000);
    gzread(savefp, ExBackupRAM, 0x8000);
    gzclose(savefp);
-  }*/
+  } */
  }
 
  // Default to 16-bit bus.
@@ -864,13 +864,13 @@ static void CloseGame(void)
 {
  if(!BRAMDisabled)
  {
-  // Disabled - use libretro api for SaveRAM instead
-  /*std::vector<PtrLengthPair> EvilRams;
+  /* Disabled - use libretro api for SaveRAM instead
+  std::vector<PtrLengthPair> EvilRams;
  
   EvilRams.push_back(PtrLengthPair(BackupRAM, 0x8000));
   EvilRams.push_back(PtrLengthPair(ExBackupRAM, 0x8000));
 
-  MDFN_DumpToFile(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), 0, EvilRams);*/
+  MDFN_DumpToFile(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), 0, EvilRams); */
  }
 
  for(int i = 0; i < 2; i++)
