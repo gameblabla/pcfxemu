@@ -93,33 +93,6 @@ class PtrLengthPair
       uint64 length;
 };
 
-static bool MDFN_DumpToFile(const char *filename, int compress,
-      const std::vector<PtrLengthPair> &pearpairs)
-{
-   RFILE *fp = filestream_open(filename, RETRO_VFS_FILE_ACCESS_WRITE, 
-         RETRO_VFS_FILE_ACCESS_HINT_NONE);
-
-   if (!fp)
-      return 0;
-
-   for(unsigned int i = 0; i < pearpairs.size(); i++)
-   {
-      const void *data = pearpairs[i].GetData();
-      const uint64 length = pearpairs[i].GetLength();
-
-      if (filestream_write(fp, data, length) != length)
-      {
-         filestream_close(fp);
-         return 0;
-      }
-   }
-
-   if (filestream_close(fp) == EOF)
-      return 0;
-
-   return 1;
-}
-
 /* Mednafen - Multi-system Emulator
  *
  * This program is free software; you can redistribute it and/or modify
@@ -592,15 +565,6 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
   memcpy(ExBackupRAM + 0x00, ExBRInit00, sizeof(ExBRInit00));
   memcpy(ExBackupRAM + 0x80, ExBRInit80, sizeof(ExBRInit80));
-
-  /* Disabled - use libretro API for SaveRAM instead
-  FILE *savefp;
-  if((savefp = gzopen(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), "rb")))
-  {
-   gzread(savefp, BackupRAM, 0x8000);
-   gzread(savefp, ExBackupRAM, 0x8000);
-   gzclose(savefp);
-  } */
  }
 
  // Default to 16-bit bus.
@@ -862,31 +826,24 @@ static void PCFX_CDSelect(void)
 
 static void CloseGame(void)
 {
- if(!BRAMDisabled)
- {
-  /* Disabled - use libretro api for SaveRAM instead
-  std::vector<PtrLengthPair> EvilRams;
- 
-  EvilRams.push_back(PtrLengthPair(BackupRAM, 0x8000));
-  EvilRams.push_back(PtrLengthPair(ExBackupRAM, 0x8000));
+   unsigned i;
 
-  MDFN_DumpToFile(MDFN_MakeFName(MDFNMKF_SAV, 0, "sav").c_str(), 0, EvilRams); */
- }
+   for(i = 0; i < 2; i++)
+   {
+      if(fx_vdc_chips[i])
+      {
+         delete fx_vdc_chips[i];
+         fx_vdc_chips[i] = NULL;
+      }
+   }
 
- for(int i = 0; i < 2; i++)
-  if(fx_vdc_chips[i])
-  {
-   delete fx_vdc_chips[i];
-   fx_vdc_chips[i] = NULL;
-  }
+   RAINBOW_Close();
+   KING_Close();
+   PCFX_V810.Kill();
 
- RAINBOW_Close();
- KING_Close();
- PCFX_V810.Kill();
-
- // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
- RAM = NULL;
- BIOSROM = NULL;
+   // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
+   RAM = NULL;
+   BIOSROM = NULL;
 }
 
 static void DoSimpleCommand(int cmd)
