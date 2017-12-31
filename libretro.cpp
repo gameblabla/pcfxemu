@@ -1953,7 +1953,7 @@ size_t retro_get_memory_size(unsigned type)
          break;
    }
 
-   return NULL;
+   return 0;
 }
 
 void retro_cheat_reset(void)
