@@ -63,36 +63,6 @@ std::string retro_base_directory;
 std::string retro_base_name;
 std::string retro_save_directory;
 
-class PtrLengthPair
-{
-   public:
-
-      inline PtrLengthPair(const void *new_data, const uint64 new_length)
-      {
-         data = new_data;
-         length = new_length;
-      }
-
-      ~PtrLengthPair() 
-      { 
-
-      } 
-
-      INLINE const void *GetData(void) const
-      {
-         return(data);
-      }
-
-      INLINE uint64 GetLength(void) const
-      {
-         return(length);
-      }
-
-   private:
-      const void *data;
-      uint64 length;
-};
-
 /* Mednafen - Multi-system Emulator
  *
  * This program is free software; you can redistribute it and/or modify
@@ -413,206 +383,203 @@ static void SetRegGroups(void);
 
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
- std::string biospath = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios").c_str());
- std::string fxscsi_path = MDFN_GetSettingS("pcfx.fxscsi");	// For developers only, so don't make it convenient.
- MDFNFILE *BIOSFile;
- V810_Emu_Mode cpu_mode;
+   V810_Emu_Mode cpu_mode;
+   std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios").c_str());
+   std::string fxscsi_path = MDFN_GetSettingS("pcfx.fxscsi");	// For developers only, so don't make it convenient.
+   MDFNFILE *BIOSFile      = file_open(biospath.c_str());
 
- BIOSFile = file_open(biospath.c_str());
+   if(!BIOSFile)
+      return(0);
 
- if(!BIOSFile)
-  return(0);
+   cpu_mode = (V810_Emu_Mode)MDFN_GetSettingI("pcfx.cpu_emulation");
+   if(cpu_mode == _V810_EMU_MODE_COUNT)
+   {
+      cpu_mode = (EmuFlags & CDGE_FLAG_ACCURATE_V810) ? V810_EMU_MODE_ACCURATE : V810_EMU_MODE_FAST;
+   }
 
- cpu_mode = (V810_Emu_Mode)MDFN_GetSettingI("pcfx.cpu_emulation");
- if(cpu_mode == _V810_EMU_MODE_COUNT)
- {
-  cpu_mode = (EmuFlags & CDGE_FLAG_ACCURATE_V810) ? V810_EMU_MODE_ACCURATE : V810_EMU_MODE_FAST;
- }
+   if(EmuFlags & CDGE_FLAG_FXGA)
+   {
+      //WantHuC6273 = TRUE;
+   }
 
- if(EmuFlags & CDGE_FLAG_FXGA)
- {
-  //WantHuC6273 = TRUE;
- }
+   MDFN_printf(_("V810 Emulation Mode: %s\n"), (cpu_mode == V810_EMU_MODE_ACCURATE) ? _("Accurate") : _("Fast"));
+   PCFX_V810.Init(cpu_mode, false);
 
- MDFN_printf(_("V810 Emulation Mode: %s\n"), (cpu_mode == V810_EMU_MODE_ACCURATE) ? _("Accurate") : _("Fast"));
- PCFX_V810.Init(cpu_mode, false);
+   uint32 RAM_Map_Addresses[1] = { 0x00000000 };
+   uint32 BIOSROM_Map_Addresses[1] = { 0xFFF00000 };
 
- uint32 RAM_Map_Addresses[1] = { 0x00000000 };
- uint32 BIOSROM_Map_Addresses[1] = { 0xFFF00000 };
+   RAM = PCFX_V810.SetFastMap(RAM_Map_Addresses, 0x00200000, 1, "RAM");
 
- // todo: cleanup on error
- if(!(RAM = PCFX_V810.SetFastMap(RAM_Map_Addresses, 0x00200000, 1, _("RAM"))))
- {
-  return(0);
- }
+   // todo: cleanup on error
+   if(!RAM)
+      return(0);
 
- if(!(BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1, _("BIOS ROM"))))
- {
-  return(0);
- }
+   BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1, "BIOS ROM");
+   if(!BIOSROM)
+      return(0);
 
- if(GET_FSIZE_PTR(BIOSFile) != 1024 * 1024)
- {
-  MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
-  return(0);
- }
+   if(GET_FSIZE_PTR(BIOSFile) != 1024 * 1024)
+   {
+      MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
+      return(0);
+   }
 
- memcpy(BIOSROM, GET_FDATA_PTR(BIOSFile), 1024 * 1024);
+   memcpy(BIOSROM, GET_FDATA_PTR(BIOSFile), 1024 * 1024);
 
- file_close(BIOSFile);
- BIOSFile = NULL;
+   file_close(BIOSFile);
+   BIOSFile = NULL;
 
 #if 0
- if(fxscsi_path != "0" && fxscsi_path != "" && fxscsi_path != "none")
- {
-  MDFNFILE *FXSCSIFile;
+   if(fxscsi_path != "0" && fxscsi_path != "" && fxscsi_path != "none")
+   {
+      MDFNFILE *FXSCSIFile;
 
-  FXSCSIFile = file_open(fxscsi_path);
+      FXSCSIFile = file_open(fxscsi_path);
 
-  if(!FXSCSIFile)
-   return(0);
+      if(!FXSCSIFile)
+         return(0);
 
-  if(GET_FSIZE_PTR(FXSCSIFile) != 1024 * 512)
-  {
-   MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
-   return(0);
-  }
+      if(GET_FSIZE_PTR(FXSCSIFile) != 1024 * 512)
+      {
+         MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
+         return(0);
+      }
 
-  uint32 FXSCSI_Map_Addresses[1] = { 0x80780000 };
+      uint32 FXSCSI_Map_Addresses[1] = { 0x80780000 };
 
-  if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, _("FX-SCSI ROM"))))
-  {
-   return(0);
-  }
+      if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, _("FX-SCSI ROM"))))
+      {
+         return(0);
+      }
 
-  memcpy(FXSCSIROM, GET_FDATA_PTR(FXSCSIFile), 1024 * 512);
+      memcpy(FXSCSIROM, GET_FDATA_PTR(FXSCSIFile), 1024 * 512);
 
-  file_close(FXSCSIFile);
-  FXSCSIFile = NULL;
- }
+      file_close(FXSCSIFile);
+      FXSCSIFile = NULL;
+   }
 #endif
 
- for(int i = 0; i < 2; i++)
- {
-  fx_vdc_chips[i] = new VDC(MDFN_GetSettingB("pcfx.nospritelimit"), 65536);
-  fx_vdc_chips[i]->SetWSHook(NULL);
-  fx_vdc_chips[i]->SetIRQHook(i ? VDCB_IRQHook : VDCA_IRQHook);
+   for(int i = 0; i < 2; i++)
+   {
+      fx_vdc_chips[i] = new VDC(MDFN_GetSettingB("pcfx.nospritelimit"), 65536);
+      fx_vdc_chips[i]->SetWSHook(NULL);
+      fx_vdc_chips[i]->SetIRQHook(i ? VDCB_IRQHook : VDCA_IRQHook);
 
-  //fx_vdc_chips[0] = FXVDC_Init(PCFXIRQ_SOURCE_VDCA, MDFN_GetSettingB("pcfx.nospritelimit"));
-  //fx_vdc_chips[1] = FXVDC_Init(PCFXIRQ_SOURCE_VDCB, MDFN_GetSettingB("pcfx.nospritelimit"));
- }
+      //fx_vdc_chips[0] = FXVDC_Init(PCFXIRQ_SOURCE_VDCA, MDFN_GetSettingB("pcfx.nospritelimit"));
+      //fx_vdc_chips[1] = FXVDC_Init(PCFXIRQ_SOURCE_VDCB, MDFN_GetSettingB("pcfx.nospritelimit"));
+   }
 
- SoundBox_Init(MDFN_GetSettingB("pcfx.adpcm.emulate_buggy_codec"), MDFN_GetSettingB("pcfx.adpcm.suppress_channel_reset_clicks"));
- RAINBOW_Init(MDFN_GetSettingB("pcfx.rainbow.chromaip"));
- FXINPUT_Init();
- FXTIMER_Init();
+   SoundBox_Init(MDFN_GetSettingB("pcfx.adpcm.emulate_buggy_codec"), MDFN_GetSettingB("pcfx.adpcm.suppress_channel_reset_clicks"));
+   RAINBOW_Init(MDFN_GetSettingB("pcfx.rainbow.chromaip"));
+   FXINPUT_Init();
+   FXTIMER_Init();
 
- if(WantHuC6273)
-  HuC6273_Init();
+   if(WantHuC6273)
+      HuC6273_Init();
 
- if(!KING_Init())
- {
-  free(BIOSROM);
-  free(RAM);
-  BIOSROM = NULL;
-  RAM = NULL;
-  return(0);
- }
+   if(!KING_Init())
+   {
+      free(BIOSROM);
+      free(RAM);
+      BIOSROM = NULL;
+      RAM = NULL;
+      return(0);
+   }
 
- CD_TrayOpen = false;
- CD_SelectedDisc = 0;
+   CD_TrayOpen = false;
+   CD_SelectedDisc = 0;
 
- SCSICD_SetDisc(true, NULL, true);
- SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
-
-
-
-
- MDFNGameInfo->fps = (uint32)((double)7159090.90909090 / 455 / 263 * 65536 * 256);
-
- MDFNGameInfo->nominal_height = MDFN_GetSettingUI("pcfx.slend") - MDFN_GetSettingUI("pcfx.slstart") + 1;
-
- // Emulation raw framebuffer image should always be of 256 width when the pcfx.high_dotclock_width setting is set to "256",
- // but it could be either 256 or 341 when the setting is set to "341", so stay with 1024 in that case so we won't have
- // a messed up aspect ratio in our recorded QuickTime movies.
- MDFNGameInfo->lcm_width = (MDFN_GetSettingUI("pcfx.high_dotclock_width") == 256) ? 256 : 1024;
- MDFNGameInfo->lcm_height = MDFNGameInfo->nominal_height;
-
- MDFNMP_Init(1024 * 1024, ((uint64)1 << 32) / (1024 * 1024));
- MDFNMP_AddRAM(2048 * 1024, 0x00000000, RAM);
-
-
- BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
-
- if(BRAMDisabled)
-  MDFN_printf(_("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n"));
-
- if(!BRAMDisabled)
- {
-  // Initialize Save RAM
-  memset(SaveRAM, 0, sizeof(SaveRAM));
-
-  static const uint8 BRInit00[] = { 0x24, 0x8A, 0xDF, 0x50, 0x43, 0x46, 0x58, 0x53, 0x72, 0x61, 0x6D, 0x80,
-                                   0x00, 0x01, 0x01, 0x00, 0x01, 0x40, 0x00, 0x00, 0x01, 0xF9, 0x03, 0x00,
-                                   0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
-                                  };
-  static const uint8 BRInit80[] = { 0xF9, 0xFF, 0xFF };
-
-  memcpy(BackupRAM + 0x00, BRInit00, sizeof(BRInit00));
-  memcpy(BackupRAM + 0x80, BRInit80, sizeof(BRInit80));
-
-
-  static const uint8 ExBRInit00[] = { 0x24, 0x8A, 0xDF, 0x50, 0x43, 0x46, 0x58, 0x43, 0x61, 0x72, 0x64, 0x80,
-                                     0x00, 0x01, 0x01, 0x00, 0x01, 0x40, 0x00, 0x00, 0x01, 0xF9, 0x03, 0x00,
-                                     0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
-                                  };
-  static const uint8 ExBRInit80[] = { 0xF9, 0xFF, 0xFF };
-
-  memcpy(ExBackupRAM + 0x00, ExBRInit00, sizeof(ExBRInit00));
-  memcpy(ExBackupRAM + 0x80, ExBRInit80, sizeof(ExBRInit80));
- }
-
- // Default to 16-bit bus.
- for(int i = 0; i < 256; i++)
- {
-  PCFX_V810.SetMemReadBus32(i, FALSE);
-  PCFX_V810.SetMemWriteBus32(i, FALSE);
- }
-
- // 16MiB RAM area.
- PCFX_V810.SetMemReadBus32(0, TRUE);
- PCFX_V810.SetMemWriteBus32(0, TRUE);
-
- // Bitstring read range
- for(int i = 0xA0; i <= 0xAF; i++)
- {
-  PCFX_V810.SetMemReadBus32(i, FALSE);       // Reads to the read range are 16-bit, and
-  PCFX_V810.SetMemWriteBus32(i, TRUE);       // writes are 32-bit.
- }
-
- // Bitstring write range
- for(int i = 0xB0; i <= 0xBF; i++)
- {
-  PCFX_V810.SetMemReadBus32(i, TRUE);	// Reads to the write range are 32-bit,
-  PCFX_V810.SetMemWriteBus32(i, FALSE);	// but writes are 16-bit!
- }
-
- // BIOS area
- for(int i = 0xF0; i <= 0xFF; i++)
- {
-  PCFX_V810.SetMemReadBus32(i, FALSE);
-  PCFX_V810.SetMemWriteBus32(i, FALSE);
- }
-
- PCFX_V810.SetMemReadHandlers(mem_rbyte, mem_rhword, mem_rword);
- PCFX_V810.SetMemWriteHandlers(mem_wbyte, mem_whword, mem_wword);
-
- PCFX_V810.SetIOReadHandlers(port_rbyte, port_rhword, NULL);
- PCFX_V810.SetIOWriteHandlers(port_wbyte, port_whword, NULL);
+   SCSICD_SetDisc(true, NULL, true);
+   SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
 
 
 
- return(1);
+
+   MDFNGameInfo->fps = (uint32)((double)7159090.90909090 / 455 / 263 * 65536 * 256);
+
+   MDFNGameInfo->nominal_height = MDFN_GetSettingUI("pcfx.slend") - MDFN_GetSettingUI("pcfx.slstart") + 1;
+
+   // Emulation raw framebuffer image should always be of 256 width when the pcfx.high_dotclock_width setting is set to "256",
+   // but it could be either 256 or 341 when the setting is set to "341", so stay with 1024 in that case so we won't have
+   // a messed up aspect ratio in our recorded QuickTime movies.
+   MDFNGameInfo->lcm_width = (MDFN_GetSettingUI("pcfx.high_dotclock_width") == 256) ? 256 : 1024;
+   MDFNGameInfo->lcm_height = MDFNGameInfo->nominal_height;
+
+   MDFNMP_Init(1024 * 1024, ((uint64)1 << 32) / (1024 * 1024));
+   MDFNMP_AddRAM(2048 * 1024, 0x00000000, RAM);
+
+
+   BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
+
+   if(BRAMDisabled)
+      MDFN_printf(_("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n"));
+
+   if(!BRAMDisabled)
+   {
+      // Initialize Save RAM
+      memset(SaveRAM, 0, sizeof(SaveRAM));
+
+      static const uint8 BRInit00[] = { 0x24, 0x8A, 0xDF, 0x50, 0x43, 0x46, 0x58, 0x53, 0x72, 0x61, 0x6D, 0x80,
+         0x00, 0x01, 0x01, 0x00, 0x01, 0x40, 0x00, 0x00, 0x01, 0xF9, 0x03, 0x00,
+         0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
+      };
+      static const uint8 BRInit80[] = { 0xF9, 0xFF, 0xFF };
+
+      memcpy(BackupRAM + 0x00, BRInit00, sizeof(BRInit00));
+      memcpy(BackupRAM + 0x80, BRInit80, sizeof(BRInit80));
+
+
+      static const uint8 ExBRInit00[] = { 0x24, 0x8A, 0xDF, 0x50, 0x43, 0x46, 0x58, 0x43, 0x61, 0x72, 0x64, 0x80,
+         0x00, 0x01, 0x01, 0x00, 0x01, 0x40, 0x00, 0x00, 0x01, 0xF9, 0x03, 0x00,
+         0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00
+      };
+      static const uint8 ExBRInit80[] = { 0xF9, 0xFF, 0xFF };
+
+      memcpy(ExBackupRAM + 0x00, ExBRInit00, sizeof(ExBRInit00));
+      memcpy(ExBackupRAM + 0x80, ExBRInit80, sizeof(ExBRInit80));
+   }
+
+   // Default to 16-bit bus.
+   for(int i = 0; i < 256; i++)
+   {
+      PCFX_V810.SetMemReadBus32(i, FALSE);
+      PCFX_V810.SetMemWriteBus32(i, FALSE);
+   }
+
+   // 16MiB RAM area.
+   PCFX_V810.SetMemReadBus32(0, TRUE);
+   PCFX_V810.SetMemWriteBus32(0, TRUE);
+
+   // Bitstring read range
+   for(int i = 0xA0; i <= 0xAF; i++)
+   {
+      PCFX_V810.SetMemReadBus32(i, FALSE);       // Reads to the read range are 16-bit, and
+      PCFX_V810.SetMemWriteBus32(i, TRUE);       // writes are 32-bit.
+   }
+
+   // Bitstring write range
+   for(int i = 0xB0; i <= 0xBF; i++)
+   {
+      PCFX_V810.SetMemReadBus32(i, TRUE);	// Reads to the write range are 32-bit,
+      PCFX_V810.SetMemWriteBus32(i, FALSE);	// but writes are 16-bit!
+   }
+
+   // BIOS area
+   for(int i = 0xF0; i <= 0xFF; i++)
+   {
+      PCFX_V810.SetMemReadBus32(i, FALSE);
+      PCFX_V810.SetMemWriteBus32(i, FALSE);
+   }
+
+   PCFX_V810.SetMemReadHandlers(mem_rbyte, mem_rhword, mem_rword);
+   PCFX_V810.SetMemWriteHandlers(mem_wbyte, mem_whword, mem_wword);
+
+   PCFX_V810.SetIOReadHandlers(port_rbyte, port_rhword, NULL);
+   PCFX_V810.SetIOWriteHandlers(port_wbyte, port_whword, NULL);
+
+
+
+   return(1);
 }
 
 static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
@@ -875,58 +842,58 @@ static void DoSimpleCommand(int cmd)
 
 int StateAction(StateMem *sm, int load, int data_only)
 {
- const v810_timestamp_t timestamp = PCFX_V810.v810_timestamp;
+   const v810_timestamp_t timestamp = PCFX_V810.v810_timestamp;
 
- SFORMAT StateRegs[] =
- {
-  SFARRAY(RAM, 0x200000),
-  SFARRAY16(Last_VDC_AR, 2),
-  SFVAR(BackupControl),
-  SFVAR(ExBusReset),
-  SFARRAY(BackupRAM, BRAMDisabled ? 0 : 0x8000),
-  SFARRAY(ExBackupRAM, BRAMDisabled ? 0 : 0x8000),
+   SFORMAT StateRegs[] =
+   {
+      SFARRAY(RAM, 0x200000),
+      SFARRAY16(Last_VDC_AR, 2),
+      SFVAR(BackupControl),
+      SFVAR(ExBusReset),
+      SFARRAY(BackupRAM, BRAMDisabled ? 0 : 0x8000),
+      SFARRAY(ExBackupRAM, BRAMDisabled ? 0 : 0x8000),
 
-  SFVAR(CD_TrayOpen),
-  SFVAR(CD_SelectedDisc),
+      SFVAR(CD_TrayOpen),
+      SFVAR(CD_SelectedDisc),
 
-  SFEND
- };
+      SFEND
+   };
 
- int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "MAIN", false);
+   int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "MAIN", false);
 
- for(int i = 0; i < 2; i++)
-  ret &= fx_vdc_chips[i]->StateAction(sm, load, data_only, i ? "VDC1" : "VDC0");
+   for(int i = 0; i < 2; i++)
+      ret &= fx_vdc_chips[i]->StateAction(sm, load, data_only, i ? "VDC1" : "VDC0");
 
- ret &= FXINPUT_StateAction(sm, load, data_only);
- ret &= PCFXIRQ_StateAction(sm, load, data_only);
- ret &= KING_StateAction(sm, load, data_only);
- ret &= PCFX_V810.StateAction(sm, load, data_only);
- ret &= FXTIMER_StateAction(sm, load, data_only);
- ret &= SoundBox_StateAction(sm, load, data_only);
- ret &= SCSICD_StateAction(sm, load, data_only, "CDRM");
- ret &= RAINBOW_StateAction(sm, load, data_only);
+   ret &= FXINPUT_StateAction(sm, load, data_only);
+   ret &= PCFXIRQ_StateAction(sm, load, data_only);
+   ret &= KING_StateAction(sm, load, data_only);
+   ret &= PCFX_V810.StateAction(sm, load, data_only);
+   ret &= FXTIMER_StateAction(sm, load, data_only);
+   ret &= SoundBox_StateAction(sm, load, data_only);
+   ret &= SCSICD_StateAction(sm, load, data_only, "CDRM");
+   ret &= RAINBOW_StateAction(sm, load, data_only);
 
- if(load)
- {
-  //
-  // Rather than bothering to store next event timestamp deltas in save states, we'll just recalculate next event times on save state load as a side effect
-  // of this call.
-  //
-  ForceEventUpdates(timestamp);
+   if(load)
+   {
+      //
+      // Rather than bothering to store next event timestamp deltas in save states, we'll just recalculate next event times on save state load as a side effect
+      // of this call.
+      //
+      ForceEventUpdates(timestamp);
 
-  if(cdifs)
-  {
-   // Sanity check.
-   if(CD_SelectedDisc >= (int)cdifs->size())
-    CD_SelectedDisc = (int)cdifs->size() - 1;
+      if(cdifs)
+      {
+         // Sanity check.
+         if(CD_SelectedDisc >= (int)cdifs->size())
+            CD_SelectedDisc = (int)cdifs->size() - 1;
 
-   SCSICD_SetDisc(CD_TrayOpen, (CD_SelectedDisc >= 0 && !CD_TrayOpen) ? (*cdifs)[CD_SelectedDisc] : NULL, true);
-  }
- }
+         SCSICD_SetDisc(CD_TrayOpen, (CD_SelectedDisc >= 0 && !CD_TrayOpen) ? (*cdifs)[CD_SelectedDisc] : NULL, true);
+      }
+   }
 
- //printf("0x%08x, %d %d %d %d\n", load, next_pad_ts, next_timer_ts, next_adpcm_ts, next_king_ts);
+   //printf("0x%08x, %d %d %d %d\n", load, next_pad_ts, next_timer_ts, next_adpcm_ts, next_king_ts);
 
- return(ret);
+   return(ret);
 }
 
 static const MDFNSetting_EnumList V810Mode_List[] =
@@ -1938,23 +1905,19 @@ static void sanitize_path(std::string &path)
 // Use a simpler approach to make sure that things go right for libretro.
 std::string MDFN_MakeFName(MakeFName_Type type, int id1, const char *cd1)
 {
-   char slash;
 #ifdef _WIN32
-   slash = '\\';
+   char slash = '\\';
 #else
-   slash = '/';
+   char slash = '/';
 #endif
    std::string ret;
+
    switch (type)
    {
-      case MDFNMKF_SAV:
-         ret = retro_save_directory +slash + retro_base_name +
-            std::string(".") + std::string(cd1);
-         break;
       case MDFNMKF_FIRMWARE:
          ret = retro_base_directory + slash + std::string(cd1);
 #ifdef _WIN32
-   sanitize_path(ret); // Because Windows path handling is mongoloid.
+         sanitize_path(ret); // Because Windows path handling is mongoloid.
 #endif
          break;
       default:	  
