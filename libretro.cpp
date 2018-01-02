@@ -60,7 +60,6 @@ static bool failed_init;
 
 
 std::string retro_base_directory;
-std::string retro_base_name;
 std::string retro_save_directory;
 
 /* Mednafen - Multi-system Emulator
@@ -974,21 +973,6 @@ MDFNGI EmulatedPCFX =
  2,     // Number of output sound channels
 };
 
-
-static void set_basename(const char *path)
-{
-   const char *base = strrchr(path, '/');
-   if (!base)
-      base = strrchr(path, '\\');
-
-   if (base)
-      retro_base_name = base + 1;
-   else
-      retro_base_name = path;
-
-   retro_base_name = retro_base_name.substr(0, retro_base_name.find_last_of('.'));
-}
-
 #ifdef NEED_DEINTERLACER
 static bool PrevInterlaced;
 static Deinterlacer deint;
@@ -1472,8 +1456,6 @@ bool retro_load_game(const struct retro_game_info *info)
 
    overscan = false;
    environ_cb(RETRO_ENVIRONMENT_GET_OVERSCAN, &overscan);
-
-   set_basename(info->path);
 
    check_variables();
 
