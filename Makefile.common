@@ -25,11 +25,9 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(MEDNAFEN_DIR)/sound/OwlResampler.cpp \
 	$(MEDNAFEN_DIR)/hw_cpu/v810/v810_cpu.cpp \
 	$(MEDNAFEN_DIR)/hw_cpu/v810/v810_cpuD.cpp \
+	$(MEDNAFEN_DIR)/hw_cpu/v810/v810_fp_ops.cpp \
 	$(MEDNAFEN_DIR)/hw_sound/pce_psg/pce_psg.cpp \
 	$(MEDNAFEN_DIR)/hw_video/huc6270/vdc_video.cpp
-
-SOURCES_C += \
-	$(MEDNAFEN_DIR)/hw_cpu/v810/fpu-new/softfloat.c 
 endif
 
 ifeq ($(NEED_BLIP), 1)

@@ -301,9 +301,6 @@ static CDGameEntry GameList[] =
 
 static void Emulate(EmulateSpecStruct *espec)
 {
- v810_timestamp_t v810_timestamp;
- v810_timestamp_t new_base_ts;
-
  //printf("%d\n", PCFX_V810.v810_timestamp);
 
  FXINPUT_Frame();
@@ -319,6 +316,7 @@ static void Emulate(EmulateSpecStruct *espec)
 
  KING_StartFrame(fx_vdc_chips, espec);	//espec->surface, &espec->DisplayRect, espec->LineWidths, espec->skip);
 
+ v810_timestamp_t v810_timestamp;
  v810_timestamp = PCFX_V810.Run(pcfx_event_handler);
 
 
@@ -328,11 +326,18 @@ static void Emulate(EmulateSpecStruct *espec)
  ForceEventUpdates(v810_timestamp);
 
  //
+ // Call KING_EndFrame() before SoundBox_Flush(), otherwise CD-DA audio distortion will occur due to sound data being updated
+ // after it was needed instead of before.
+ //
+ KING_EndFrame(v810_timestamp);
+
+ //
  // new_base_ts is guaranteed to be <= v810_timestamp
  //
+ v810_timestamp_t new_base_ts;
  espec->SoundBufSize = SoundBox_Flush(v810_timestamp, &new_base_ts, espec->SoundBuf, espec->SoundBufMaxSize);
 
- KING_EndFrame(v810_timestamp, new_base_ts);
+ KING_ResetTS(new_base_ts);
  FXTIMER_ResetTS(new_base_ts);
  FXINPUT_ResetTS(new_base_ts);
  SoundBox_ResetTS(new_base_ts);
@@ -839,6 +844,7 @@ static void CloseGame(void)
 
    RAINBOW_Close();
    KING_Close();
+   SoundBox_Kill();
    PCFX_V810.Kill();
 
    // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
@@ -1023,7 +1029,7 @@ static Deinterlacer deint;
 
 #define MEDNAFEN_CORE_NAME_MODULE "pcfx"
 #define MEDNAFEN_CORE_NAME "Mednafen PC-FX"
-#define MEDNAFEN_CORE_VERSION "v0.9.33.3"
+#define MEDNAFEN_CORE_VERSION "v0.9.36.5"
 #define MEDNAFEN_CORE_EXTENSIONS "cue|ccd|toc|chd"
 #define MEDNAFEN_CORE_TIMING_FPS 59.94
 #define MEDNAFEN_CORE_GEOMETRY_BASE_W (game->nominal_width)
@@ -1611,10 +1617,10 @@ void retro_run()
    update_input();
 
    static int16_t sound_buf[0x10000];
-   static MDFN_Rect rects[FB_MAX_HEIGHT];
+   static int32 rects[FB_MAX_HEIGHT];
    static unsigned width, height;
    bool resolution_changed = false;
-   rects[0].w = ~0;
+   rects[0] = ~0;
 
    EmulateSpecStruct spec = {0};
    spec.surface = surf;

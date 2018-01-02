@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "fpu-new/softfloat.h"
+#include "v810_fp_ops.h"
 
 typedef int32 v810_timestamp_t;
 
@@ -136,12 +136,6 @@ typedef enum
  V810_EMU_MODE_ACCURATE = 1,
  _V810_EMU_MODE_COUNT
 } V810_Emu_Mode;
-
-//
-// WARNING: Do NOT instantiate this class in multiple threads in such a way that both threads can be inside a method of this class at the same time.
-// To fix this, you'll need to put locks or something(re-engineer it to use state passed in through pointers) around the SoftFloat code.
-//
-
 
 class V810
 {
@@ -340,7 +334,7 @@ class V810
 
 
  bool IsSubnormal(uint32 fpval);
- void FPU_Math_Template(float32 (*func)(float32, float32), uint32 arg1, uint32 arg2);
+ void FPU_Math_Template(uint32 (V810_FP_Ops::*func)(uint32, uint32), uint32 arg1, uint32 arg2);
  void FPU_DoException(void);
  bool CheckFPInputException(uint32 fpval);
  bool FPU_DoesExceptionKillResult(void);
@@ -351,6 +345,7 @@ class V810
  void BSTR_WWORD(v810_timestamp_t &timestamp, uint32 A, uint32 V);
  bool Do_BSTR_Search(v810_timestamp_t &timestamp, const int inc_mul, unsigned int bit_test);
 
+ V810_FP_Ops fpo;
 
  uint8 DummyRegion[V810_FAST_MAP_PSIZE + V810_FAST_MAP_TRAMPOLINE_SIZE];
 };
