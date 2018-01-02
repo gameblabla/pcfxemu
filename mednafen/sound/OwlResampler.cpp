@@ -749,18 +749,18 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
 
  //
- // As far as filter frequency response design goes, we clamp the output rate parameter to prevent excessive
- // ultrasonic frequency content which may degrade sound quality with lower-quality audio equipment, 
- // and to prevent integer overflow problems in the integer filter generation and convolution code paths.
+ // As far as filter frequency response design goes, we clamp the output rate parameter
+ // to keep PCE CD and PC-FX CD-DA sample amplitudes from going wild since we're not resampling CD-DA totally properly.
  //
- // ...and to keep PCE CD and PC-FX CD-DA sample amplitudes from going wild since we're not resampling CD-DA totally properly.
- //
-#define OWLRESAMP_FCALC_RATE_CLAMP 48000.0
+#define OWLRESAMP_FCALC_RATE_CLAMP 128000.0 //192000.0 //96000.0 //48000.0
+
+ // A little SOMETHING to widen the transition band a bit to reduce computational complexity with higher output rates.
+ const double something = std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, (48000.0 + std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, output_rate)) / 2 / QualityTable[quality].obw);
 
  //
  // Note: Cutoff calculation is performed again(though slightly differently) down below after the SIMD check.
  //
- cutoff = QualityTable[quality].obw * (std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, std::min<double>(input_rate, output_rate)) / input_rate);
+ cutoff = QualityTable[quality].obw * (std::min<double>(something, std::min<double>(input_rate, output_rate)) / input_rate);
 
  required_bandwidth = (std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, std::min<double>(input_rate, output_rate)) / input_rate) - cutoff;
 
@@ -819,7 +819,7 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
  //
  // Adjust cutoff now that NumCoeffs may have been increased.
  //
- cutoff = std::min<double>(QualityTable[quality].obw * OWLRESAMP_FCALC_RATE_CLAMP / input_rate, (std::min<double>(input_rate, output_rate) / input_rate - ((double)k_d / NumCoeffs)));
+ cutoff = std::min<double>(QualityTable[quality].obw * something / input_rate, (std::min<double>(input_rate, output_rate) / input_rate - ((double)k_d / NumCoeffs)));
 
  MDFN_printf("Adjusted number of coefficients per phase: %u\n", NumCoeffs);
  MDFN_printf("Adjusted nominal cutoff frequency: %f\n", InputRate * cutoff / 2);
