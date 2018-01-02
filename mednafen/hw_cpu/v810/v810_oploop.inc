@@ -19,7 +19,7 @@
 
 
     // Macro test taken from http://gcc.gnu.org/viewcvs/trunk/gcc/testsuite/gcc.dg/20020919-1.c?view=markup&pathrev=142696
-    //#if defined (__powerpc__) || defined (__PPC__) || defined (__ppc__)	|| defined (__POWERPC__) || defined (PPC) || defined (_IBMR2) 
+    //#if defined (__powerpc__) || defined (__PPC__) || defined (__ppc__)	|| defined (__POWERPC__) || defined (PPC) || defined (_IBMR2)
     //	register v810_timestamp_t timestamp_rl asm("15") = v810_timestamp;
     //#elif defined(__x86_64__)
     //	register v810_timestamp_t timestamp_rl asm("r11") = v810_timestamp;
@@ -115,7 +115,7 @@
             const uint32 arg1 = tmpop & 0x1F;			\
             const uint32 arg2 = (tmpop >> 5) & 0x1F;		\
             RB_INCPCBY2();
-						
+
 	#define DO_AM_II() DO_AM_I();
 
 
@@ -127,7 +127,7 @@
             const uint32 arg3 = (tmpop >> 5) & 0x1F;		\
             const uint32 arg2 = tmpop & 0x1F;			\
             const uint32 arg1 = RB_RDOP(2);	\
-            RB_INCPCBY4();						
+            RB_INCPCBY4();
 
 
         #define DO_AM_VIa()					\
@@ -204,9 +204,9 @@
             SetFlag(PSW_CY, (val != 0) && ((P_REG[arg2] >> (32 - val))&0x01) );
 	    SetFlag(PSW_OV, FALSE);
             SetPREG(arg2, P_REG[arg2] << val);
-	    SetSZ(P_REG[arg2]);            
+	    SetSZ(P_REG[arg2]);
 	END_OP();
-			
+
 	BEGIN_OP(SHR);
             ADDCLOCK(1);
             val = P_REG[arg1] & 0x1F;
@@ -233,12 +233,12 @@
 	BEGIN_OP(SAR);
             ADDCLOCK(1);
             val = P_REG[arg1] & 0x1F;
-			
+
 	    SetFlag(PSW_CY, (val) && ((P_REG[arg2]>>(val-1))&0x01) );
 	    SetFlag(PSW_OV, FALSE);
 
 	    SetPREG(arg2, (uint32) ((int32)P_REG[arg2] >> val));
-            
+
 	    SetSZ(P_REG[arg2]);
 	END_OP();
 
@@ -292,7 +292,7 @@
 
 		P_REG[arg2] = 0;
 
-		switch (arg1 & 0x0F) 
+		switch (arg1 & 0x0F)
 		{
 			case COND_V:
 				if (TESTCOND_V) P_REG[arg2] = 1;
@@ -578,7 +578,7 @@
 	BEGIN_OP(LD_B);
 		        ADDCLOCK(1);
 			tmp2 = (sign_16(arg1)+P_REG[arg2])&0xFFFFFFFF;
-			
+
 			SetPREG(arg3, sign_8(MemRead8(timestamp, tmp2)));
 
 			//should be 3 clocks when executed alone, 2 when precedes another LD, or 1
@@ -586,7 +586,7 @@
 			if(lastop >= 0)
 			{
 				if(lastop == LASTOP_LD)
-				{ 
+				{
 				 ADDCLOCK(1);
 				}
 				else
@@ -627,7 +627,7 @@
 	                if(MemReadBus32[tmp2 >> 24])
 			{
 			 SetPREG(arg3, MemRead32(timestamp, tmp2));
-			
+
 			 if(lastop >= 0)
 			 {
 				if(lastop == LASTOP_LD)
@@ -642,7 +642,12 @@
 			}
 			else
 			{
-                         SetPREG(arg3, MemRead16(timestamp, tmp2) | (MemRead16(timestamp, tmp2 | 2) << 16));
+			 uint32 rv;
+
+			 rv = MemRead16(timestamp, tmp2);
+			 rv |= MemRead16(timestamp, tmp2 | 2) << 16;
+
+                         SetPREG(arg3, rv);
 
                          if(lastop >= 0)
                          {
@@ -666,7 +671,7 @@
 
              if(lastop == LASTOP_ST)
 	     {
-	      ADDCLOCK(1); 
+	      ADDCLOCK(1);
 	     }
 	     lastop = LASTOP_ST;
 	END_OP_SKIPLO();
@@ -741,9 +746,14 @@
 	     else
 	     {
 	      uint32 eff_addr = (sign_16(arg1) + P_REG[arg2]) & 0xFFFFFFFC;
+	      uint32 rv;
 
 	      ADDCLOCK(5);
-              SetPREG(arg3, IORead16(timestamp, eff_addr) | ((IORead16(timestamp, eff_addr | 2) << 16)));
+
+	      rv = IORead16(timestamp, eff_addr);
+	      rv |= IORead16(timestamp, eff_addr | 2) << 16;
+
+              SetPREG(arg3, rv);
 	     }
 	     lastop = LASTOP_IN;
 	END_OP_SKIPLO();
@@ -756,7 +766,7 @@
 
 	     if(lastop == LASTOP_OUT)
 	     {
-	      ADDCLOCK(1); 
+	      ADDCLOCK(1);
 	     }
 	     lastop = LASTOP_OUT;
 	END_OP_SKIPLO();
@@ -797,7 +807,7 @@
 	      else
 	      {
 	       ADDCLOCK(3);
-	      }	      
+	      }
              }
 	     lastop = LASTOP_OUT;
 	END_OP_SKIPLO();
@@ -858,8 +868,8 @@
 	     RB_DECPCBY2();
 	     Exception(ZERO_DIV_HANDLER_ADDR, ECODE_ZERO_DIV);
 	     CHECK_HALTED();
-            } 
-	    else 
+            }
+	    else
 	    {
 	     // Careful here, since arg2 can be == 30
 	     uint32 quotient = (uint32)P_REG[arg2] / (uint32)P_REG[arg1];
@@ -882,14 +892,14 @@
 
             ADDCLOCK(38);
             if((uint32)P_REG[arg1] == 0) // Divide by zero!
-	    { 
+	    {
 	     RB_DECPCBY2();
 	     Exception(ZERO_DIV_HANDLER_ADDR, ECODE_ZERO_DIV);
 	     CHECK_HALTED();
-            } 
-	    else 
+            }
+	    else
 	    {
-                if((P_REG[arg2]==0x80000000)&&(P_REG[arg1]==0xFFFFFFFF)) 
+                if((P_REG[arg2]==0x80000000)&&(P_REG[arg1]==0xFFFFFFFF))
 		{
 			SetFlag(PSW_OV, TRUE);
 			P_REG[30]=0;
@@ -972,7 +982,10 @@
 	     if(MemReadBus32[addr >> 24])
 	      tmp = MemRead32(timestamp, addr);
 	     else
-	      tmp = MemRead16(timestamp, addr) | (MemRead16(timestamp, addr | 2) << 16);
+	     {
+	      tmp = MemRead16(timestamp, addr);
+	      tmp |= MemRead16(timestamp, addr | 2) << 16;
+	     }
 
              compare_temp = P_REG[arg3] - tmp;
 
@@ -1011,7 +1024,7 @@
 	 SetPC(0xFFFFFE00 | (iNum << 4));
 
 	 RB_ADDBT(old_PC, RB_GETPC(), 0xFE00 | (iNum << 4));
-    
+
 	 S_REG[ECR] = 0xFE00 | (iNum << 4);
 
 	 S_REG[PSW] |= PSW_EP;
@@ -1022,7 +1035,7 @@
 	 // saturating at 15.
 	 iNum++;
 
-	 if(iNum > 0x0F) 
+	 if(iNum > 0x0F)
 	  iNum = 0x0F;
 
 	 S_REG[PSW] &= ~PSW_IA;
