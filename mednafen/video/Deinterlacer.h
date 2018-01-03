@@ -10,7 +10,7 @@ class Deinterlacer
  Deinterlacer();
  ~Deinterlacer();
 
- void Process(MDFN_Surface *surface, const MDFN_Rect &DisplayRect, MDFN_Rect *LineWidths, const bool field);
+ void Process(MDFN_Surface *surface, const MDFN_Rect &DisplayRect, int32 *LineWidths, const bool field);
 
  void ClearState(void);
 
