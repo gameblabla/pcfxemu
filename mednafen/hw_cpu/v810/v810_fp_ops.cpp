@@ -16,6 +16,7 @@
  */
 
 #include "v810_fp_ops.h"
+#include <algorithm>
 
 bool V810_FP_Ops::fp_is_zero(uint32 v)
 {
