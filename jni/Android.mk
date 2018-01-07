@@ -43,6 +43,7 @@ NEED_CD = 1
 NEED_SCSI_CD = 1
 NEED_TREMOR = 1
 CORE_DEFINE := -DWANT_PCFX_EMU
+HAVE_CHD = 1
 
 TARGET_NAME := mednafen_$(core)_libretro
 
