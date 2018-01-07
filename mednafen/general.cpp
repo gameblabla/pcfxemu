@@ -39,17 +39,17 @@ static bool IsAbsolutePath(const char *path)
 #endif
          path[0] == '/'
       )
+      return(TRUE);
+
+#if defined(_WIN32) || defined(DOS)
+   if((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
+   {
+      if(path[1] == ':')
          return(TRUE);
+   }
+#endif
 
- #if defined(WIN32) || defined(DOS)
- if((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
- {
-    if(path[1] == ':')
-       return(TRUE);
- }
- #endif
-
- return(FALSE);
+   return(FALSE);
 }
 
 static bool IsAbsolutePath(const std::string &path)
@@ -137,11 +137,10 @@ void MDFN_GetFilePathComponents(const std::string &file_path,
 
 std::string MDFN_EvalFIP(const std::string &dir_path, const std::string &rel_path, bool skip_safety_check)
 {
-   char slash;
 #ifdef _WIN32
-   slash = '\\';
+   char slash = '\\';
 #else
-   slash = '/';
+   char slash = '/';
 #endif
 
    if(!skip_safety_check && !MDFN_IsFIROPSafe(rel_path))
