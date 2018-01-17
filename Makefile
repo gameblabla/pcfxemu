@@ -397,8 +397,8 @@ FLAGS += $(ENDIANNESS_DEFINES) -DSIZEOF_DOUBLE=8 $(WARNINGS) -DMEDNAFEN_VERSION=
 CXXFLAGS += $(FLAGS)
 CFLAGS += $(FLAGS)
 
-OBJOUT   = -o
-LINKOUT  = -o
+OBJOUT   = -o 
+LINKOUT  = -o 
 
 ifneq (,$(findstring msvc,$(platform)))
 	OBJOUT = -Fo
@@ -414,7 +414,9 @@ else
 endif
 
 $(TARGET): $(OBJECTS)
-ifeq ($(STATIC_LINKING), 1)
+ifeq ($(platform), emscripten)
+	$(CXX) $(CXXFLAGS) $(OBJOUT)$@ $^
+else ifeq ($(STATIC_LINKING), 1)
 	$(AR) rcs $@ $(OBJECTS)
 else
 	$(LD) $(LINKOUT)$@ $^ $(LDFLAGS) $(LIBS)
