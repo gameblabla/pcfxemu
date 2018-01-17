@@ -177,7 +177,7 @@ ifeq ($(HAVE_CHD), 1)
 endif
 
 ifeq ($(NEED_TREMOR), 1)
-   SOURCES_C += $(wildcard $(MEDNAFEN_DIR)/tremor/*.c)
+   SOURCES_C += $(sort $(filter-out %ivorbisfile_example.c, $(wildcard $(MEDNAFEN_DIR)/tremor/*.c)))
    FLAGS += -DNEED_TREMOR
 endif
 
@@ -199,15 +199,19 @@ SOURCES_CXX += \
 SOURCES_C += \
 	$(MEDNAFEN_DIR)/file.c \
 	$(MEDNAFEN_DIR)/mednafen-endian.c \
-	$(MEDNAFEN_DIR)/mednafen_md5.c \
-	$(LIBRETRO_COMM_DIR)/streams/file_stream.c \
-	$(LIBRETRO_COMM_DIR)/streams/file_stream_transforms.c \
-	$(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c \
-	$(LIBRETRO_COMM_DIR)/encodings/encoding_utf.c \
-	$(LIBRETRO_COMM_DIR)/compat/fopen_utf8.c \
-	$(LIBRETRO_COMM_DIR)/compat/compat_snprintf.c  \
-	$(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c  \
-	$(LIBRETRO_COMM_DIR)/compat/compat_strl.c  \
-	$(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c  \
-	$(LIBRETRO_COMM_DIR)/string/stdstring.c 
+	$(MEDNAFEN_DIR)/mednafen_md5.c
+endif
+
+ifneq ($(STATIC_LINKING), 1)
+    SOURCES_C += $(LIBRETRO_COMM_DIR)/streams/file_stream.c \
+				 $(LIBRETRO_COMM_DIR)/streams/file_stream_transforms.c \
+				 $(LIBRETRO_COMM_DIR)/compat/compat_strl.c \
+				 $(LIBRETRO_COMM_DIR)/compat/compat_snprintf.c \
+				 $(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
+				 $(LIBRETRO_COMM_DIR)/compat/compat_strcasestr.c \
+				 $(LIBRETRO_COMM_DIR)/compat/fopen_utf8.c \
+				 $(LIBRETRO_COMM_DIR)/encodings/encoding_utf.c \
+				 $(LIBRETRO_COMM_DIR)/encodings/encoding_crc32.c \
+				 $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c \
+				 $(LIBRETRO_COMM_DIR)/string/stdstring.c
 endif
