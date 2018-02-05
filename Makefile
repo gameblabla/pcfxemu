@@ -70,6 +70,10 @@ ifeq ($(platform), unix)
    ifneq ($(shell uname -p | grep -E '((i.|x)86|amd64)'),)
       IS_X86 = 1
    endif
+   ifneq ($(findstring Haiku,$(shell uname -s)),)
+   PTHREAD_FLAGS = -lpthread
+   CXXFLAGS += -fpermissive
+   endif
    LDFLAGS += $(PTHREAD_FLAGS)
    FLAGS += $(PTHREAD_FLAGS)
 else ifeq ($(platform), osx)
