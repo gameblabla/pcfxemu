@@ -3,6 +3,7 @@ FRONTEND_SUPPORTS_RGB565 = 1
 
 CORE_DIR := .
 HAVE_CHD = 1
+HAVE_CDROM = 0
 
 SPACE :=
 SPACE := $(SPACE) $(SPACE)
@@ -13,30 +14,30 @@ filter_out2 = $(call filter_out1,$(call filter_out1,$1))
 
 ifeq ($(platform),)
 platform = unix
-ifeq ($(shell uname -a),)
+ifeq ($(shell uname -s),)
    platform = win
-else ifneq ($(findstring MINGW,$(shell uname -a)),)
+else ifneq ($(findstring MINGW,$(shell uname -s)),)
    platform = win
-else ifneq ($(findstring Darwin,$(shell uname -a)),)
+else ifneq ($(findstring Darwin,$(shell uname -s)),)
    platform = osx
-else ifneq ($(findstring win,$(shell uname -a)),)
+else ifneq ($(findstring win,$(shell uname -s)),)
 	platform = win
 endif
 endif
 
 # system platform
 system_platform = unix
-ifeq ($(shell uname -a),)
+ifeq ($(shell uname -s),)
 	EXE_EXT = .exe
 	system_platform = win
-else ifneq ($(findstring Darwin,$(shell uname -a)),)
+else ifneq ($(findstring Darwin,$(shell uname -s)),)
 	system_platform = osx
 ifeq ($(shell uname -p),powerpc)
 	arch = ppc
 else
 	arch = intel
 endif
-else ifneq ($(findstring MINGW,$(shell uname -a)),)
+else ifneq ($(findstring MINGW,$(shell uname -s)),)
 	system_platform = win
 endif
 
@@ -69,6 +70,9 @@ ifeq ($(platform), unix)
    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
    ifneq ($(shell uname -p | grep -E '((i.|x)86|amd64)'),)
       IS_X86 = 1
+   endif
+   ifneq ($(findstring Linux,$(shell uname -s)),)
+     HAVE_CDROM = 1
    endif
    ifneq ($(findstring Haiku,$(shell uname -s)),)
    PTHREAD_FLAGS = -lpthread
@@ -238,6 +242,7 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
     CFLAGS += -DNOMINMAX
     CXXFLAGS += -DNOMINMAX
     WINDOWS_VERSION = 1
+    HAVE_CDROM = 1
 
 	PlatformSuffix = $(subst windows_msvc2017_,,$(platform))
 	ifneq (,$(findstring desktop,$(PlatformSuffix)))
@@ -336,6 +341,7 @@ else ifeq ($(platform), windows_msvc2003_x86)
 	CC  = cl.exe
 	CXX = cl.exe
 
+HAVE_CDROM = 1
 PATH := $(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../../Vc7/bin"):$(PATH)
 PATH := $(PATH):$(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../IDE")
 INCLUDE := $(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../../Vc7/include")
@@ -361,6 +367,7 @@ else
    SHARED := -shared -Wl,--no-undefined -Wl,--version-script=link.T
    LDFLAGS += -static-libgcc -static-libstdc++ -lwinmm
    WINDOWS_VERSION = 1
+   HAVE_CDROM = 1
 endif
 
 include Makefile.common
@@ -400,6 +407,13 @@ LDFLAGS += $(fpic) $(SHARED)
 FLAGS += $(fpic) $(NEW_GCC_FLAGS) $(INCFLAGS)
 
 FLAGS += $(ENDIANNESS_DEFINES) -DSIZEOF_DOUBLE=8 $(WARNINGS) -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DPSS_STYLE=1 -DMPC_FIXED_POINT $(CORE_DEFINE) -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_ $(EXTRA_INCLUDES) $(SOUND_DEFINE)
+
+ifeq ($(HAVE_CDROM), 1)
+   FLAGS += -DHAVE_CDROM
+ifeq ($(CDROM_DEBUG), 1)
+   FLAGS += -DCDROM_DEBUG
+endif
+endif
 
 CXXFLAGS += $(FLAGS)
 CFLAGS += $(FLAGS)
