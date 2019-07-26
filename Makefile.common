@@ -9,6 +9,12 @@ DEPS_DIR     	   := $(CORE_DIR)/deps
 
 INCFLAGS := -I$(CORE_DIR) -I$(MEDNAFEN_DIR) -I$(MEDNAFEN_DIR)/include -I$(MEDNAFEN_DIR)/intl -I$(MEDNAFEN_DIR)/hw_sound -I$(MEDNAFEN_DIR)/hw_cpu -I$(MEDNAFEN_DIR)/hw_misc -I$(LIBRETRO_COMM_DIR)/include -I$(DEPS_DIR)/zlib -I$(LIBRETRO_COMM_DIR)/include
 
+ifeq ($(HAVE_CDROM), 1)
+SOURCES_C += \
+				 $(LIBRETRO_COMM_DIR)/cdrom/cdrom.c \
+				 $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation_cdrom.c
+endif
+
 ifneq ($(HAVE_GRIFFIN),1)
    SOURCES_CXX += \
 	$(CORE_EMU_DIR)/king.cpp \
@@ -205,6 +211,10 @@ endif
 ifneq ($(STATIC_LINKING), 1)
     SOURCES_C += $(LIBRETRO_COMM_DIR)/streams/file_stream.c \
 				 $(LIBRETRO_COMM_DIR)/streams/file_stream_transforms.c \
+         $(LIBRETRO_COMM_DIR)/file/file_path.c \
+         $(LIBRETRO_COMM_DIR)/file/retro_dirent.c \
+         $(LIBRETRO_COMM_DIR)/lists/string_list.c \
+         $(LIBRETRO_COMM_DIR)/lists/dir_list.c \
 				 $(LIBRETRO_COMM_DIR)/compat/compat_strl.c \
 				 $(LIBRETRO_COMM_DIR)/compat/compat_snprintf.c \
 				 $(LIBRETRO_COMM_DIR)/compat/compat_posix_string.c \
@@ -213,5 +223,6 @@ ifneq ($(STATIC_LINKING), 1)
 				 $(LIBRETRO_COMM_DIR)/encodings/encoding_utf.c \
 				 $(LIBRETRO_COMM_DIR)/encodings/encoding_crc32.c \
 				 $(LIBRETRO_COMM_DIR)/vfs/vfs_implementation.c \
+         $(LIBRETRO_COMM_DIR)/memmap/memalign.c \
 				 $(LIBRETRO_COMM_DIR)/string/stdstring.c
 endif
