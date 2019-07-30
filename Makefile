@@ -336,6 +336,30 @@ else ifeq ($(platform), emscripten)
    TARGET := $(TARGET_NAME)_libretro_$(platform).bc
    STATIC_LINKING = 1
 
+# Windows MSVC 2005 x86
+else ifeq ($(platform), windows_msvc2005_x86)
+	CC  = cl.exe
+	CXX = cl.exe
+
+PATH := $(shell IFS=$$'\n'; cygpath "$(VS80COMNTOOLS)../../VC/bin"):$(PATH)
+PATH := $(PATH):$(shell IFS=$$'\n'; cygpath "$(VS80COMNTOOLS)../IDE")
+INCLUDE := $(shell IFS=$$'\n'; cygpath -w "$(VS80COMNTOOLS)../../VC/include")
+LIB := $(shell IFS=$$'\n'; cygpath -w "$(VS80COMNTOOLS)../../VC/lib")
+BIN := $(shell IFS=$$'\n'; cygpath "$(VS80COMNTOOLS)../../VC/bin")
+
+WindowsSdkDir := $(INETSDK)
+
+HAVE_CDROM = 1
+
+export INCLUDE := $(INCLUDE);$(INETSDK)/Include;libretro-common/include/compat/msvc
+export LIB := $(LIB);$(WindowsSdkDir);$(INETSDK)/Lib
+TARGET := $(TARGET_NAME)_libretro.dll
+PSS_STYLE :=2
+LDFLAGS += -DLL
+CFLAGS += -D_CRT_SECURE_NO_DEPRECATE
+LIBS =
+WINDOWS_VERSION=1
+
 # Windows MSVC 2003 x86
 else ifeq ($(platform), windows_msvc2003_x86)
 	CC  = cl.exe
@@ -344,7 +368,7 @@ else ifeq ($(platform), windows_msvc2003_x86)
 HAVE_CDROM = 1
 PATH := $(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../../Vc7/bin"):$(PATH)
 PATH := $(PATH):$(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../IDE")
-INCLUDE := $(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../../Vc7/include")
+INCLUDE := $(shell IFS=$$'\n'; cygpath -w "$(VS71COMNTOOLS)../../Vc7/include")
 LIB := $(shell IFS=$$'\n'; cygpath -w "$(VS71COMNTOOLS)../../Vc7/lib")
 BIN := $(shell IFS=$$'\n'; cygpath "$(VS71COMNTOOLS)../../Vc7/bin")
 
