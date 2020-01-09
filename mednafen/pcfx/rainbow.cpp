@@ -487,7 +487,7 @@ static uint32 get_dc_uv_coeff(void)
 static void decode(int32 *dct, const uint32 *QuantTable, const int32 dc, const HuffmanQuickLUT *table)
 {
  int32 coeff;
- int zeroes;
+ int32 zeroes;
  int count;
  int index;
 
@@ -722,7 +722,7 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
     for(int column = 0; column < 16; column++)
     {
      uint32 *dest_base_column = &dest_base[column * 16];
-     int zeroes = 0;
+     int32 zeroes = 0;
 
      dc_y += get_dc_y_coeff(&zeroes);
 

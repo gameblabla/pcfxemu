@@ -30,5 +30,5 @@ uint8 FXSCSI_CtrlRead(uint32 A)
 
 void FXSCSI_CtrlWrite(uint32 A, uint8 V)
 {
-   printf("FXSCSI Write: %08x %02x\n", A, V);
+   //printf("FXSCSI Write: %08x %02x\n", A, V);
 }
