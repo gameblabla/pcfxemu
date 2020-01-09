@@ -190,6 +190,7 @@ else ifeq ($(platform), vita)
    FLAGS += -DVITA
    STATIC_LINKING = 1
 
+# Xbox 360
 else ifeq ($(platform), xenon)
    TARGET := $(TARGET_NAME)_libretro_xenon360.a
    CC = xenon-gcc$(EXE_EXT)
@@ -198,6 +199,20 @@ else ifeq ($(platform), xenon)
    ENDIANNESS_DEFINES += -D__LIBXENON__ -m32 -D__ppc__ -DMSB_FIRST
    LIBS := $(PTHREAD_FLAGS)
    STATIC_LINKING = 1
+
+# Nintendo Switch (libnx)
+else ifeq ($(platform), libnx)
+include $(DEVKITPRO)/libnx/switch_rules
+    TARGET := $(TARGET_NAME)_libretro_$(platform).a
+    DEFINES := -DSWITCH=1 -U__linux__ -U__linux -DRARCH_INTERNAL
+    CFLAGS  :=  $(DEFINES) -g -O3 -fPIE -I$(LIBNX)/include/ -ffunction-sections -fdata-sections -ftls-model=local-exec -Wl,--allow-multiple-definition -specs=$(LIBNX)/switch.specs
+    CFLAGS += $(INCDIRS)
+    CFLAGS  += $(INCLUDE)  -D__SWITCH__ -DHAVE_LIBNX
+    CXXFLAGS := $(ASFLAGS) $(CFLAGS) -fexceptions -fno-rtti -std=gnu++11 
+    CFLAGS += -std=gnu11
+    STATIC_LINKING = 1
+
+# Nintendo Gamecube
 else ifeq ($(platform), ngc)
    TARGET := $(TARGET_NAME)_libretro_$(platform).a
    CC = $(DEVKITPPC)/bin/powerpc-eabi-gcc$(EXE_EXT)
@@ -208,6 +223,8 @@ else ifeq ($(platform), ngc)
 
    EXTRA_INCLUDES := -I$(DEVKITPRO)/libogc/include
    STATIC_LINKING = 1
+
+# wii
 else ifeq ($(platform), wii)
    TARGET := $(TARGET_NAME)_libretro_$(platform).a
    CC = $(DEVKITPPC)/bin/powerpc-eabi-gcc$(EXE_EXT)
