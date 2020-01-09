@@ -253,10 +253,10 @@ else ifneq (,$(findstring windows_msvc2017,$(platform)))
     CFLAGS += -DNOMINMAX
     CXXFLAGS += -DNOMINMAX
     WINDOWS_VERSION = 1
-    HAVE_CDROM = 1
 
 	PlatformSuffix = $(subst windows_msvc2017_,,$(platform))
 	ifneq (,$(findstring desktop,$(PlatformSuffix)))
+		HAVE_CDROM = 1
 		WinPartition = desktop
 		MSVC2017CompileFlags = -DWINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP -FS
 		LDFLAGS += -MANIFEST -LTCG:incremental -NXCOMPAT -DYNAMICBASE -DEBUG -OPT:REF -INCREMENTAL:NO -SUBSYSTEM:WINDOWS -MANIFESTUAC:"level='asInvoker' uiAccess='false'" -OPT:ICF -ERRORREPORT:PROMPT -NOLOGO -TLBID:1
