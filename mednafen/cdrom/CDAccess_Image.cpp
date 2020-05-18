@@ -859,7 +859,9 @@ bool CDAccess_Image::ImageOpen(const std::string& path, bool image_memcache)
    NumTracks = 1 + LastTrack - FirstTrack;
 
    int32_t RunningLBA = 0;
+#if 0
    int32_t LastIndex = 0;
+#endif
    long FileOffset = 0;
 
    RunningLBA -= 150;
@@ -911,7 +913,9 @@ bool CDAccess_Image::ImageOpen(const std::string& path, bool image_memcache)
       {
          if(Tracks[x].FirstFileInstance) 
          {
+#if 0
             LastIndex = 0;
+#endif
             FileOffset = 0;
          }
 
