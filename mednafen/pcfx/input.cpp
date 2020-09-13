@@ -22,6 +22,8 @@
 #include "input/gamepad.h"
 #include "input/mouse.h"
 
+#include "../state_helpers.h"
+
 #define PCFX_PORTS	2
 #define TOTAL_PORTS	8
 

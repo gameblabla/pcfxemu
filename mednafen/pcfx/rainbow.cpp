@@ -22,7 +22,9 @@
 #include "king.h"
 #include "interrupt.h"
 #include "jrevdct.h"
+
 #include "../clamp.h"
+#include "../state_helpers.h"
 
 static bool ChromaIP;	// Bilinearly interpolate chroma channel
 

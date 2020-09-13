@@ -17,6 +17,7 @@
 
 #include "pcfx.h"
 #include "interrupt.h"
+#include "../state_helpers.h"
 
 static uint16 InterruptAsserted;
 static uint16 InterruptMask;

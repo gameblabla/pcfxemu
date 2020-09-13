@@ -198,13 +198,13 @@ SOURCES_CXX += \
 	$(MEDNAFEN_DIR)/video/Deinterlacer.cpp \
 	$(MEDNAFEN_DIR)/video/surface.cpp \
 	$(MEDNAFEN_DIR)/Stream.cpp \
-	$(MEDNAFEN_DIR)/state.cpp \
 	$(MEDNAFEN_DIR)/mempatcher.cpp \
 	$(CORE_DIR)/libretro.cpp
 
 SOURCES_C += \
 	$(MEDNAFEN_DIR)/file.c \
 	$(MEDNAFEN_DIR)/mednafen-endian.c \
+	$(MEDNAFEN_DIR)/state.c \
 	$(MEDNAFEN_DIR)/mednafen_md5.c
 endif
 

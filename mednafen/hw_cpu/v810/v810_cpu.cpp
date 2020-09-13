@@ -55,6 +55,8 @@ found freely through public domain sources.
 #include "v810_cpu.h"
 #include "v810_cpuD.h"
 
+#include "../../state_helpers.h"
+
 V810::V810()
 {
  #ifdef WANT_DEBUGGER

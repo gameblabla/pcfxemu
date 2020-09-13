@@ -14,12 +14,12 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-
-#include "mednafen/mednafen.h"
-#include "pce_psg.h"
-
 #include <math.h>
 #include <string.h>
+
+#include "mednafen/mednafen.h"
+#include "mednafen/state_helpers.h"
+#include "pce_psg.h"
 
 // Frequency cache cutoff optimization threshold (<= FREQC7M_COT)
 #define FREQC7M_COT	0x7 //0xA

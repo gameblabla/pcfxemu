@@ -15,16 +15,18 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <math.h>
+#include <string.h>
+
 #include "pcfx.h"
 #include "soundbox.h"
 #include "king.h"
-#include "../cdrom/scsicd.h"
 #include "pce_psg/pce_psg.h"
-#include "../clamp.h"
-#include "../sound/OwlResampler.h"
 
-#include <math.h>
-#include <string.h>
+#include "../cdrom/scsicd.h"
+#include "../sound/OwlResampler.h"
+#include "../clamp.h"
+#include "../state_helpers.h"
 
 static const int StepSizes[49] =
 {

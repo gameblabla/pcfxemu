@@ -33,23 +33,26 @@
 	KRAM mode register is not emulated(I'm not even sure what it does exactly).
 */
 
+#ifdef __MMX__
+#include <mmintrin.h>
+#endif
+
+#include <math.h>
+
 #include "pcfx.h"
 #include "king.h"
-#include "../cdrom/scsicd.h"
 #include "interrupt.h"
 #include "rainbow.h"
 #include "soundbox.h"
 #include "input.h"
 #include "timer.h"
 #include "debug.h"
-#include <math.h>
+#include "../cdrom/scsicd.h"
 #include "../video.h"
 #include "../clamp.h"
+#include "../state_helpers.h"
 #include "../sound/OwlResampler.h"
 
-#ifdef __MMX__
-#include <mmintrin.h>
-#endif
 
 #ifdef _WIN32
 static inline void KINGDBG(const char *format, ...) { (void)0; }

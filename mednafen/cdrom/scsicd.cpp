@@ -28,6 +28,7 @@
 
 #include "../mednafen.h"
 #include "../mednafen-endian.h"
+#include "../state_helpers.h"
 
 static uint32_t CD_DATA_TRANSFER_RATE;
 static uint32_t System_Clock;

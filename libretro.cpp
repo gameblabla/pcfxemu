@@ -1,7 +1,16 @@
 #include	<stdarg.h>
+#include <errno.h>
+#include <string.h>
+#include <math.h>
+
+#ifdef _MSC_VER
+#include <compat/msvc.h>
+#endif
+
 #include <string/stdstring.h>
 #include <retro_timers.h>
 #include <streams/file_stream.h>
+
 #include "mednafen/mednafen.h"
 #include "mednafen/mempatcher.h"
 #include "mednafen/git.h"
@@ -29,14 +38,7 @@
 #include "mednafen/cdrom/cdromif.h"
 #include "mednafen/md5.h"
 #include "mednafen/clamp.h"
-
-#include <errno.h>
-#include <string.h>
-#include <math.h>
-
-#ifdef _MSC_VER
-#include <compat/msvc.h>
-#endif
+#include "mednafen/state_helpers.h"
 
 #include "libretro_core_options.h"
 
@@ -841,7 +843,7 @@ static void DoSimpleCommand(int cmd)
  }
 }
 
-int StateAction(StateMem *sm, int load, int data_only)
+extern "C" int StateAction(StateMem *sm, int load, int data_only)
 {
    const v810_timestamp_t timestamp = PCFX_V810.v810_timestamp;
 

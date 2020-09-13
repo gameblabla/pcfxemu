@@ -20,6 +20,7 @@
 #include "gamepad.h"
 
 #include "../../mednafen-endian.h"
+#include "../../state_helpers.h"
 
 class PCFX_Input_Gamepad : public PCFX_Input_Device
 {

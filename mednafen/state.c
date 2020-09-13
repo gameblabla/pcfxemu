@@ -15,20 +15,20 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <boolean.h>
-
-#include <compat/msvc.h>
-
-#include "mednafen.h"
-#include "driver.h"
-#include "general.h"
-#include "state.h"
+#include <retro_inline.h>
 
 #include "mednafen-endian.h"
+#include "state.h"
 
 #define RLSB 		MDFNSTATE_RLSB	//0x80000000
+
+/* Forward declaration */
+int StateAction(StateMem *sm, int load, int data_only);
 
 int32_t smem_read(StateMem *st, void *buffer, uint32_t len)
 {
@@ -45,7 +45,9 @@ int32_t smem_write(StateMem *st, void *buffer, uint32_t len)
 {
    if ((len + st->loc) > st->malloced)
    {
-      uint32_t newsize = (st->malloced >= 32768) ? st->malloced : (st->initial_malloc ? st->initial_malloc : 32768);
+      uint32_t newsize = (st->malloced >= 32768) 
+         ? st->malloced 
+         : (st->initial_malloc ? st->initial_malloc : 32768);
 
       while(newsize < (len + st->loc))
          newsize *= 2;
@@ -73,9 +75,15 @@ int32_t smem_seek(StateMem *st, uint32_t offset, int whence)
 {
    switch(whence)
    {
-      case SEEK_SET: st->loc = offset; break;
-      case SEEK_END: st->loc = st->len - offset; break;
-      case SEEK_CUR: st->loc += offset; break;
+      case SEEK_SET:
+         st->loc = offset;
+         break;
+      case SEEK_END:
+         st->loc = st->len - offset;
+         break;
+      case SEEK_CUR:
+         st->loc += offset;
+         break;
    }
 
    if(st->loc > st->len)
@@ -115,7 +123,7 @@ int smem_read32le(StateMem *st, uint32_t *b)
    return(4);
 }
 
-static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix = NULL)
+static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix)
 {
    while(sf->size || sf->name)	// Size can sometimes be zero, so also check for the text name.  These two should both be zero only at the end of a struct.
    {
@@ -213,7 +221,7 @@ static int WriteStateChunk(StateMem *st, const char *sname, SFORMAT *sf)
 
    data_start_pos = st->loc;
 
-   if(!SubWrite(st, sf))
+   if(!SubWrite(st, sf, NULL))
       return(0);
 
    end_pos = st->loc;
@@ -236,7 +244,7 @@ static SFORMAT *FindSF(const char *name, SFORMAT *sf)
          continue;
       }
 
-      if (sf->size == (uint32)~0) /* Link to another SFORMAT structure. */
+      if (sf->size == (uint32_t)~0) /* Link to another SFORMAT structure. */
       {
          SFORMAT *temp_sf = FindSF(name, (SFORMAT*)sf->v);
          if (temp_sf)
@@ -244,7 +252,6 @@ static SFORMAT *FindSF(const char *name, SFORMAT *sf)
       }
       else
       {
-         assert(sf->name);
          if (!strcmp(sf->name, name))
             return sf;
       }
@@ -362,13 +369,12 @@ static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)
       }
    } // while(...)
 
-   assert(st->loc == (temp + size));
    return 1;
 }
 
 /* This function is called by the game driver(NES, GB, GBA) to save a state. */
 static int MDFNSS_StateAction_internal(void *st_p, int load,
-      int data_only, SSDescriptor *section)
+      int data_only, struct SSDescriptor *section)
 {
    StateMem *st = (StateMem*)st_p;
 
@@ -429,7 +435,7 @@ static int MDFNSS_StateAction_internal(void *st_p, int load,
 
 int MDFNSS_StateAction(void *st_p, int load, int data_only, SFORMAT *sf, const char *name, bool optional)
 {
-   SSDescriptor love;
+   struct SSDescriptor love;
    StateMem *st      = (StateMem*)st_p;
 
    love.sf           = sf;
@@ -439,7 +445,7 @@ int MDFNSS_StateAction(void *st_p, int load, int data_only, SFORMAT *sf, const c
    return MDFNSS_StateAction_internal(st, load, 0, &love);
 }
 
-int MDFNSS_SaveSM(void *st_p, int, int, const void*, const void*, const void*)
+int MDFNSS_SaveSM(void *st_p, int a, int b, const void *c, const void *d, const void *e)
 {
    uint8_t header[32];
    StateMem *st = (StateMem*)st_p;
@@ -464,7 +470,7 @@ int MDFNSS_SaveSM(void *st_p, int, int, const void*, const void*, const void*)
    return(1);
 }
 
-int MDFNSS_LoadSM(void *st_p, int, int)
+int MDFNSS_LoadSM(void *st_p, int a, int b)
 {
    uint8_t header[32];
    uint32_t stateversion;

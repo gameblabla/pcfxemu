@@ -22,6 +22,8 @@
 #include "interrupt.h"
 #include "timer.h"
 
+#include "../state_helpers.h"
+
 static uint16 control;
 static uint16 period;
 static int32 counter;

@@ -1,7 +1,7 @@
 #ifndef _GIT_H
 #define _GIT_H
 
-#include <string>
+#include <string.h>
 #include <libretro.h>
 
 #include "video.h"
@@ -109,13 +109,6 @@ struct CheatFormatStruct
 {
  const char *FullName;		//"Game Genie", "GameShark", "Pro Action Catplay", etc.
  const char *Description;	// Whatever?
-
- bool (*DecodeCheat)(const std::string& cheat_string, MemoryPatch* patch);	// *patch should be left as initialized by MemoryPatch::MemoryPatch(), unless this is the
-										// second(or third or whatever) part of a multipart cheat.
-										//
-										// Will throw an std::exception(or derivative) on format error.
-										//
-										// Will return true if this is part of a multipart cheat.
 };
 
 struct CheatFormatInfoStruct
@@ -336,7 +329,13 @@ typedef struct
  double mouse_sensitivity;
 } MDFNGI;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 int StateAction(StateMem *sm, int load, int data_only);
+#ifdef __cplusplus
+}
+#endif
 
 extern retro_log_printf_t log_cb;
 
