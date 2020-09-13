@@ -143,20 +143,14 @@ static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix = NULL)
       nameo[0] = slen;
 
       if(slen >= 255)
-      {
-         printf("Warning:  state variable name possibly too long: %s %s %s %d\n", sf->name, name_prefix, nameo, slen);
          slen = 255;
-      }
 
       smem_write(st, nameo, 1 + nameo[0]);
       smem_write32le(st, bytesize);
 
 #ifdef MSB_FIRST
       /* Flip the byte order... */
-      if(sf->flags & MDFNSTATE_BOOL)
-      {
-
-      }
+      if(sf->flags & MDFNSTATE_BOOL) { }
       else if(sf->flags & MDFNSTATE_RLSB64)
          Endian_A64_Swap(sf->v, bytesize / sizeof(uint64_t));
       else if(sf->flags & MDFNSTATE_RLSB32)
@@ -213,14 +207,9 @@ static int WriteStateChunk(StateMem *st, const char *sname, SFORMAT *sf)
    memset(sname_tmp, 0, sizeof(sname_tmp));
    memcpy((char *)sname_tmp, sname, (sname_len < 32) ? sname_len : 32);
 
-#ifndef NDEBUG
-   if(sname_len > 32)
-      printf("Warning: section name is too long: %s\n", sname);
-#endif
-
    smem_write(st, sname_tmp, 32);
 
-   smem_write32le(st, 0);                // We'll come back and write this later.
+   smem_write32le(st, 0); // We'll come back and write this later.
 
    data_start_pos = st->loc;
 
