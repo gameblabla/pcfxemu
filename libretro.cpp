@@ -387,8 +387,7 @@ static void SetRegGroups(void);
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
    V810_Emu_Mode cpu_mode;
-   std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios").c_str());
-   std::string fxscsi_path = MDFN_GetSettingS("pcfx.fxscsi");	// For developers only, so don't make it convenient.
+   std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios"));
    MDFNFILE *BIOSFile      = file_open(biospath.c_str());
 
    if(!BIOSFile)
@@ -433,7 +432,8 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    BIOSFile = NULL;
 
 #if 0
-   if(fxscsi_path != "0" && fxscsi_path != "" && fxscsi_path != "none")
+   const char *fxscsi_path = MDFN_GetSettingS("pcfx.fxscsi");	// For developers only, so don't make it convenient.
+   if(fxscsi_path)
    {
       MDFNFILE *FXSCSIFile;
 

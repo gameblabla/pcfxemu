@@ -190,7 +190,6 @@ endif
 ifneq ($(HAVE_GRIFFIN), 1)
 SOURCES_CXX += \
 	$(MEDNAFEN_DIR)/error.cpp \
-	$(MEDNAFEN_DIR)/settings.cpp \
 	$(MEDNAFEN_DIR)/general.cpp \
 	$(MEDNAFEN_DIR)/FileWrapper.cpp \
 	$(MEDNAFEN_DIR)/FileStream.cpp \
@@ -203,6 +202,7 @@ SOURCES_CXX += \
 
 SOURCES_C += \
 	$(MEDNAFEN_DIR)/file.c \
+	$(MEDNAFEN_DIR)/settings.c \
 	$(MEDNAFEN_DIR)/mednafen-endian.c \
 	$(MEDNAFEN_DIR)/state.c \
 	$(MEDNAFEN_DIR)/mednafen_md5.c

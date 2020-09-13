@@ -15,10 +15,12 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "mednafen.h"
+#include <stdio.h>
 #include <errno.h>
 #include <string.h>
-#include <string>
+
+#include <boolean.h>
+
 #include "settings.h"
 
 int setting_initial_scanline = 0;
@@ -30,12 +32,7 @@ int setting_suppress_channel_reset_clicks = 1;
 int setting_emulate_buggy_codec = 0;
 int setting_rainbow_chromaip = 0;
 
-bool MDFN_SaveSettings(const char *path)
-{
-   return(1);
-}
-
-uint64 MDFN_GetSettingUI(const char *name)
+uint64_t MDFN_GetSettingUI(const char *name)
 {
    if (!strcmp("pcfx.cdspeed", name))
       return 2;
@@ -52,7 +49,7 @@ uint64 MDFN_GetSettingUI(const char *name)
    return 0;
 }
 
-int64 MDFN_GetSettingI(const char *name)
+int64_t MDFN_GetSettingI(const char *name)
 {
    if (!strcmp("pcfx.cpu_emulation", name))
       return 2;
@@ -106,25 +103,13 @@ bool MDFN_GetSettingB(const char *name)
    return 0;
 }
 
-extern std::string retro_base_directory;
-
-std::string MDFN_GetSettingS(const char *name)
+const char *MDFN_GetSettingS(const char *name)
 {
    if (!strcmp("pcfx.bios", name))
-      return std::string("pcfx.rom");
+      return "pcfx.rom";
    if (!strcmp("pcfx.fxscsi", name))
-      return std::string("pcfx.fxscsi");
+      return "pcfx.fxscsi";
    /* FILESYS */
-   if (!strcmp("filesys.path_firmware", name))
-      return retro_base_directory;
-   if (!strcmp("filesys.path_palette", name))
-      return retro_base_directory;
-   if (!strcmp("filesys.path_sav", name))
-      return retro_base_directory;
-   if (!strcmp("filesys.path_state", name))
-      return retro_base_directory;
-   if (!strcmp("filesys.path_cheat", name))
-      return retro_base_directory;
    fprintf(stderr, "unhandled setting S: %s\n", name);
    return 0;
 }
@@ -139,7 +124,7 @@ bool MDFNI_SetSettingB(const char *name, bool value)
    return false;
 }
 
-bool MDFNI_SetSettingUI(const char *name, uint64 value)
+bool MDFNI_SetSettingUI(const char *name, uint64_t value)
 {
    return false;
 }
