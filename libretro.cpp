@@ -692,17 +692,12 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
       et++;
      }
     }
-    mednafen_md5_finish(&md5_gameset, MDFNGameInfo->GameSetMD5);
-    MDFNGameInfo->GameSetMD5Valid = TRUE;
    }
    break;
   }
  } // end: for(unsigned if_disc = 0; if_disc < CDInterfaces->size(); if_disc++)
 
  MDFN_printf(_("CD Layout MD5:   0x%s\n"), mednafen_md5_asciistr(MDFNGameInfo->MD5));
-
- if(MDFNGameInfo->GameSetMD5Valid)
-  MDFN_printf(_("GameSet MD5:     0x%s\n"), mednafen_md5_asciistr(MDFNGameInfo->GameSetMD5));
 }
 
 // PC-FX BIOS will look at all data tracks(not just the first one), in contrast to the PCE CD BIOS, which only looks
@@ -898,12 +893,6 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
 
    return(ret);
 }
-
-static const FileExtensionSpecStruct KnownExtensions[] =
-{
- //{ ".ex", "PC-FX HuEXE" },
- { NULL, NULL }
-};
 
 MDFNGI EmulatedPCFX =
 {
@@ -1285,7 +1274,6 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
 
 static MDFNGI *MDFNI_LoadGame(const char *name)
 {
-	std::vector<FileExtensionSpecStruct> valid_iae;
    MDFNGameInfo = &EmulatedPCFX;
 
    if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".ccd") || !strcasecmp(name + strlen(name) - 4, ".chd") || !strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".m3u")))
