@@ -899,58 +899,6 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
    return(ret);
 }
 
-static const MDFNSetting_EnumList V810Mode_List[] =
-{
- { "fast", (int)V810_EMU_MODE_FAST, "Fast Mode", "Fast mode trades timing accuracy, cache emulation, and executing from hardware registers and RAM not intended for code use for performance."},
- { "accurate", (int)V810_EMU_MODE_ACCURATE, "Accurate Mode", "Increased timing accuracy, though not perfect, along with cache emulation, at the cost of decreased performance.  Additionally, even the pipeline isn't correctly and fully emulated in this mode." },
- { "auto", (int)_V810_EMU_MODE_COUNT, "Auto Mode", "Selects \"fast\" or \"accurate\" automatically based on an internal database.  If the CD image is not recognized, defaults to \"fast\"." },
- { NULL, 0 },
-};
-
-
-static const MDFNSetting_EnumList HDCWidthList[] =
-{
- { "256", 256,	"256 pixels", "This value will cause heavy pixel distortion." },
- { "341", 341,	"341 pixels", "This value will cause moderate pixel distortion." },
- { "1024", 1024, "1024 pixels", "This value will cause no pixel distortion as long as interpolation is enabled on the video output device and the resolution is sufficiently high, but it will use a lot of CPU time." },
- { NULL, 0 },
-};
-
-static MDFNSetting PCFXSettings[] =
-{
-  { "pcfx.input.port1.multitap", MDFNSF_EMU_STATE | MDFNSF_UNTRUSTED_SAFE, "Enable multitap on PC-FX port 1.", "EXPERIMENTAL emulation of the unreleased multitap.  Enables ports 3 4 5.", MDFNST_BOOL, "0", NULL, NULL },
-  { "pcfx.input.port2.multitap", MDFNSF_EMU_STATE | MDFNSF_UNTRUSTED_SAFE, "Enable multitap on PC-FX port 2.", "EXPERIMENTAL emulation of the unreleased multitap.  Enables ports 6 7 8.", MDFNST_BOOL, "0", NULL, NULL },
-
-
-  { "pcfx.mouse_sensitivity", MDFNSF_NOFLAGS, "Mouse sensitivity.", NULL, MDFNST_FLOAT, "1.25", NULL, NULL },
-  { "pcfx.disable_softreset", MDFNSF_NOFLAGS, "When RUN+SEL are pressed simultaneously, disable both buttons temporarily.", NULL, MDFNST_BOOL, "0", NULL, NULL, NULL, FXINPUT_SettingChanged },
-
-  { "pcfx.cpu_emulation", MDFNSF_EMU_STATE | MDFNSF_UNTRUSTED_SAFE, "CPU emulation mode.", NULL, MDFNST_ENUM, "auto", NULL, NULL, NULL, NULL, V810Mode_List },
-  { "pcfx.bios", MDFNSF_EMU_STATE, "Path to the ROM BIOS", NULL, MDFNST_STRING, "pcfx.rom" },
-  { "pcfx.fxscsi", MDFNSF_EMU_STATE, "Path to the FX-SCSI ROM", "Intended for developers only.", MDFNST_STRING, "0" },
-  { "pcfx.disable_bram", MDFNSF_EMU_STATE | MDFNSF_UNTRUSTED_SAFE, "Disable internal and external BRAM.", "It is intended for viewing games' error screens that may be different from simple BRAM full and uninitialized BRAM error screens, though it can cause the game to crash outright.", MDFNST_BOOL, "0" },
-  { "pcfx.cdspeed", MDFNSF_EMU_STATE | MDFNSF_UNTRUSTED_SAFE, "Emulated CD-ROM speed.", "Setting the value higher than 2, the default, will decrease loading times in most games by some degree.", MDFNST_UINT, "2", "2", "10" },
-
-  { "pcfx.nospritelimit", MDFNSF_NOFLAGS, "Remove 16-sprites-per-scanline hardware limit.", NULL, MDFNST_BOOL, "0" },
-  { "pcfx.high_dotclock_width", MDFNSF_NOFLAGS, "Emulated width for 7.16MHz dot-clock mode.", "Lower values are faster, but will cause some degree of pixel distortion.", MDFNST_ENUM, "1024", NULL, NULL, NULL, NULL, HDCWidthList },
-
-  { "pcfx.slstart", MDFNSF_NOFLAGS, "First rendered scanline.", NULL, MDFNST_UINT, "4", "0", "239" },
-  { "pcfx.slend", MDFNSF_NOFLAGS, "Last rendered scanline.", NULL, MDFNST_UINT, "235", "0", "239" },
-
-  { "pcfx.rainbow.chromaip", MDFNSF_NOFLAGS, "Enable bilinear interpolation on the chroma channel of RAINBOW YUV output.", "This is an enhancement-related setting.  Enabling it may cause graphical glitches with some games.", MDFNST_BOOL, "0" },
-
-  { "pcfx.adpcm.suppress_channel_reset_clicks", MDFNSF_NOFLAGS, "Hack to suppress clicks caused by forced channel resets.", NULL, MDFNST_BOOL, "1" },
-
-  // Hack that emulates the codec a buggy ADPCM encoder used for some games' ADPCM.  Not enabled by default because it makes some games(with 
-  //correctly-encoded  ADPCM?) sound worse
-  { "pcfx.adpcm.emulate_buggy_codec", MDFNSF_NOFLAGS, "Hack that emulates the codec a buggy ADPCM encoder used for some games' ADPCM.", NULL, MDFNST_BOOL, "0" },
-
-  { "pcfx.resamp_quality", MDFNSF_NOFLAGS, "Sound quality.", "Higher values correspond to better SNR and better preservation of higher frequencies(\"brightness\"), at the cost of increased computational complexity and a negligible increase in latency.", MDFNST_INT, "3", "0", "5" },
-  { "pcfx.resamp_rate_error", MDFNSF_NOFLAGS, "Output rate tolerance.", "Lower values correspond to better matching of the output rate of the resampler to the actual desired output rate, at the expense of increased RAM usage and poorer CPU cache utilization.", MDFNST_FLOAT, "0.0000009", "0.0000001", "0.0000350" },
-
-  { NULL }
-};
-
 static const FileExtensionSpecStruct KnownExtensions[] =
 {
  //{ ".ex", "PC-FX HuEXE" },
@@ -959,7 +907,6 @@ static const FileExtensionSpecStruct KnownExtensions[] =
 
 MDFNGI EmulatedPCFX =
 {
- PCFXSettings,
  MDFN_MASTERCLOCK_FIXED(PCFX_MASTER_CLOCK),
  0,
  TRUE,  // Multires possible?

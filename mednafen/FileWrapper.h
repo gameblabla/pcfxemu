@@ -3,6 +3,8 @@
 
 #include <streams/file_stream.h>
 
+#include <string>
+
 // A stdio FILE wrapper(with some BSD and POSIXisms, and a little dash of Win32, thrown in for special behaviors)
 class FileWrapper
 {
