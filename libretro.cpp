@@ -2064,16 +2064,3 @@ void MDFN_PrintError(const char *format, ...)
 
    va_end(ap);
 }
-
-void MDFN_DebugPrintReal(const char *file, const int line, const char *format, ...)
-{
-   char *temp;
-   va_list ap;
-
-   va_start(ap, format);
-   temp = (char*)malloc(4096 * sizeof(char));
-   vsnprintf(temp, 4096, format, ap);
-   free(temp);
-
-   va_end(ap);
-}
