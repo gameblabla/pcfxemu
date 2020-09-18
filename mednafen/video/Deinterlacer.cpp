@@ -2,7 +2,6 @@
 #include "../video.h"
 #include "../general.h"
 #include "../state.h"
-#include "../driver.h"
 
 #include "Deinterlacer.h"
 
