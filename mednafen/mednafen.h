@@ -11,6 +11,8 @@
 #include "math_ops.h"
 #include "git.h"
 
+#include "settings.h"
+
 #ifdef _MSC_VER
 #include <compat/msvc.h>
 #endif
@@ -32,8 +34,6 @@
 #define gzseek(a,b,c) fseek(a,b,c)
 
 extern MDFNGI *MDFNGameInfo;
-
-#include "settings.h"
 
 void MDFN_PrintError(const char *format, ...);
 void MDFN_printf(const char *format, ...);

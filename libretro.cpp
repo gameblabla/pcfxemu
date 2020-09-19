@@ -949,7 +949,7 @@ void retro_init(void)
    else 
       log_cb = NULL;
 
-   MDFNI_InitializeModule();
+   CDUtility_Init();
 
    const char *dir = NULL;
 
@@ -963,7 +963,7 @@ void retro_init(void)
 
       retro_base_directory = retro_base_directory.substr(0, last);
 
-      MDFNI_Initialize(retro_base_directory.c_str());
+      return;
    }
    else
    {
@@ -1418,7 +1418,25 @@ bool retro_load_game(const struct retro_game_info *info)
    return game;
 }
 
-void retro_unload_game()
+static void MDFNI_CloseGame(void)
+{
+   if(!MDFNGameInfo)
+      return;
+
+   MDFN_FlushGameCheats(0);
+
+   CloseGame();
+
+   MDFNMP_Kill();
+
+   MDFNGameInfo = NULL;
+
+   for(unsigned i = 0; i < CDInterfaces.size(); i++)
+      delete CDInterfaces[i];
+   CDInterfaces.clear();
+}
+
+void retro_unload_game(void)
 {
    if (!game)
       return;
@@ -1837,30 +1855,12 @@ std::string MDFN_MakeFName(MakeFName_Type type, int id1, const char *cd1)
    return ret;
 }
 
-
-void MDFND_Message(const char *str)
-{
-   if (log_cb)
-      log_cb(RETRO_LOG_INFO, "%s\n", str);
-}
-
 void MDFND_MidSync(const EmulateSpecStruct *)
 {}
 
 void MDFN_MidLineUpdate(EmulateSpecStruct *espec, int y)
 {
  //MDFND_MidLineUpdate(espec, y);
-}
-
-void MDFND_PrintError(const char* err)
-{
-   if (log_cb)
-      log_cb(RETRO_LOG_ERROR, "%s\n", err);
-}
-
-void MDFND_Sleep(unsigned int time)
-{
-   retro_sleep(time);
 }
 
 #ifdef WANT_THREADING
@@ -1949,36 +1949,6 @@ void MDFN_DispMessage(const char *format, ...)
    environ_cb(RETRO_ENVIRONMENT_SET_MESSAGE, &msg);
 }
 
-void MDFNI_CloseGame(void)
-{
-   if(!MDFNGameInfo)
-      return;
-
-   MDFN_FlushGameCheats(0);
-
-   CloseGame();
-
-   MDFNMP_Kill();
-
-   MDFNGameInfo = NULL;
-
-   for(unsigned i = 0; i < CDInterfaces.size(); i++)
-      delete CDInterfaces[i];
-   CDInterfaces.clear();
-}
-
-bool MDFNI_InitializeModule(void)
-{
- CDUtility_Init();
-
- return(1);
-}
-
-int MDFNI_Initialize(const char *basedir)
-{
-	return(1);
-}
-
 static int curindent = 0;
 
 void MDFN_indent(int indent)
@@ -2033,7 +2003,8 @@ void MDFN_printf(const char *format, ...)
    vsnprintf(temp, 4096, format_temp, ap);
    free(format_temp);
 
-   MDFND_Message(temp);
+   if (log_cb)
+      log_cb(RETRO_LOG_INFO, "%s\n", temp);
    free(temp);
 
    va_end(ap);
@@ -2047,7 +2018,8 @@ void MDFN_PrintError(const char *format, ...)
    va_start(ap, format);
    temp = (char*)malloc(4096 * sizeof(char));
    vsnprintf(temp, 4096, format, ap);
-   MDFND_PrintError(temp);
+   if (log_cb)
+      log_cb(RETRO_LOG_ERROR, "%s\n", temp);
    free(temp);
 
    va_end(ap);
