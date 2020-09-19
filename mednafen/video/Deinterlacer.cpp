@@ -1,9 +1,9 @@
 #include "../mednafen.h"
-#include "../video.h"
 #include "../general.h"
 #include "../state.h"
 
 #include "Deinterlacer.h"
+#include "surface.h"
 
 Deinterlacer::Deinterlacer()
 {

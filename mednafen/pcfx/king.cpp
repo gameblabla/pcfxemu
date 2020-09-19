@@ -48,7 +48,6 @@
 #include "timer.h"
 #include "debug.h"
 #include "../cdrom/scsicd.h"
-#include "../video.h"
 #include "../clamp.h"
 #include "../state_helpers.h"
 #include "../sound/OwlResampler.h"

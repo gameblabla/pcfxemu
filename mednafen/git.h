@@ -6,7 +6,7 @@
 
 #include "file.h"
 #include "state.h"
-#include "video.h"
+#include "video/surface.h"
 
 enum
 {

@@ -20,11 +20,11 @@
 #include <math.h>
 
 #include "mednafen/mednafen.h"
-#include "mednafen/video.h"
 #include "mednafen/lepacker.h"
 #include "mednafen/state_helpers.h"
 
 #include "vdc.h"
+#include "../../video/surface.h"
 
 static inline void VDC_DEBUG(const char *fmt, ...)
 {
