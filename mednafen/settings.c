@@ -15,7 +15,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <stdio.h>
 #include <errno.h>
 #include <string.h>
 
@@ -44,8 +43,6 @@ uint64_t MDFN_GetSettingUI(const char *name)
       return setting_high_dotclock_width;
    if (!strcmp("pcfx.resamp_quality", name))
       return setting_resamp_quality;
-
-   fprintf(stderr, "unhandled setting UI: %s\n", name);
    return 0;
 }
 
@@ -53,7 +50,6 @@ int64_t MDFN_GetSettingI(const char *name)
 {
    if (!strcmp("pcfx.cpu_emulation", name))
       return 2;
-   fprintf(stderr, "unhandled setting I: %s\n", name);
    return 0;
 }
 
@@ -63,8 +59,6 @@ double MDFN_GetSettingF(const char *name)
       return 0.0000009;
    if (!strcmp("pcfx.mouse_sensitivity", name))
       return  	1.25; /* TODO - make configurable */
-
-   fprintf(stderr, "unhandled setting F: %s\n", name);
    return 0;
 }
 
@@ -97,7 +91,6 @@ bool MDFN_GetSettingB(const char *name)
    /* FILESYS */
    if (!strcmp("filesys.untrusted_fip_check", name))
       return 0;
-   fprintf(stderr, "unhandled setting B: %s\n", name);
    return 0;
 }
 
@@ -107,22 +100,5 @@ const char *MDFN_GetSettingS(const char *name)
       return "pcfx.rom";
    if (!strcmp("pcfx.fxscsi", name))
       return "pcfx.fxscsi";
-   /* FILESYS */
-   fprintf(stderr, "unhandled setting S: %s\n", name);
    return 0;
-}
-
-bool MDFNI_SetSetting(const char *name, const char *value, bool NetplayOverride)
-{
-   return false;
-}
-
-bool MDFNI_SetSettingB(const char *name, bool value)
-{
-   return false;
-}
-
-bool MDFNI_SetSettingUI(const char *name, uint64_t value)
-{
-   return false;
 }

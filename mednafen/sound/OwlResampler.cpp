@@ -681,8 +681,6 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
  cpuext = 0;
  if (perf_get_cpu_features_cb)
     cpuext = perf_get_cpu_features_cb();
- MDFN_printf("OwlResampler.cpp debug info:\n");
- MDFN_indent(1);
 
  // Get the number of phases required, and adjust ratio.
  {
@@ -884,8 +882,6 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
  assert(debias_corner < (output_rate / 16));
  debias_multiplier = (uint32)(((uint64)1 << 16) * debias_corner / output_rate);
-
- MDFN_indent(-1);
 
  //abort();
 }
