@@ -44,7 +44,7 @@ FileWrapper::FileWrapper(const char *path, const int mode, const char *purpose) 
  {
   ErrnoHolder ene(errno);
 
-  throw(MDFN_Error(ene.Errno(), _("Error opening file %s"), ene.StrError()));
+  throw(MDFN_Error(ene.Errno(), "Error opening file %s", ene.StrError()));
  }
 }
 

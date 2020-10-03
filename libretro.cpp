@@ -404,7 +404,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
       //WantHuC6273 = TRUE;
    }
 
-   MDFN_printf(_("V810 Emulation Mode: %s\n"), (cpu_mode == V810_EMU_MODE_ACCURATE) ? _("Accurate") : _("Fast"));
+   MDFN_printf("V810 Emulation Mode: %s\n", (cpu_mode == V810_EMU_MODE_ACCURATE) ? "Accurate" : "Fast");
    PCFX_V810.Init(cpu_mode, false);
 
    uint32 RAM_Map_Addresses[1] = { 0x00000000 };
@@ -420,13 +420,13 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    if(!BIOSROM)
       return(0);
 
-   if(GET_FSIZE_PTR(BIOSFile) != 1024 * 1024)
+   if(BIOSFile->size != 1024 * 1024)
    {
-      MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
+      MDFN_PrintError("BIOS ROM file is incorrect size.\n");
       return(0);
    }
 
-   memcpy(BIOSROM, GET_FDATA_PTR(BIOSFile), 1024 * 1024);
+   memcpy(BIOSROM, BIOSFile->data, 1024 * 1024);
 
    file_close(BIOSFile);
    BIOSFile = NULL;
@@ -442,20 +442,20 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
       if(!FXSCSIFile)
          return(0);
 
-      if(GET_FSIZE_PTR(FXSCSIFile) != 1024 * 512)
+      if(FXSCSIFile->size != 1024 * 512)
       {
-         MDFN_PrintError(_("BIOS ROM file is incorrect size.\n"));
+         MDFN_PrintError("BIOS ROM file is incorrect size.\n");
          return(0);
       }
 
       uint32 FXSCSI_Map_Addresses[1] = { 0x80780000 };
 
-      if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, _("FX-SCSI ROM"))))
+      if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, "FX-SCSI ROM")))
       {
          return(0);
       }
 
-      memcpy(FXSCSIROM, GET_FDATA_PTR(FXSCSIFile), 1024 * 512);
+      memcpy(FXSCSIROM, FXSCSIFile->data, 1024 * 512);
 
       file_close(FXSCSIFile);
       FXSCSIFile = NULL;
@@ -515,7 +515,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
 
    if(BRAMDisabled)
-      MDFN_printf(_("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n"));
+      MDFN_printf("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n");
 
    if(!BRAMDisabled)
    {
@@ -697,7 +697,7 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
   }
  } // end: for(unsigned if_disc = 0; if_disc < CDInterfaces->size(); if_disc++)
 
- MDFN_printf(_("CD Layout MD5:   0x%s\n"), mednafen_md5_asciistr(MDFNGameInfo->MD5));
+ MDFN_printf("CD Layout MD5:   0x%s\n", mednafen_md5_asciistr(MDFNGameInfo->MD5));
 }
 
 // PC-FX BIOS will look at all data tracks(not just the first one), in contrast to the PCE CD BIOS, which only looks
@@ -740,7 +740,7 @@ static int LoadCD(std::vector<CDIF *> *CDInterfaces)
  if(!LoadCommon(CDInterfaces))
   return(0);
 
- MDFN_printf(_("Emulated CD-ROM drive speed: %ux\n"), (unsigned int)MDFN_GetSettingUI("pcfx.cdspeed"));
+ MDFN_printf("Emulated CD-ROM drive speed: %ux\n", (unsigned int)MDFN_GetSettingUI("pcfx.cdspeed"));
 
  MDFNGameInfo->GameType = GMT_CDROM;
 
@@ -758,16 +758,16 @@ static void PCFX_CDInsertEject(void)
 #if 0
   if(!(*cdifs)[disc]->Eject(CD_TrayOpen))
   {
-   MDFN_DispMessage(_("Eject error."));
+   MDFN_DispMessage("Eject error.");
    CD_TrayOpen = !CD_TrayOpen;
   }
 #endif
  }
 
  if(CD_TrayOpen)
-  MDFN_DispMessage(_("Virtual CD Drive Tray Open"));
+  MDFN_DispMessage("Virtual CD Drive Tray Open");
  else
-  MDFN_DispMessage(_("Virtual CD Drive Tray Closed"));
+  MDFN_DispMessage("Virtual CD Drive Tray Closed");
 
  SCSICD_SetDisc(CD_TrayOpen, (CD_SelectedDisc >= 0 && !CD_TrayOpen) ? (*cdifs)[CD_SelectedDisc] : NULL);
 }
@@ -788,9 +788,9 @@ static void PCFX_CDSelect(void)
    CD_SelectedDisc = -1;
 
   if(CD_SelectedDisc == -1)
-   MDFN_DispMessage(_("Disc absence selected."));
+   MDFN_DispMessage("Disc absence selected.");
   else
-   MDFN_DispMessage(_("Disc %d of %d selected."), CD_SelectedDisc + 1, (int)cdifs->size());
+   MDFN_DispMessage("Disc %d of %d selected.", CD_SelectedDisc + 1, (int)cdifs->size());
  }
 }
 
@@ -1143,13 +1143,13 @@ static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsig
       {
          if(efp == path)
          {
-            MDFN_Error(0, _("M3U at \"%s\" references self."), efp.c_str());
+            MDFN_Error(0, "M3U at \"%s\" references self.", efp.c_str());
             return false;
          }
 
          if(depth == 99)
          {
-            MDFN_Error(0, _("M3U load recursion too deep!"));
+            MDFN_Error(0, "M3U load recursion too deep!");
             return false;
          }
 
@@ -1180,7 +1180,7 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
 {
  uint8 LayoutMD5[16];
 
- MDFN_printf(_("Loading %s...\n"), devicename);
+ MDFN_printf("Loading %s...\n", devicename);
 
   if(devicename && strlen(devicename) > 4 && !strcasecmp(devicename + strlen(devicename) - 4, ".m3u"))
   {
@@ -1209,11 +1209,11 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
 
   CDInterfaces[i]->ReadTOC(&toc);
 
-  MDFN_printf(_("CD %d Layout:\n"), i + 1);
+  MDFN_printf("CD %d Layout:\n", i + 1);
 
   for(int32 track = toc.first_track; track <= toc.last_track; track++)
   {
-   MDFN_printf(_("Track %2d, LBA: %6d  %s\n"), track, toc.tracks[track].lba, (toc.tracks[track].control & 0x4) ? "DATA" : "AUDIO");
+   MDFN_printf("Track %2d, LBA: %6d  %s\n", track, toc.tracks[track].lba, (toc.tracks[track].control & 0x4) ? "DATA" : "AUDIO");
   }
 
   MDFN_printf("Leadout: %6d\n", toc.tracks[100].lba);
@@ -1247,7 +1247,7 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
   mednafen_md5_finish(&layout_md5, LayoutMD5);
  }
 
- MDFN_printf(_("Using module: pcfx\n\n"));
+ MDFN_printf("Using module: pcfx\n\n");
 
  // TODO: include module name in hash
  memcpy(MDFNGameInfo->MD5, LayoutMD5, 16);
