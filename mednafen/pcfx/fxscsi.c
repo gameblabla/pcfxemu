@@ -15,20 +15,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "pcfx.h"
 #include "fxscsi.h"
 
-bool FXSCSI_Init(void)
-{
-   return true;
-}
-
-uint8 FXSCSI_CtrlRead(uint32 A)
-{
-   return 0;
-}
-
-void FXSCSI_CtrlWrite(uint32 A, uint8 V)
-{
-   //printf("FXSCSI Write: %08x %02x\n", A, V);
-}
+bool FXSCSI_Init(void) { return true; }
+uint8 FXSCSI_CtrlRead(uint32 A) { return 0; }
+void FXSCSI_CtrlWrite(uint32 A, uint8 V) { }

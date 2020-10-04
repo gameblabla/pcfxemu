@@ -20,8 +20,7 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(CORE_EMU_DIR)/king.cpp \
 	$(CORE_EMU_DIR)/soundbox.cpp \
 	$(CORE_EMU_DIR)/interrupt.cpp \
-    $(CORE_EMU_DIR)/huc6273.cpp \
-    $(CORE_EMU_DIR)/fxscsi.cpp \
+	$(CORE_EMU_DIR)/huc6273.cpp \
 	$(CORE_EMU_DIR)/input.cpp \
 	$(CORE_EMU_DIR)/timer.cpp \
 	$(CORE_EMU_DIR)/rainbow.cpp \
@@ -34,6 +33,8 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(MEDNAFEN_DIR)/hw_cpu/v810/v810_fp_ops.cpp \
 	$(MEDNAFEN_DIR)/hw_sound/pce_psg/pce_psg.cpp \
 	$(MEDNAFEN_DIR)/hw_video/huc6270/vdc_video.cpp
+SOURCES_C += \
+	$(CORE_EMU_DIR)/fxscsi.c
 endif
 
 ifeq ($(NEED_BLIP), 1)
