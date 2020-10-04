@@ -21,6 +21,7 @@
 
 #include <boolean.h>
 #include <retro_inline.h>
+#include <compat/strl.h>
 
 #include "mednafen-endian.h"
 #include "state.h"
@@ -127,6 +128,10 @@ static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix)
 {
    while(sf->size || sf->name)	// Size can sometimes be zero, so also check for the text name.  These two should both be zero only at the end of a struct.
    {
+      int32_t bytesize;
+      char nameo[1 + 256];
+      int slen;
+
       if(!sf->size || !sf->v)
       {
          sf++;
@@ -142,12 +147,8 @@ static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix)
          continue;
       }
 
-      int32_t bytesize = sf->size;
-
-      char nameo[1 + 256];
-      int slen;
-
-      slen = snprintf(nameo + 1, 256, "%s%s", name_prefix ? name_prefix : "", sf->name);
+      bytesize = sf->size;
+      slen     = snprintf(nameo + 1, 256, "%s%s", name_prefix ? name_prefix : "", sf->name);
       nameo[0] = slen;
 
       if(slen >= 255)
@@ -173,7 +174,8 @@ static bool SubWrite(StateMem *st, SFORMAT *sf, const char *name_prefix)
       // Don't do it if we're only saving the raw data.
       if(sf->flags & MDFNSTATE_BOOL)
       {
-         for(int32_t bool_monster = 0; bool_monster < bytesize; bool_monster++)
+         int32_t bool_monster;
+         for(bool_monster = 0; bool_monster < bytesize; bool_monster++)
          {
             uint8_t tmp_bool = ((bool *)sf->v)[bool_monster];
             //printf("Bool write: %.31s\n", sf->name);
@@ -268,6 +270,7 @@ static void DOReadChunk(StateMem *st, SFORMAT *sf)
    while(sf->size || sf->name)       // Size can sometimes be zero, so also check for the text name.  
       // These two should both be zero only at the end of a struct.
    {
+      int32_t bytesize;
       if(!sf->size || !sf->v)
       {
          sf++;
@@ -281,7 +284,7 @@ static void DOReadChunk(StateMem *st, SFORMAT *sf)
          continue;
       }
 
-      int32_t bytesize = sf->size;
+      bytesize = sf->size;
 
       // Loading raw data, bool types are stored as they appear in memory, not as single bytes in the full state format.
       // In the SFORMAT structure, the size member for bool entries is the number of bool elements, not the total in-memory size,
@@ -300,6 +303,7 @@ static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)
 
    while (st->loc < (temp + size))
    {
+      SFORMAT *tmp;
       uint32_t recorded_size;	// In bytes
       uint8_t toa[1 + 256];	// Don't change to char unless cast toa[0] to unsigned to smem_read() and other places.
 
@@ -319,7 +323,7 @@ static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)
 
       smem_read32le(st, &recorded_size);
 
-      SFORMAT *tmp = FindSF((char*)toa + 1, sf);
+      tmp = FindSF((char*)toa + 1, sf);
 
       if(tmp)
       {
@@ -341,7 +345,8 @@ static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)
             if(tmp->flags & MDFNSTATE_BOOL)
             {
                // Converting downwards is necessary for the case of sizeof(bool) > 1
-               for(int32_t bool_monster = expected_size - 1; bool_monster >= 0; bool_monster--)
+               int32_t bool_monster;
+               for(bool_monster = expected_size - 1; bool_monster >= 0; bool_monster--)
                {
                   ((bool *)tmp->v)[bool_monster] = ((uint8_t *)tmp->v)[bool_monster];
                }
@@ -447,6 +452,7 @@ int MDFNSS_StateAction(void *st_p, int load, int data_only, SFORMAT *sf, const c
 
 int MDFNSS_SaveSM(void *st_p, int a, int b, const void *c, const void *d, const void *e)
 {
+   uint32_t sizy;
    uint8_t header[32];
    StateMem *st = (StateMem*)st_p;
    static const char *header_magic = "MDFNSVST";
@@ -463,7 +469,7 @@ int MDFNSS_SaveSM(void *st_p, int a, int b, const void *c, const void *d, const 
    if(!StateAction(st, 0, 0))
       return(0);
 
-   uint32_t sizy = st->loc;
+   sizy = st->loc;
    smem_seek(st, 16 + 4, SEEK_SET);
    smem_write32le(st, sizy);
 

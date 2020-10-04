@@ -135,8 +135,6 @@ int FXTIMER_StateAction(StateMem *sm, int load, int data_only)
    return(ret);
 }
 
-
-
 bool FXTIMER_GetRegister(const std::string &name, uint32 &value, std::string *special)
 {
    if(name == "TCTRL")
@@ -172,8 +170,7 @@ bool FXTIMER_GetRegister(const std::string &name, uint32 &value, std::string *sp
       }
       return(TRUE);
    }
-   else
-      return(FALSE);
+   return(FALSE);
 }
 
 void FXTIMER_Reset(void)

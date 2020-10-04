@@ -24,7 +24,6 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(CORE_EMU_DIR)/input.cpp \
 	$(CORE_EMU_DIR)/timer.cpp \
 	$(CORE_EMU_DIR)/rainbow.cpp \
-	$(CORE_EMU_DIR)/jrevdct.cpp \
 	$(CORE_EMU_DIR)/input/gamepad.cpp \
 	$(CORE_EMU_DIR)/input/mouse.cpp \
 	$(MEDNAFEN_DIR)/sound/OwlResampler.cpp \
@@ -34,7 +33,8 @@ ifneq ($(HAVE_GRIFFIN),1)
 	$(MEDNAFEN_DIR)/hw_sound/pce_psg/pce_psg.cpp \
 	$(MEDNAFEN_DIR)/hw_video/huc6270/vdc_video.cpp
 SOURCES_C += \
-	$(CORE_EMU_DIR)/fxscsi.c
+	$(CORE_EMU_DIR)/fxscsi.c \
+	$(CORE_EMU_DIR)/jrevdct.c
 endif
 
 ifeq ($(NEED_BLIP), 1)
