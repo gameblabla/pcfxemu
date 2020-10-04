@@ -6,5 +6,5 @@
 *.pdb
 *.exp
 *.manifest
-/old
+/new
 
