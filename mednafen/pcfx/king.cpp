@@ -46,7 +46,6 @@
 #include "soundbox.h"
 #include "input.h"
 #include "timer.h"
-#include "debug.h"
 #include "../cdrom/scsicd.h"
 #include "../clamp.h"
 #include "../state_helpers.h"

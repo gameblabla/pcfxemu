@@ -29,7 +29,6 @@
 #include "mednafen/pcfx/king.h"
 #include "mednafen/pcfx/timer.h"
 #include "mednafen/pcfx/interrupt.h"
-#include "mednafen/pcfx/debug.h"
 #include "mednafen/pcfx/rainbow.h"
 #include "mednafen/pcfx/huc6273.h"
 #include "mednafen/pcfx/fxscsi.h"
