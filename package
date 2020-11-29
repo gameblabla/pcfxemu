@@ -25,6 +25,7 @@ Icon=pcfx
 Terminal=false
 Type=Application
 Categories=emulators;
+MimeType=application/x-cue;
 X-OD-NeedsDownscaling=true' > opk/default."$1".desktop
 
 mksquashfs ./opk pcfxemu_"$1".opk -all-root -noappend -no-exports -no-xattrs
