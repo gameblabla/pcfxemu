@@ -90,7 +90,6 @@ V810 PCFX_V810;
 
 static uint8 *BIOSROM = NULL; 	// 1MB
 static uint8 *RAM = NULL; 	// 2MB
-static uint8 *FXSCSIROM = NULL;	// 512KiB
 
 static uint32 RAM_LPA;		// Last page access
 
@@ -372,8 +371,6 @@ static void VDCB_IRQHook(bool asserted)
  PCFXIRQ_Assert(PCFXIRQ_SOURCE_VDCB, asserted);
 }
 
-static void SetRegGroups(void);
-
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
    std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios"));
@@ -420,37 +417,6 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    file_close(BIOSFile);
    BIOSFile = NULL;
 
-#if 0
-   const char *fxscsi_path = MDFN_GetSettingS("pcfx.fxscsi");	// For developers only, so don't make it convenient.
-   if(fxscsi_path)
-   {
-      MDFNFILE *FXSCSIFile;
-
-      FXSCSIFile = file_open(fxscsi_path);
-
-      if(!FXSCSIFile)
-         return(0);
-
-      if(FXSCSIFile->size != 1024 * 512)
-      {
-         MDFN_PrintError("BIOS ROM file is incorrect size.\n");
-         return(0);
-      }
-
-      uint32 FXSCSI_Map_Addresses[1] = { 0x80780000 };
-
-      if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, "FX-SCSI ROM")))
-      {
-         return(0);
-      }
-
-      memcpy(FXSCSIROM, FXSCSIFile->data, 1024 * 512);
-
-      file_close(FXSCSIFile);
-      FXSCSIFile = NULL;
-   }
-#endif
-
    for(int i = 0; i < 2; i++)
    {
       fx_vdc_chips[i] = new VDC(MDFN_GetSettingB("pcfx.nospritelimit"), 65536);
@@ -485,16 +451,6 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
    SCSICD_SetDisc(true, NULL, true);
    SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
-
-   MDFNGameInfo->fps = (uint32)((double)7159090.90909090 / 455 / 263 * 65536 * 256);
-
-   MDFNGameInfo->nominal_height = MDFN_GetSettingUI("pcfx.slend") - MDFN_GetSettingUI("pcfx.slstart") + 1;
-
-   // Emulation raw framebuffer image should always be of 256 width when the pcfx.high_dotclock_width setting is set to "256",
-   // but it could be either 256 or 341 when the setting is set to "341", so stay with 1024 in that case so we won't have
-   // a messed up aspect ratio in our recorded QuickTime movies.
-   MDFNGameInfo->lcm_width = (MDFN_GetSettingUI("pcfx.high_dotclock_width") == 256) ? 256 : 1024;
-   MDFNGameInfo->lcm_height = MDFNGameInfo->nominal_height;
 
    BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
 
@@ -680,8 +636,6 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
    break;
   }
  } // end: for(unsigned if_disc = 0; if_disc < CDInterfaces->size(); if_disc++)
-
- MDFN_printf("CD Layout MD5:   0x%s\n", mednafen_md5_asciistr(MDFNGameInfo->MD5));
 }
 
 static int LoadCD(std::vector<CDIF *> *CDInterfaces)
@@ -696,8 +650,6 @@ static int LoadCD(std::vector<CDIF *> *CDInterfaces)
   return(0);
 
  printf("Emulated CD-ROM drive speed: %ux\n", (unsigned int)MDFN_GetSettingUI("pcfx.cdspeed"));
-
- MDFNGameInfo->GameType = GMT_CDROM;
 
  PCFX_Power();
 
@@ -849,25 +801,6 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
    return(ret);
 }
 
-MDFNGI EmulatedPCFX =
-{
- MDFN_MASTERCLOCK_FIXED(PCFX_MASTER_CLOCK),
- 0,
- TRUE,  // Multires possible?
-
- 0,   // lcm_width
- 0,   // lcm_height
- NULL,  // Dummy
-
- 288,	// Nominal width
- 240,	// Nominal height
-
- 1024,	// Framebuffer width
- 512,	// Framebuffer height
-
- 2,     // Number of output sound channels
-};
-
 #ifdef NEED_DEINTERLACER
 static bool PrevInterlaced;
 static Deinterlacer deint;
@@ -980,7 +913,7 @@ void MDFN_ResetMessages(void)
  static std::vector<CDIF *> CDInterfaces;	// FIXME: Cleanup on error out.
 // TODO: LoadCommon()
 
-MDFNGI *MDFNI_LoadCD(const char *devicename)
+uint8_t MDFNI_LoadCD(const char *devicename)
 {
  uint8 LayoutMD5[16];
 
@@ -1053,16 +986,11 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
 
  printf("Using module: pcfx\n\n");
 
- // TODO: include module name in hash
- memcpy(MDFNGameInfo->MD5, LayoutMD5, 16);
-
  if(!(LoadCD(&CDInterfaces)))
  {
   for(unsigned i = 0; i < CDInterfaces.size(); i++)
    delete CDInterfaces[i];
   CDInterfaces.clear();
-
-  MDFNGameInfo = NULL;
   return(0);
  }
 
@@ -1070,27 +998,22 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
 
  MDFN_ResetMessages();   // Save state, status messages, etc.
 
- return(MDFNGameInfo);
+ return 0;
 }
 
-static MDFNGI *MDFNI_LoadGame(const char *name)
+static uint8_t MDFNI_LoadGame(const char *name)
 {
-	MDFNGameInfo = &EmulatedPCFX;
 	if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".ccd") || !strcasecmp(name + strlen(name) - 4, ".chd") || !strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".m3u")))
 	{
-		return(MDFNI_LoadCD(name));
+		return (MDFNI_LoadCD(name));
 	}
-	return NULL;
+	return 0;
 }
 
 bool Load_Game_Memory(char* path)
 {
    check_variables();
-   game = MDFNI_LoadGame(path);
-   if (!game)
-   {
-      return false;
-   }
+	MDFNI_LoadGame(path);
 #ifdef NEED_DEINTERLACER
 	PrevInterlaced = false;
 	deint.ClearState();
@@ -1114,17 +1037,12 @@ bool Load_Game_Memory(char* path)
 	
 	KING_SetPixelFormat();
 	SoundBox_SetSoundRate(SOUND_OUTPUT_FREQUENCY);
-	return game;
+	return 1;
 }
 
 static void MDFNI_CloseGame(void)
 {
-   if(!MDFNGameInfo)
-      return;
-
    CloseGame();
-
-   MDFNGameInfo = NULL;
 
    for(unsigned i = 0; i < CDInterfaces.size(); i++)
       delete CDInterfaces[i];
@@ -1162,7 +1080,9 @@ static void update_input(void)
 
 static uint64_t video_frames, audio_frames;
 
-#ifdef FRAMESKIP
+#if defined(FRAMESKIP) || defined(FORCE_FRAMESKIP)
+
+#ifndef FORCE_FRAMESKIP
 static uint32_t Timer_Read(void) 
 {
 	/* Timing. */
@@ -1171,7 +1091,10 @@ static uint32_t Timer_Read(void)
 	return (((tval.tv_sec*1000000) + (tval.tv_usec)));
 }
 static long lastTick = 0, newTick;
-static uint32_t SkipCnt = 0, FPS = MEDNAFEN_CORE_TIMING_FPS, FrameSkip;
+static uint32_t FPS = MEDNAFEN_CORE_TIMING_FPS;
+#endif
+static uint32_t SkipCnt = 0;
+static uint32_t FrameSkip;
 static const uint32_t TblSkip[5][5] = {
     {0, 0, 0, 0, 0},
     {0, 0, 0, 0, 1},
@@ -1363,8 +1286,6 @@ void MDFN_MidLineUpdate(EmulateSpecStruct *espec, int y)
 {
  //MDFND_MidLineUpdate(espec, y);
 }
-
-MDFNGI *MDFNGameInfo = &EmulatedPCFX;
 
 /* forward declarations */
 extern void MDFND_DispMessage(unsigned char *str);
