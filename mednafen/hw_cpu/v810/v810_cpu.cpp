@@ -46,14 +46,13 @@ found freely through public domain sources.
 
 //#include "pcfx.h"
 //#include "debug.h"
-
+#include <stdint.h>
 #include <string.h>
 #include <errno.h>
 #include <algorithm>
 
 #include "v810_opt.h"
 #include "v810_cpu.h"
-#include "v810_cpuD.h"
 
 #include "../../state_helpers.h"
 
@@ -175,15 +174,13 @@ INLINE uint32 V810::CacheOpMemLoad(v810_timestamp_t &timestamp, uint32 A)
 
 void V810::CacheDump(v810_timestamp_t &timestamp, const uint32 SA)
 {
- printf("Cache dump: %08x\n", SA);
-
- for(int i = 0; i < 128; i++)
+ for(uint_fast8_t i = 0; i < 128; i++)
  {
   CacheOpMemStore(timestamp, SA + i * 8 + 0, Cache[i].data[0]);
   CacheOpMemStore(timestamp, SA + i * 8 + 4, Cache[i].data[1]);
  }
 
- for(int i = 0; i < 128; i++)
+ for(uint_fast8_t i = 0; i < 128; i++)
  {
   uint32 icht = Cache[i].tag | ((int)Cache[i].data_valid[0] << 22) | ((int)Cache[i].data_valid[1] << 23);
 
@@ -194,15 +191,13 @@ void V810::CacheDump(v810_timestamp_t &timestamp, const uint32 SA)
 
 void V810::CacheRestore(v810_timestamp_t &timestamp, const uint32 SA)
 {
- printf("Cache restore: %08x\n", SA);
-
- for(int i = 0; i < 128; i++)
+ for(uint_fast8_t i = 0; i < 128; i++)
  {
   Cache[i].data[0] = CacheOpMemLoad(timestamp, SA + i * 8 + 0);
   Cache[i].data[1] = CacheOpMemLoad(timestamp, SA + i * 8 + 4);
  }
 
- for(int i = 0; i < 128; i++)
+ for(uint_fast8_t i = 0; i < 128; i++)
  {
   uint32 icht;
 
@@ -314,9 +309,6 @@ void V810::Reset()
  S_REG[ECR]    =  0x0000FFF0;
  S_REG[PSW]    =  0x00008000;
 
- if(VBMode)
-  S_REG[PIR]	= 0x00005346;
- else
   S_REG[PIR]    =  0x00008100;
 
  S_REG[TKCW]   =  0x000000E0;
@@ -330,29 +322,23 @@ void V810::Reset()
  RecalcIPendingCache();
 }
 
-bool V810::Init(V810_Emu_Mode mode, bool vb_mode)
+bool V810::Init()
 {
- EmuMode = mode;
- VBMode = vb_mode;
+	in_bstr = FALSE;
+	in_bstr_to = 0;
 
- in_bstr = FALSE;
- in_bstr_to = 0;
+	memset(DummyRegion, 0, V810_FAST_MAP_PSIZE);
 
- if(mode == V810_EMU_MODE_FAST)
- {
-  memset(DummyRegion, 0, V810_FAST_MAP_PSIZE);
+	for(unsigned int i = V810_FAST_MAP_PSIZE; i < V810_FAST_MAP_PSIZE + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
+	{
+		DummyRegion[i + 0] = 0;
+		DummyRegion[i + 1] = 0x36 << 2;
+	}
 
-  for(unsigned int i = V810_FAST_MAP_PSIZE; i < V810_FAST_MAP_PSIZE + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
-  {
-   DummyRegion[i + 0] = 0;
-   DummyRegion[i + 1] = 0x36 << 2;
-  }
+	for(uint64 A = 0; A < (1ULL << 32); A += V810_FAST_MAP_PSIZE)
+		FastMap[A / V810_FAST_MAP_PSIZE] = DummyRegion - A;
 
-  for(uint64 A = 0; A < (1ULL << 32); A += V810_FAST_MAP_PSIZE)
-   FastMap[A / V810_FAST_MAP_PSIZE] = DummyRegion - A;
- }
-
- return(TRUE);
+	return(TRUE);
 }
 
 void V810::Kill(void)
@@ -365,7 +351,7 @@ void V810::Kill(void)
 
 void V810::SetInt(int level)
 {
- assert(level >= -1 && level <= 15);
+ //assert(level >= -1 && level <= 15);
 
  ilevel = level;
  RecalcIPendingCache();
@@ -377,9 +363,9 @@ uint8 *V810::SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addr
 
  for(unsigned int i = 0; i < num_addresses; i++)
  {
-  assert((addresses[i] & (V810_FAST_MAP_PSIZE - 1)) == 0);
+  //assert((addresses[i] & (V810_FAST_MAP_PSIZE - 1)) == 0);
  }
- assert((length & (V810_FAST_MAP_PSIZE - 1)) == 0);
+ //assert((length & (V810_FAST_MAP_PSIZE - 1)) == 0);
 
  if(!(ret = (uint8 *)malloc(length + V810_FAST_MAP_TRAMPOLINE_SIZE)))
  {
@@ -512,7 +498,7 @@ INLINE void V810::SetSREG(v810_timestamp_t &timestamp, unsigned int which, uint3
 	switch(which)
 	{
 	 default:	// Reserved
-		printf("LDSR to reserved system register: 0x%02x : 0x%08x\n", which, value);
+		//printf("LDSR to reserved system register: 0x%02x : 0x%08x\n", which, value);
 		break;
 
          case ECR:      // Read-only
@@ -541,7 +527,7 @@ INLINE void V810::SetSREG(v810_timestamp_t &timestamp, unsigned int which, uint3
 
 	 case ADDTRE:
   	        S_REG[ADDTRE] = value & 0xFFFFFFFE;
-        	printf("Address trap(unemulated): %08x\n", value);
+        	//printf("Address trap(unemulated): %08x\n", value);
 		break;
 
 	 case CHCW:
@@ -549,7 +535,7 @@ INLINE void V810::SetSREG(v810_timestamp_t &timestamp, unsigned int which, uint3
 
               	switch(value & 0x31)
               	{
-              	 default: printf("Undefined cache control bit combination: %08x\n", value);
+              	 default: //printf("Undefined cache control bit combination: %08x\n", value);
                           break;
 
               	 case 0x00: break;
@@ -571,10 +557,10 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 {
 	uint32 ret;
 
-	if(which != 24 && which != 25 && which >= 8)
+	/*if(which != 24 && which != 25 && which >= 8)
 	{
 	 printf("STSR from reserved system register: 0x%02x", which);
-        }
+        }*/
 
 	ret = S_REG[which];
 
@@ -584,9 +570,6 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 #define RB_SETPC(new_pc_raw) 										\
 			  {										\
 			   const uint32 new_pc = new_pc_raw;	/* So RB_SETPC(RB_GETPC()) won't mess up */	\
-			   if(RB_AccurateMode)								\
-			    PC = new_pc;								\
-			   else										\
 			   {										\
 			    PC_ptr = &FastMap[(new_pc) >> V810_FAST_MAP_SHIFT][(new_pc)];		\
 			    PC_base = PC_ptr - (new_pc);						\
@@ -594,9 +577,6 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 			  }
 
 #define RB_PCRELCHANGE(delta) { 				\
-				if(RB_AccurateMode)		\
-				 PC += (delta);			\
-				else				\
 				{				\
 				 uint32 PC_tmp = RB_GETPC();	\
 				 PC_tmp += (delta);		\
@@ -604,65 +584,11 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 				}					\
 			      }
 
-#define RB_INCPCBY2()	{ if(RB_AccurateMode) PC += 2; else PC_ptr += 2; }
-#define RB_INCPCBY4()   { if(RB_AccurateMode) PC += 4; else PC_ptr += 4; }
+#define RB_INCPCBY2()	{ PC_ptr += 2; }
+#define RB_INCPCBY4()   { PC_ptr += 4; }
 
-#define RB_DECPCBY2()   { if(RB_AccurateMode) PC -= 2; else PC_ptr -= 2; }
-#define RB_DECPCBY4()   { if(RB_AccurateMode) PC -= 4; else PC_ptr -= 4; }
-
-
-// Define accurate mode defines
-#define RB_GETPC()      PC
-#ifdef _MSC_VER
-#define RB_RDOP(PC_offset) RDOP(timestamp, PC + PC_offset)
-#else
-#define RB_RDOP(PC_offset, ...) RDOP(timestamp, PC + PC_offset, ## __VA_ARGS__)
-#endif
-
-void V810::Run_Accurate(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
-{
- const bool RB_AccurateMode = true;
-
- #define RB_ADDBT(n,o,p)
- #define RB_CPUHOOK(n)
-
- #include "v810_oploop.inc"
-
- #undef RB_CPUHOOK
- #undef RB_ADDBT
-}
-
-#ifdef WANT_DEBUGGER
-
-/* Make sure class member variable v810_timestamp is synchronized to our local copy, since we'll read it externally if a system
-   reset/power occurs when in step mode or similar.
-*/
-#define RB_CPUHOOK_DBG(n) { if(CPUHook) { v810_timestamp = timestamp_rl; CPUHook(timestamp_rl, n); } }
-
-void V810::Run_Accurate_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
-{
- const bool RB_AccurateMode = true;
-
- #define RB_ADDBT(n,o,p) { if(ADDBT) ADDBT(n,o,p); }
- /* Make sure class member variable v810_timestamp is synchronized to our local copy, since we'll read it externally if a system
-    reset/power occurs when in step mode or similar.
- */
- #define RB_CPUHOOK(n) RB_CPUHOOK_DBG(n)
- #define RB_DEBUGMODE
-
- #include "v810_oploop.inc"
-
- #undef RB_DEBUGMODE
- #undef RB_CPUHOOK
- #undef RB_ADDBT
-}
-#endif
-
-//
-// Undefine accurate mode defines
-//
-#undef RB_GETPC
-#undef RB_RDOP
+#define RB_DECPCBY2()   { PC_ptr -= 2; }
+#define RB_DECPCBY4()   { PC_ptr -= 4; }
 
 
 
@@ -679,8 +605,6 @@ void V810::Run_Accurate_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_ti
 
 void V810::Run_Fast(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
 {
- const bool RB_AccurateMode = false;
-
  #define RB_ADDBT(n,o,p)
  #define RB_CPUHOOK(n)
 
@@ -690,23 +614,6 @@ void V810::Run_Fast(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t 
  #undef RB_ADDBT
 }
 
-#ifdef WANT_DEBUGGER
-void V810::Run_Fast_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
-{
- const bool RB_AccurateMode = false;
-
- #define RB_ADDBT(n,o,p) { if(ADDBT) ADDBT(n,o,p); }
- #define RB_CPUHOOK(n) RB_CPUHOOK_DBG(n)
- #define RB_DEBUGMODE
-
- #include "v810_oploop.inc"
-
- #undef RB_DEBUGMODE
- #undef RB_CPUHOOK
- #undef RB_ADDBT
-}
-#endif
-
 //
 // Undefine fast mode defines
 //
@@ -715,25 +622,9 @@ void V810::Run_Fast_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_timest
 
 v810_timestamp_t V810::Run(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
 {
- Running = true;
-
- #ifdef WANT_DEBUGGER
- if(CPUHook || ADDBT)
- {
-  if(EmuMode == V810_EMU_MODE_FAST)
-   Run_Fast_Debug(event_handler);
-  else
-   Run_Accurate_Debug(event_handler);
- }
- else
- #endif
- {
-  if(EmuMode == V810_EMU_MODE_FAST)
+	Running = true;
    Run_Fast(event_handler);
-  else
-   Run_Accurate(event_handler);
- }
- return(v810_timestamp);
+	return(v810_timestamp);
 }
 
 void V810::Exit(void)
@@ -751,28 +642,18 @@ void V810::SetCPUHook(void (*newhook)(const v810_timestamp_t timestamp, uint32 P
 
 uint32 V810::GetPC(void)
 {
- if(EmuMode == V810_EMU_MODE_ACCURATE)
-  return(PC);
- else
- {
   return(PC_ptr - PC_base);
- }
 }
 
 void V810::SetPC(uint32 new_pc)
 {
- if(EmuMode == V810_EMU_MODE_ACCURATE)
-  PC = new_pc;
- else
- {
   PC_ptr = &FastMap[new_pc >> V810_FAST_MAP_SHIFT][new_pc];
   PC_base = PC_ptr - new_pc;
- }
 }
 
 uint32 V810::GetPR(const unsigned int which)
 {
- assert(which <= 0x1F);
+ //assert(which <= 0x1F);
 
 
  return(which ? P_REG[which] : 0);
@@ -780,7 +661,7 @@ uint32 V810::GetPR(const unsigned int which)
 
 void V810::SetPR(const unsigned int which, uint32 value)
 {
- assert(which <= 0x1F);
+ //assert(which <= 0x1F);
 
  if(which)
   P_REG[which] = value;
@@ -788,14 +669,14 @@ void V810::SetPR(const unsigned int which, uint32 value)
 
 uint32 V810::GetSR(const unsigned int which)
 {
- assert(which <= 0x1F);
+ //assert(which <= 0x1F);
 
  return(GetSREG(which));
 }
 
 void V810::SetSR(const unsigned int which, uint32 value)
 {
- assert(which <= 0x1F);
+ //assert(which <= 0x1F);
 
 // SetSREG(timestamp, which, value);
 }
@@ -961,7 +842,7 @@ bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1)
 {
  if((sub_op >= 0x10) || (!(sub_op & 0x8) && sub_op >= 0x4))
  {
-  printf("%08x\tBSR Error: %04x\n", PC,sub_op);
+  //printf("%08x\tBSR Error: %04x\n", PC,sub_op);
 
   SetPC(GetPC() - 2);
   Exception(INVALID_OP_HANDLER_ADDR, ECODE_INVALID_OP);
@@ -1104,10 +985,10 @@ bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1)
 
 	return((bool)P_REG[28]);
  }
- else
+ /*else
  {
   printf("BSTR Search: %02x\n", sub_op);
- }
+ }*/
  return(Do_BSTR_Search(timestamp, ((sub_op & 1) ? -1 : 1), (sub_op & 0x2) >> 1));
 }
 
@@ -1237,47 +1118,6 @@ INLINE void V810::FPU_Math_Template(uint32 (V810_FP_Ops::*func)(uint32, uint32),
 
 void V810::fpu_subop(v810_timestamp_t &timestamp, int sub_op, int arg1, int arg2)
 {
- //printf("FPU: %02x\n", sub_op);
- if(VBMode)
- {
-  switch(sub_op)
-  {
-   case XB: timestamp++;	// Unknown
-	    P_REG[arg1] = (P_REG[arg1] & 0xFFFF0000) | ((P_REG[arg1] & 0xFF) << 8) | ((P_REG[arg1] & 0xFF00) >> 8);
-	    return;
-
-   case XH: timestamp++;	// Unknown
-	    P_REG[arg1] = (P_REG[arg1] << 16) | (P_REG[arg1] >> 16);
-	    return;
-
-   // Does REV use arg1 or arg2 for the source register?
-   case REV: timestamp++;	// Unknown
-		printf("Revvie bits\n");
-	     {
-	      // Public-domain code snippet from: http://graphics.stanford.edu/~seander/bithacks.html#ReverseParallel
-      	      uint32 v = P_REG[arg2]; // 32-bit word to reverse bit order
-
-	      // swap odd and even bits
-	      v = ((v >> 1) & 0x55555555) | ((v & 0x55555555) << 1);
-	      // swap consecutive pairs
-	      v = ((v >> 2) & 0x33333333) | ((v & 0x33333333) << 2);
-	      // swap nibbles ... 
-	      v = ((v >> 4) & 0x0F0F0F0F) | ((v & 0x0F0F0F0F) << 4);
-	      // swap bytes
-	      v = ((v >> 8) & 0x00FF00FF) | ((v & 0x00FF00FF) << 8);
-	      // swap 2-byte long pairs
-	      v = ( v >> 16             ) | ( v               << 16);
-
-	      P_REG[arg1] = v;
-	     }
-	     return;
-
-   case MPYHW: timestamp += 9 - 1;	// Unknown?
-	       P_REG[arg1] = (int32)(int16)(P_REG[arg1] & 0xFFFF) * (int32)(int16)(P_REG[arg2] & 0xFFFF);
-	       return;
-  }
- }
-
  switch(sub_op) 
  {
         // Virtual-Boy specific(probably!)
@@ -1393,7 +1233,7 @@ void V810::Exception(uint32 handler, uint16 eCode)
  }
 #endif
 
-    printf("Exception: %08x %04x\n", handler, eCode);
+    //printf("Exception: %08x %04x\n", handler, eCode);
 
     // Invalidate our bitstring state(forces the instruction to be re-read, and the r/w buffers reloaded).
     in_bstr = FALSE;
@@ -1402,7 +1242,7 @@ void V810::Exception(uint32 handler, uint16 eCode)
 
     if(S_REG[PSW] & PSW_NP) // Fatal exception
     {
-     printf("Fatal exception; Code: %08x, ECR: %08x, PSW: %08x, PC: %08x\n", eCode, S_REG[ECR], S_REG[PSW], PC);
+//printf("Fatal exception; Code: %08x, ECR: %08x, PSW: %08x, PC: %08x\n", eCode, S_REG[ECR], S_REG[PSW], PC);
      Halted = HALT_FATAL_EXCEPTION;
      IPendingCache = 0;
      return;
@@ -1442,48 +1282,6 @@ int V810::StateAction(StateMem *sm, int load, int data_only)
  uint32 *cache_data_temp = NULL;
  bool *cache_data_valid_temp = NULL;
  uint32 PC_tmp = GetPC();
-
- if(EmuMode == V810_EMU_MODE_ACCURATE)
- {
-  cache_tag_temp = (uint32 *)malloc(sizeof(uint32 *) * 128);
-  cache_data_temp = (uint32 *)malloc(sizeof(uint32 *) * 128 * 2);
-  cache_data_valid_temp = (bool *)malloc(sizeof(bool *) * 128 * 2);
-
-  if(!cache_tag_temp || !cache_data_temp || !cache_data_valid_temp)
-  {
-   if(cache_tag_temp)
-    free(cache_tag_temp);
-
-   if(cache_data_temp)
-    free(cache_data_temp);
-
-   if(cache_data_valid_temp)
-    free(cache_data_valid_temp);
-
-   return(0);
-  }
-  if(!load)
-  {
-   for(int i = 0; i < 128; i++)
-   {
-    cache_tag_temp[i] = Cache[i].tag;
-
-    cache_data_temp[i * 2 + 0] = Cache[i].data[0];
-    cache_data_temp[i * 2 + 1] = Cache[i].data[1];
-
-    cache_data_valid_temp[i * 2 + 0] = Cache[i].data_valid[0];
-    cache_data_valid_temp[i * 2 + 1] = Cache[i].data_valid[1];
-   }
-  }
-  else // If we're loading, go ahead and clear the cache temporaries,
-       // in case the save state was saved while in fast mode
-       // and the cache data isn't present and thus won't be loaded.
-  {
-   memset(cache_tag_temp, 0, sizeof(uint32) * 128);
-   memset(cache_data_temp, 0, sizeof(uint32) * 128 * 2);
-   memset(cache_data_valid_temp, 0, sizeof(bool) * 128 * 2);
-  }
- }
 
  int32 next_event_ts_delta = next_event_ts - v810_timestamp;
 
@@ -1527,29 +1325,9 @@ int V810::StateAction(StateMem *sm, int load, int data_only)
   RecalcIPendingCache();
 
   SetPC(PC_tmp);
-  if(EmuMode == V810_EMU_MODE_ACCURATE)
-  {
-   for(int i = 0; i < 128; i++)
-   {
-    Cache[i].tag = cache_tag_temp[i];
-
-    Cache[i].data[0] = cache_data_temp[i * 2 + 0];
-    Cache[i].data[1] = cache_data_temp[i * 2 + 1];
-
-    Cache[i].data_valid[0] = cache_data_valid_temp[i * 2 + 0];
-    Cache[i].data_valid[1] = cache_data_valid_temp[i * 2 + 1];
-
-    //printf("%d %08x %08x %08x %d %d\n", i, Cache[i].tag << 10, Cache[i].data[0], Cache[i].data[1], Cache[i].data_valid[0], Cache[i].data_valid[1]);
-   }
-  }
  }
 
- if(EmuMode == V810_EMU_MODE_ACCURATE)
- {
-  free(cache_tag_temp);
-  free(cache_data_temp);
-  free(cache_data_valid_temp);
- }
+
 
  return(ret);
 }

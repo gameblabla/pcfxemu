@@ -145,7 +145,7 @@ class V810
  ~V810();
 
  // Pass TRUE for vb_mode if we're emulating a VB-specific enhanced V810 CPU core
- bool Init(V810_Emu_Mode mode, bool vb_mode);
+ bool Init();
  void Kill(void);
 
  void SetInt(int level);
@@ -187,10 +187,6 @@ class V810
 
  int StateAction(StateMem *sm, int load, int data_only);
 
- #ifdef WANT_DEBUGGER
- void CheckBreakpoints(void (*callback)(int type, uint32 address, uint32 value, unsigned int len), uint16 MDFN_FASTCALL (*peek16)(const v810_timestamp_t, uint32), uint32 MDFN_FASTCALL (*peek32)(const v810_timestamp_t, uint32));
- void SetCPUHook(void (*newhook)(const v810_timestamp_t timestamp, uint32 PC), void (*new_ADDBT)(uint32, uint32, uint32));
- #endif
  uint32 GetPC(void);
  void SetPC(uint32);
 
@@ -229,17 +225,7 @@ class V810
   LASTOP_HEAVY_MATH = 5
  };
 
- V810_Emu_Mode EmuMode;
- bool VBMode;
-
  void Run_Fast(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
- void Run_Accurate(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
-
- #ifdef WANT_DEBUGGER
- void Run_Fast_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
- void Run_Accurate_Debug(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
- #endif
-
  uint8 MDFN_FASTCALL (*MemRead8)(v810_timestamp_t &timestamp, uint32 A);
  uint16 MDFN_FASTCALL (*MemRead16)(v810_timestamp_t &timestamp, uint32 A);
  uint32 MDFN_FASTCALL (*MemRead32)(v810_timestamp_t &timestamp, uint32 A);
