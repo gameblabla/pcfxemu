@@ -26,6 +26,7 @@
 #include <emmintrin.h>
 #endif
 
+#include "Blip_Buffer.h"
 #include "../mednafen.h"
 #include "../mednafen-endian.h"
 #include "../state_helpers.h"
@@ -34,7 +35,7 @@ static uint32_t CD_DATA_TRANSFER_RATE;
 static uint32_t System_Clock;
 static void (*CDIRQCallback)(int);
 static void (*CDStuffSubchannels)(uint8_t, int);
-static int32_t* HRBufs[2];
+static Blip_Buffer* HRBufs[2];
 static int WhichSystem;
 
 static CDIF *Cur_CDIF;
@@ -2699,8 +2700,8 @@ static INLINE void RunCDDA(uint32_t system_timestamp, int32_t run_time)
 		 CDDA_Filter[1 + synthtime_phase_int + 1][c] * mult_b);
     }
 
-    int32_t* tb0 = &HRBufs[0][synthtime];
-    int32_t* tb1 = &HRBufs[1][synthtime];
+    int16_t* tb0 = (int16_t*)&HRBufs[0][synthtime];
+    int16_t* tb1 = (int16_t*)&HRBufs[1][synthtime];
 
     for(unsigned c = 0; c < CDDA_FILTER_NUMCONVOLUTIONS; c++)
     {
@@ -3087,7 +3088,7 @@ void SCSICD_Close(void)
  }
 }
 
-void SCSICD_Init(int type, int cdda_time_div, int32_t* left_hrbuf, int32_t* right_hrbuf, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int))
+void SCSICD_Init(int type, int cdda_time_div, Blip_Buffer* left_hrbuf, Blip_Buffer* right_hrbuf, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int))
 {
  Cur_CDIF = NULL;
  TrayOpen = true;

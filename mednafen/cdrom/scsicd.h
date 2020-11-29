@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "cdromif.h"
+#include "Blip_Buffer.h"
 
 #include "../state.h"
 
@@ -93,7 +94,7 @@ void SCSICD_GetCDDAValues(int16_t &left, int16_t &right);
 
 void SCSICD_SetLog(void (*logfunc)(const char *, const char *, ...));
 
-void SCSICD_Init(int type, int CDDATimeDiv, int32_t* left_hrbuf, int32_t* right_hrbuf, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int));
+void SCSICD_Init(int type, int CDDATimeDiv, Blip_Buffer* left_hrbuf, Blip_Buffer* right_hrbuf, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int));
 void SCSICD_Close(void);
 
 void SCSICD_SetTransferRate(uint32_t TransferRate);
