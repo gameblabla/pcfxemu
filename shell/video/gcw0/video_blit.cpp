@@ -39,7 +39,7 @@ const uint32_t internal_pitch = 256;
 #endif
 
 /* GCW0 : Triple buffering causes flickering, for some reasons... */
-#define SDL_FLAGS SDL_HWSURFACE | SDL_TRIPLEBUF
+#define SDL_FLAGS SDL_HWSURFACE
 
 #ifdef ENABLE_JOYSTICKCODE
 SDL_Joystick* sdl_joy;
@@ -81,8 +81,6 @@ void Set_Video_Menu()
 void Set_Video_InGame()
 {
 	sdl_screen = SDL_SetVideoMode(256, 240, 16, SDL_FLAGS);
-	
-	internal_pix = (uint16_t*)sdl_screen->pixels;
 
 	SDL_FillRect(sdl_screen, NULL, 0);
 	SDL_Flip(sdl_screen);
@@ -90,6 +88,8 @@ void Set_Video_InGame()
 	SDL_Flip(sdl_screen);
 	SDL_FillRect(sdl_screen, NULL, 0);
 	SDL_Flip(sdl_screen);
+	
+	internal_pix = (uint16_t*)sdl_screen->pixels;
 }
 
 void Video_Close()

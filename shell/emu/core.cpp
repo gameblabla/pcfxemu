@@ -34,7 +34,9 @@
 #include "mednafen/pcfx/timer.h"
 #include "mednafen/pcfx/interrupt.h"
 #include "mednafen/pcfx/rainbow.h"
+#ifdef HAVE_HUC6273
 #include "mednafen/pcfx/huc6273.h"
+#endif
 #include "mednafen/pcfx/fxscsi.h"
 #include "mednafen/cdrom/scsicd.h"
 #include "mednafen/cdrom/cdromif.h"
@@ -98,7 +100,9 @@ static const int RAM_PageNOTMask = ~(RAM_PageSize - 1);
 
 static uint16 Last_VDC_AR[2];
 
+#ifdef HAVE_HUC6273
 static bool WantHuC6273 = FALSE;
+#endif
 
 //static 
 VDC *fx_vdc_chips[2];
@@ -342,10 +346,10 @@ static void PCFX_Reset(void)
  KING_Reset(timestamp);	// SCSICD_Power() is called from KING_Reset()
  SoundBox_Reset(timestamp);
  RAINBOW_Reset();
-
+#ifdef HAVE_HUC6273
  if(WantHuC6273)
   HuC6273_Reset();
-
+#endif
  PCFXIRQ_Reset();
  FXTIMER_Reset();
  PCFX_V810.Reset();
@@ -377,7 +381,6 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    MDFNFILE *BIOSFile      = file_open(biospath.c_str());
 
 	biospath = retro_base_directory + "/pcfx.rom";
-	printf("%s\n", biospath.c_str());
 
    if(!BIOSFile)
    {
@@ -385,10 +388,12 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 		return(0);
    }
 
+   #ifdef HAVE_HUC6273
    if(EmuFlags & CDGE_FLAG_FXGA)
    {
       //WantHuC6273 = TRUE;
    }
+   #endif
 
    PCFX_V810.Init();
 
@@ -462,8 +467,10 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    FXINPUT_Init();
    FXTIMER_Init();
 
+   #ifdef HAVE_HUC6273
    if(WantHuC6273)
       HuC6273_Init();
+   #endif
 
    if(!KING_Init())
    {
@@ -492,8 +499,8 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
    BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
 
-   if(BRAMDisabled)
-      MDFN_printf("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n");
+   /*if(BRAMDisabled)
+      MDFN_printf("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n");*/
 
    if(!BRAMDisabled)
    {
@@ -964,7 +971,7 @@ void MDFND_DispMessage(unsigned char *str)
 {
    /*if (log_cb)
       log_cb(RETRO_LOG_INFO, "%s\n", str);*/
-    printf("%s\n", str);
+    //printf("%s\n", str);
 }
 
 void MDFN_ResetMessages(void)
@@ -1057,7 +1064,6 @@ MDFNGI *MDFNI_LoadCD(const char *devicename)
   CDInterfaces.clear();
 
   MDFNGameInfo = NULL;
-  printf("Can't LoadCD\n");
   return(0);
  }
 
@@ -1084,7 +1090,6 @@ bool Load_Game_Memory(char* path)
    game = MDFNI_LoadGame(path);
    if (!game)
    {
-	   printf("Can't load game\n");
       return false;
    }
 #ifdef NEED_DEINTERLACER
@@ -1475,7 +1480,6 @@ int main(int argc, char* argv[])
 	
 	Emu_Init();
 	isloaded = Load_Game_Memory(argv[1]);
-	printf("isloaded %d\n", isloaded);
 	if (!isloaded)
 	{
 		printf("Could not load ROM in memory\n");

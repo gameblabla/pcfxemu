@@ -19,6 +19,8 @@
 ** 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#ifdef HAVE_CHD
+
 #include <mednafen/mednafen.h>
 #include <mednafen/general.h>
 #include <mednafen/mednafen-endian.h>
@@ -544,3 +546,4 @@ bool CDAccess_CHD::Read_TOC(TOC *toc)
   *toc = this->toc;
   return true;
 }
+#endif

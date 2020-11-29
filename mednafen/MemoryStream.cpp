@@ -149,7 +149,7 @@ void MemoryStream::write(const void *data, uint64 count)
 
 void MemoryStream::seek(int64 offset, int whence)
 {
- int64 new_position;
+ int64 new_position = 0;
 
  switch(whence)
  {

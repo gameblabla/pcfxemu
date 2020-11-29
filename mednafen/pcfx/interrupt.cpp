@@ -14,7 +14,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
-
+#include <cstdio>
 #include "pcfx.h"
 #include "interrupt.h"
 #include "../state_helpers.h"
@@ -95,7 +95,7 @@ void PCFXIRQ_Write16(uint32 A, uint16 V)
    switch(A & 0xC0)
    {
       case 0x00:
-         puts("Address error clear");
+//         puts("Address error clear");
          break;
       case 0x40:
          InterruptMask = V & 0x7F;
