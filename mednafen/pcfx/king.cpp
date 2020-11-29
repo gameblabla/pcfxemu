@@ -103,8 +103,6 @@ typedef struct
  bool in_hblank;	/* TRUE if we're in H-blank */
  bool in_vdc_hsync;
 
- bool frame_interlaced;
-
  uint16 picture_mode;
 
  bool dot_clock;	 // Cached from picture_mode in hblank
@@ -1569,7 +1567,6 @@ uint16 KING_GetADPCMHalfWord(int ch)
  return(ret);
 }
 
-static uint32 HighDotClockWidth;
 extern Blip_Buffer FXsbuf[2];
 
 bool KING_Init(void)
@@ -1579,7 +1576,6 @@ bool KING_Init(void)
 
  king->lastts = 0;
 
- HighDotClockWidth = MDFN_GetSettingUI("pcfx.high_dotclock_width");
  BGLayerDisable = 0;
 
  BuildCMT();
@@ -2301,16 +2297,6 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
 
  DisplayRect->y = MDFN_GetSettingUI("pcfx.slstart");
  DisplayRect->h = MDFN_GetSettingUI("pcfx.slend") - DisplayRect->y + 1;
-
- if(fx_vce.frame_interlaced)
- {
-  skip = false;
-
-  espec->InterlaceOn = true;
-  espec->InterlaceField = fx_vce.odd_field;
-  DisplayRect->y *= 2;
-  DisplayRect->h *= 2;
- }
 }
 
 static int rb_type;
@@ -2587,11 +2573,7 @@ static void MixLayers(void)
 
     uint16 *target;
     uint32 BPC_Cache = (LAYER_NONE << 28); // Backmost pixel color(cache)
-
-    if(fx_vce.frame_interlaced)
-     target = pXBuf + internal_pitch * ((fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field);
-    else
-     target = pXBuf + internal_pitch * (fx_vce.raster_counter - 22);
+	target = pXBuf + internal_pitch * (fx_vce.raster_counter - 22);
     
 
     // If at least one layer is enabled with the HuC6261, hindmost color is palette[0]
@@ -2762,14 +2744,11 @@ static void MixLayers(void)
 	#include "king_mix_body.inc"
 	#undef YUV888_TO_xxx
 
-    DisplayRect->w = fx_vce.dot_clock ? HighDotClockWidth : 256;
+    DisplayRect->w = 256;
     DisplayRect->x = 0;
 
 	// FIXME
-	if(fx_vce.frame_interlaced)
-		LineWidths[(fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field] = DisplayRect->w;
-	else
-		LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
+	LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
 }
 
 static INLINE void RunVDCs(const int master_cycles, uint16 *pixels0, uint16 *pixels1)
@@ -2869,16 +2848,6 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 
 			if(!fx_vce.raster_counter)
 			{
-			 bool previous_interlaced = fx_vce.frame_interlaced;
-
-			 fx_vce.frame_interlaced = fx_vce.picture_mode & 2;
-
-			 if(fx_vce.frame_interlaced && previous_interlaced)
-			  fx_vce.odd_field ^= 1;
-
-			 if(!fx_vce.frame_interlaced)
-			  fx_vce.odd_field = 0;
-
 			 PCFX_V810.Exit();
 			}
 
