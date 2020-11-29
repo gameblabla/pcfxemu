@@ -37,7 +37,6 @@
 #ifdef HAVE_HUC6273
 #include "mednafen/pcfx/huc6273.h"
 #endif
-#include "mednafen/pcfx/fxscsi.h"
 #include "mednafen/cdrom/scsicd.h"
 #include "mednafen/cdrom/cdromif.h"
 #include "mednafen/md5.h"

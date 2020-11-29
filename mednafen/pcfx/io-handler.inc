@@ -4,11 +4,7 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
 {
  if(A <= 0x0FF)
   return(FXINPUT_Read8(A, timestamp));
- else if(A >= 0x100 && A <= 0x1FF) // SOUNDBOX dummy
- {
-  timestamp += 4;
- }
- else if(A >= 0x200 && A <= 0x2FF) // RAINBOW dummy
+ else if(A >= 0x100 && A <= 0x2FF) // SOUNDBOX dummy
  {
   timestamp += 4;
  }
@@ -60,14 +56,6 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
    return(HuC6273_Read8(A));
  }
  #endif
- else if(FXSCSIROM && A >= 0x780000 && A <= 0x7FFFFF)
- {
-  return(FXSCSIROM[A & 0x7FFFF]);
- }
- else if(FXSCSIROM && A >= 0x600000 && A <= 0x6FFFFF)
- {
-  return(FXSCSI_CtrlRead(A));
- }
  FXDBG("Unknown 8-bit port read: %08x", A);
 
  return(0x00);
@@ -77,18 +65,13 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
 {
  if(A <= 0x0FF)
   return(FXINPUT_Read16(A, timestamp));
- else if(A >= 0x100 && A <= 0x1FF) // SOUNDBOX dummy
+ else if(A >= 0x100 && A <= 0x3FF) // SOUNDBOX dummy
  {
   timestamp += 4;
- }
- else if(A >= 0x200 && A <= 0x2FF) // RAINBOW dummy
- {
-  timestamp += 4;
- }
- else if(A >= 0x300 && A <= 0x3FF)
- {
-  timestamp += 4;
-  return(FXVCE_Read16(A));
+  if(A >= 0x300)
+  {
+	return(FXVCE_Read16(A));
+  }
  }
  else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
  {
@@ -130,16 +113,6 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
    return(HuC6273_Read16(A));
  }
  #endif
- else if(FXSCSIROM && A >= 0x780000 && A <= 0x7FFFFF)
- {
-  return(le16toh(*(uint16*)&FXSCSIROM[A & 0x7FFFF]));
- }
- else if(FXSCSIROM && A >= 0x600000 && A <= 0x6FFFFF)
- {
-  puts("FXSCSI 16-bit:");
-  return(FXSCSI_CtrlRead(A));
- }
-
  FXDBG("Unknown 16-bit port read: %08x", A);
 
  return(0x00);
@@ -209,14 +182,6 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t &timestamp, uint32 A, uint
     HuC6273_Write16(A, V);
   }
   #endif
-  else if(FXSCSIROM && A >= 0x600000 && A <= 0x6FFFFF)
-  {
-   FXSCSI_CtrlWrite(A, V);
-  }
-  else
-  {
-   FXDBG("Port 8-bit write: %08x %02x", A, V);
-  }
 }
 
 static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uint16 V)
@@ -257,10 +222,6 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uin
    ExBusReset = V & 1;
    FXDBG("ExBusReset H Write: %04x", V);
   }
-  else if(A >= 0x800 && A <= 0x8FF) // ?? LIP writes here
-  {
-   FXDBG("Port 16-bit write: %08x %04x", A, V);
-  }
   else if(A >= 0xc00 && A <= 0xCFF)
   {
    switch(A & 0xC0)
@@ -287,14 +248,5 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uin
     HuC6273_Write16(A, V);
   }
   #endif
-  else if(FXSCSIROM && A >= 0x600000 && A <= 0x6FFFFF)
-  {
-   puts("FXSCSI 16-bit:");
-   FXSCSI_CtrlWrite(A, V);
-  }
-  else
-  {
-   FXDBG("Port 16-bit write: %08x %04x", A, V);
-  }
 }
 

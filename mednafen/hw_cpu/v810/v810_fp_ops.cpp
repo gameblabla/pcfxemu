@@ -171,31 +171,13 @@ uint32 V810_FP_Ops::fpim_encode(fpim* df)
  else if(tmp_exp <= -127)
  {
   exception_flags |= flag_underflow | flag_inexact;
-  //printf("Subnormal: %lld. %d\n", tmp_walrus, tmp_exp);
-  if(1)
-  {
    tmp_exp = -127;
    tmp_walrus = 0;
-  }
-  else
-  {
-   tmp_walrus >>= -(tmp_exp + 126);
-   tmp_exp = -127;
-  }
  }
  else if(tmp_exp >= 128)
  {
   exception_flags |= flag_overflow;
-  //printf("Overflow!\n");
-
-  if(1)
    tmp_exp -= 192;
-  else
-  {
-   tmp_exp = 128;
-   tmp_walrus = 0;
-  }
-
  }
  return (tmp_sign << 31) | ((tmp_exp + 127) << 23) | (tmp_walrus & 0x7FFFFF);
 }

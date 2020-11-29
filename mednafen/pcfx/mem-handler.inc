@@ -8,8 +8,6 @@ uint8 MDFN_FASTCALL mem_peekbyte(const v810_timestamp_t timestamp, const uint32 
   return(0xFF);
  else if(A >= 0xF0000000)
   return(BIOSROM[A & 0xFFFFF]);
- else if(FXSCSIROM && A >= 0x80780000 && A <= 0x807FFFFF)
-  return(FXSCSIROM[A & 0x7FFFF]);
  return(0xFF);
 }
 
@@ -21,8 +19,6 @@ uint16 MDFN_FASTCALL mem_peekhword(const v810_timestamp_t timestamp, const uint3
   return(0xFFFF);
  else if(A >= 0xF0000000)
   return(le16toh(*(uint16 *)&BIOSROM[A & 0xFFFFF]));
- else if(FXSCSIROM && A >= 0x80780000 && A <= 0x807FFFFF)
-  return(le16toh(*(uint16*)&FXSCSIROM[A & 0x7FFFF]));
  return(0xFFFF);
 }
 
