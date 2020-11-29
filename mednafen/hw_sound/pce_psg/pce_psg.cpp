@@ -300,7 +300,7 @@ PCE_PSG::PCE_PSG(Blip_Buffer *bb_l, Blip_Buffer *bb_r, int want_revision)
 	SoundEnabled = (sbuf[0] && sbuf[1]);
 
 	lastts = 0;
-	for(int ch = 0; ch < 6; ch++)
+	for(uint_fast8_t ch = 0; ch < 6; ch++)
 	{
 	 channel[ch].blip_prev_samp[0] = 0;
 	 channel[ch].blip_prev_samp[1] = 0;

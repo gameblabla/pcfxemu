@@ -193,8 +193,6 @@ class V810
  void SetPR(const unsigned int which, uint32 value);
 
  uint32 GetSR(const unsigned int which);
- void SetSR(const unsigned int which, uint32 value);
-
 
  private:
 
@@ -288,14 +286,7 @@ class V810
  bool have_src_cache, have_dst_cache;
 
  uint8 *FastMap[(1ULL << 32) / V810_FAST_MAP_PSIZE];
- std::vector<void *> FastMapAllocList;
-
-
- #ifdef WANT_DEBUGGER
- void (*CPUHook)(const v810_timestamp_t timestamp, uint32 PC);
- void (*ADDBT)(uint32 old_PC, uint32 new_PC, uint32);
- #endif
-
+ uint8 *FastMapAllocList;
 
  // For CacheDump and CacheRestore
  void CacheOpMemStore(v810_timestamp_t &timestamp, uint32 A, uint32 V);

@@ -303,7 +303,7 @@ static INLINE void RebuildLayerPrioCache(void)
 
  for(unsigned int i = 1; i < (1 + 8); i++)
  {
-  for(int n = 0; n < 4; n++)
+  for(uint_fast8_t n = 0; n < 4; n++)
   {
    if(vr->LayerPriority[LAYER_BG0 + n] == i && !Done[LAYER_BG0 + n])
    {
@@ -348,11 +348,11 @@ static void DoHBlankVCECaching(void)
  fx_vce.dot_clock = (bool)(fx_vce.picture_mode & 0x08);
  fx_vce.dot_clock_ratio = (fx_vce.picture_mode & 0x08) ? 3 : 4;
 
- for(int i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
   dest->priority[i] = source->priority[i];
  
 
- for(int i = 0; i < 4; i++)
+ for(uint_fast8_t i = 0; i < 4; i++)
   dest->palette_offset[i] = source->palette_offset[i];
 
  dest->ChromaKeyY = source->ChromaKeyY;
@@ -363,7 +363,7 @@ static void DoHBlankVCECaching(void)
  dest->BLE = source->BLE;
  dest->SPBL = source->SPBL;
 
- for(int i = 0; i < 6; i++)
+ for(uint_fast8_t i = 0; i < 6; i++)
   dest->coefficients[i] = source->coefficients[i];
 
  RebuildLayerPrioCache();
@@ -784,7 +784,7 @@ static int32 CalcNextExternalEvent(int32 next_event)
 
  //printf("KING: %d %d %d; %d\n", king->dma_cycle_counter, scsicd_ne, HPhaseCounter, next_event);
 
- for(int chip = 0; chip < 2; chip++)
+ for(uint_fast8_t chip = 0; chip < 2; chip++)
  {
   int fwoom = (fx_vce.vdc_event[chip] * fx_vce.dot_clock_ratio - fx_vce.clock_divider);
 
@@ -1476,7 +1476,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 		case 0x50: 
 			   if(!msh)
 			   {
-			    for(int ch = 0; ch < 2; ch++)
+			    for(uint_fast8_t ch = 0; ch < 2; ch++)
 			    {
 			     if(!(king->ADPCMControl & (1 << ch)) && (V & (1 << ch)))
 			     { 
@@ -1587,9 +1587,9 @@ bool KING_Init(void)
  // This multi-dimensional array has no concept of bg, vdc, rainbow, or their orders per-se, it just
  // contains priority information for 3 different layers.
 
- for(int bg_prio = 0; bg_prio < 8; bg_prio++)
-  for(int vdc_prio = 0; vdc_prio < 8; vdc_prio++)
-   for(int rainbow_prio = 0; rainbow_prio < 8; rainbow_prio++)
+ for(uint_fast8_t bg_prio = 0; bg_prio < 8; bg_prio++)
+  for(uint_fast8_t vdc_prio = 0; vdc_prio < 8; vdc_prio++)
+   for(uint_fast8_t rainbow_prio = 0; rainbow_prio < 8; rainbow_prio++)
    {
     int bg_prio_test = bg_prio ? bg_prio : 0x10;
     int vdc_prio_test = vdc_prio ? vdc_prio : 0x10;
@@ -1685,7 +1685,7 @@ void KING_Reset(const v810_timestamp_t timestamp)
 
  RedoKINGIRQCheck();
 
- for(unsigned int x = 0; x < 0x200; x++)
+ for(uint_fast16_t x = 0; x < 0x200; x++)
   RedoPaletteCache(x);
 
  DoHBlankVCECaching();
@@ -1883,7 +1883,7 @@ static void DrawBG(uint32 *target, int n, bool sub)
   int remap_thing = 0;
   int remap_sub_thing = 0;
 
-  for(int x = 0; x < 8; x++)
+  for(uint_fast8_t x = 0; x < 8; x++)
   {
    uint16 mpd;
 
@@ -1922,7 +1922,7 @@ static void DrawBG(uint32 *target, int n, bool sub)
    }
   }
 
-  for(int x = 0; x < 8; x++)
+  for(uint_fast8_t x = 0; x < 8; x++)
   {
    uint16 mpd;
 
@@ -1977,7 +1977,7 @@ static void DrawBG(uint32 *target, int n, bool sub)
          yaccum += (int16)king->BGAffinCenterY << 8;	\
 
   #define ROTCODE_LOOP_PRE	\
-         for(int x = 0; x < 256; x++)	\
+         for(uint_fast16_t x = 0; x < 256; x++)	\
          {	\
           uint16 new_x = (xaccum >> 8);	\
           uint16 new_y = (yaccum >> 8);	\
@@ -2088,7 +2088,7 @@ static void DrawBG(uint32 *target, int n, bool sub)
   else switch(bgmode & 0x7)
   {
 #define DRAWBG8x1_MAC(cg_needed, blit_suffix, pbn_arg)	\
-			 for(int x = 0; x < 256 + 8; x+= 8)     	\
+			 for(uint_fast16_t x = 0; x < 256 + 8; x+= 8)     	\
                          {                                      	\
                           if(bat_x < bat_width && bat_y < bat_height)	\
                           {                                     	\
@@ -2202,9 +2202,9 @@ static uint32 CbCrLUT[65536];
 
 static void RebuildUVLUT(void)
 {
- for(int ur = 0; ur < 256; ur++)
+ for(uint_fast16_t ur = 0; ur < 256; ur++)
  {
-  for(int vr = 0; vr < 256; vr++)
+  for(uint_fast16_t vr = 0; vr < 256; vr++)
   {
    int r, g, b;
    int u, v;
@@ -2227,7 +2227,7 @@ static void RebuildUVLUT(void)
    //printf("%d %d %d, %08x\n", r, g, b, CbCrLUT[vr + ur * 256]);
   }
  }
- for(int x = 0; x < 1152; x++)
+ for(uint_fast16_t x = 0; x < 1152; x++)
  {
   if(x < 384) RGBDeflower[x] = 0;
   else if(x > (384 + 255)) RGBDeflower[x] = 255;
@@ -2373,7 +2373,7 @@ static void DrawActive(void)
      if((fx_vce.ChromaKeyY | fx_vce.ChromaKeyU | fx_vce.ChromaKeyV) == 0)
      {
       //puts("Opt: 0 chroma key");
-      for(int x = 0; x < 256; x++)
+      for(uint_fast16_t x = 0; x < 256; x++)
       {
        if(!(rainbow_linebuffer[x] & 0xFFFFFF))
         rainbow_linebuffer[x] = 0;
@@ -2385,7 +2385,7 @@ static void DrawActive(void)
 
       //puts("Opt: Single color chroma key");
 
-      for(int x = 0; x < 256; x++)
+      for(uint_fast16_t x = 0; x < 256; x++)
       {
        if((rainbow_linebuffer[x] & 0xFFFFFF) == compare_color)
         rainbow_linebuffer[x] = 0;
@@ -2398,7 +2398,7 @@ static void DrawActive(void)
       const uint32 yv_max_add = ((0xFF - ymax) << 16) | (0xFF - vmax);
       const uint32 u_max_add = (0xFF - umax) << 8;
 
-      for(int x = 0; x < 256; x++)
+      for(uint_fast16_t x = 0; x < 256; x++)
       {
        const uint32 pixel = rainbow_linebuffer[x];
        const uint32 yv = pixel & 0xFF00FF;
@@ -2412,10 +2412,10 @@ static void DrawActive(void)
         rainbow_linebuffer[x] = 0;
       }
      }
-     else
+     /*else
      {
       //puts("Opt: color keying off\n");
-     }
+     }*/
     }
    }
 
@@ -2430,9 +2430,9 @@ static void DrawActive(void)
     // Only bother to draw the BGs if the microprogram is enabled.
    if(king->MPROGControl & 0x1)
    {
-    for(int prio = 1; prio <= 7; prio++)
+    for(uint_fast8_t prio = 1; prio <= 7; prio++)
     {
-     for(int x = 0; x < 4; x++)
+     for(uint_fast8_t x = 0; x < 4; x++)
      {
       int thisprio = (king->priority >> (x * 3)) & 0x7;
 
@@ -2465,9 +2465,9 @@ static INLINE void VDC_PIXELMIX(bool SPRCOMBO_ON, bool BGCOMBO_ON)
                                 (((uint32)fx_vce.palette_offset[0] >> 8) & 0xFF) << 1 // SPR
                                };
 
-    const int width = fx_vce.dot_clock ? 342 : 256; // 342, not 341, to prevent garbage pixels in high dot clock mode.
+    const int width = 256; // 342, not 341, to prevent garbage pixels in high dot clock mode.
 
-    for(int x = 0; x < width; x++)
+    for(uint_fast16_t x = 0; x < width; x++)
     {
      const uint32 zort[2] = { vdc_linebuffers[0][x], vdc_linebuffers[1][x] };
      uint32 tmp_pixel;
@@ -2518,7 +2518,7 @@ static void MixLayers(void)
     uint32 ble_cache[8];
     bool ble_cache_any = FALSE;
 
-    for(int n = 0; n < 8; n++)
+    for(uint_fast8_t n = 0; n < 8; n++)
     {
      priority_remap[n] = vce_rendercache.LayerPriority[n];
      //printf("%d: %d\n", n, priority_remap[n]);
@@ -2529,14 +2529,14 @@ static void MixLayers(void)
      priority_remap[LAYER_RAINBOW] = 0;
 
     ble_cache[LAYER_NONE] = 0;
-    for(int x = 0; x < 4; x++)
+    for(uint_fast8_t x = 0; x < 4; x++)
      ble_cache[LAYER_BG0 + x] = (vce_rendercache.BLE >> (4 + x * 2)) & 0x3;
 
     ble_cache[LAYER_VDC_BG] = (vce_rendercache.BLE >> 0) & 0x3;
     ble_cache[LAYER_VDC_SPR] = (vce_rendercache.BLE >> 2) & 0x3;
     ble_cache[LAYER_RAINBOW] = (vce_rendercache.BLE >> 12) & 0x3;
 
-    for(int x = 0; x < 8; x++)
+    for(uint_fast8_t x = 0; x < 8; x++)
      if(ble_cache[x])
      {
       ble_cache_any = TRUE;
@@ -2548,7 +2548,7 @@ static void MixLayers(void)
     uint8 *coeff_cache_y_fore[3];
     int8 *coeff_cache_u_fore[3], *coeff_cache_v_fore[3];
 
-    for(int x = 0; x < 3; x++)
+    for(uint_fast8_t x = 0; x < 3; x++)
     {
      coeff_cache_y_fore[x] = vce_rendercache.coefficient_mul_table_y[(vce_rendercache.coefficients[x * 2 + 0] >> 8) & 0xF];
      coeff_cache_u_fore[x] = vce_rendercache.coefficient_mul_table_uv[(vce_rendercache.coefficients[x * 2 + 0] >> 4) & 0xF];
@@ -2817,7 +2817,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			fx_vce.in_hblank = true;
                         fx_vce.in_vdc_hsync = true;
 
-                        for(int chip = 0; chip < 2; chip++)
+                        for(uint_fast8_t chip = 0; chip < 2; chip++)
                          vdc_chips[chip]->HSync(true);
 
 			HPhaseCounter += 48;
@@ -2827,11 +2827,11 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			fx_vce.raster_counter = (fx_vce.raster_counter + 1) % ((fx_vce.picture_mode & 0x1) ? 262 : 263); //lines_per_frame;
 
                         if(fx_vce.raster_counter == 0)
-                         for(int chip = 0; chip < 2; chip++)
+                         for(uint_fast8_t chip = 0; chip < 2; chip++)
                           vdc_chips[chip]->VSync(true);
 
                         if(fx_vce.raster_counter == 3)
-                         for(int chip = 0; chip < 2; chip++)
+                         for(uint_fast8_t chip = 0; chip < 2; chip++)
                           vdc_chips[chip]->VSync(false);
 
 			if(!fx_vce.raster_counter)
@@ -2895,7 +2895,7 @@ void KING_SetLayerEnableMask(uint64 mask)
  BGLayerDisable = (~ms) & 0xF;
  ms >>= 4;
 
- for(unsigned chip = 0; chip < 2; chip++)
+ for(uint_fast8_t chip = 0; chip < 2; chip++)
  {
   fx_vdc_chips[chip]->SetLayerEnableMask(ms & 0x3);
   ms >>= 2;
@@ -2903,29 +2903,6 @@ void KING_SetLayerEnableMask(uint64 mask)
 
  RAINBOWLayerDisable = (~ms) & 0x1;
  ms >>= 1;
-
-#if 0
- if(which < 4)
- {
-  BGLayerDisable ^= 1 << which;
-  return( !((BGLayerDisable >> which) & 1));
- }
- else if(which == 4 || which == 5)
- {
-  return(fx_vdc_chips[0]->ToggleLayer(which - 4));
- }
- else if(which == 6 || which == 7)
- {
-  return(fx_vdc_chips[1]->ToggleLayer(which - 6));
- }
- else if(which == 8)
- {
-  RAINBOWLayerDisable = !RAINBOWLayerDisable;
-  return(!RAINBOWLayerDisable);
- }
- else
-  return(0);
-#endif
 }
 
 
