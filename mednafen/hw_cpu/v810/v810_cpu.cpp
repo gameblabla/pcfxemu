@@ -334,7 +334,11 @@ bool V810::Init()
 
 void V810::Kill(void)
 {
-	if (FastMapAllocList) free(FastMapAllocList);
+	if (FastMapAllocList != NULL)
+	{
+		free(FastMapAllocList);
+		FastMapAllocList = NULL;
+	}
 }
 
 void V810::SetInt(int level)
