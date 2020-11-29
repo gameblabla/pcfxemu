@@ -348,8 +348,6 @@ v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp)
   psg.bigdiv += 1365 * 2 / 2;
  }
 
-
- assert((psg.bigdiv + 1) / 2);
  return(timestamp + (psg.bigdiv + 1) / 2);
 }
 

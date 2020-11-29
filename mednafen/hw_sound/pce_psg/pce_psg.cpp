@@ -155,8 +155,6 @@ void PCE_PSG::RecalcNoiseFreqCache(int chnum)
 
 void PCE_PSG::PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uint8 *Buffer)
 {
- assert(ch <= 5);
-
  while(Length--)
  {
   Address &= 0x1F;
@@ -168,8 +166,6 @@ void PCE_PSG::PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uin
 
 void PCE_PSG::PokeWave(const unsigned int ch, uint32 Address, uint32 Length, const uint8 *Buffer)
 {
- assert(ch <= 5);
-
  while(Length--)
  {
   Address &= 0x1F;
