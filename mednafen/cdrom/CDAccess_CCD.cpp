@@ -152,7 +152,7 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
       {
          if(linebuf.length() < 3 || linebuf[linebuf.length() - 1] != ']')
          {
-            log_cb(RETRO_LOG_ERROR, "Malformed section specifier: %s", linebuf.c_str());
+            //log_cb(RETRO_LOG_ERROR, "Malformed section specifier: %s", linebuf.c_str());
             return false;
          }
 
@@ -167,7 +167,7 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
 
          if(feqpos == std::string::npos || feqpos != leqpos)
          {
-            log_cb(RETRO_LOG_ERROR, "Malformed value pair specifier: %s\n", linebuf.c_str());
+            //log_cb(RETRO_LOG_ERROR, "Malformed value pair specifier: %s\n", linebuf.c_str());
             return false;
          }
 
@@ -194,13 +194,13 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
 
       if(num_sessions != 1)
       {
-         log_cb(RETRO_LOG_ERROR, "Unsupported number of sessions: %u\n", num_sessions);
+         //log_cb(RETRO_LOG_ERROR, "Unsupported number of sessions: %u\n", num_sessions);
          return false;
       }
 
       if(data_tracks_scrambled)
       {
-         log_cb(RETRO_LOG_ERROR, "Scrambled CCD data tracks currently not supported.\n");
+         //log_cb(RETRO_LOG_ERROR, "Scrambled CCD data tracks currently not supported.\n");
          return false;
       }
 
@@ -222,7 +222,7 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
 
          if(session != 1)
          {
-            log_cb(RETRO_LOG_ERROR, "Unsupported TOC entry Session value: %u\n", session);
+            //log_cb(RETRO_LOG_ERROR, "Unsupported TOC entry Session value: %u\n", session);
             return false;
          }
 
@@ -237,7 +237,7 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
          else switch(point)
          {
             default:
-               log_cb(RETRO_LOG_ERROR, "Unsupported TOC entry Point value: %u\n", point);
+               //log_cb(RETRO_LOG_ERROR, "Unsupported TOC entry Point value: %u\n", point);
                return false;
             case 0xA0:
                tocd.first_track = pmin;
@@ -271,13 +271,13 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
 
       if(ss % 2352)
       {
-         log_cb(RETRO_LOG_ERROR, "CCD image size is not evenly divisible by 2352.\n");
+         //log_cb(RETRO_LOG_ERROR, "CCD image size is not evenly divisible by 2352.\n");
          return false;
       }
 
       if(ss > 0x7FFFFFFF)
       {
-         log_cb(RETRO_LOG_ERROR, "CCD image is too large.\n");
+         //log_cb(RETRO_LOG_ERROR, "CCD image is too large.\n");
          return false;
       }
 
@@ -291,7 +291,7 @@ bool CDAccess_CCD::Load(const std::string& path, bool image_memcache)
 
       if(sub_stream.size() != (uint64)img_numsectors * 96)
       {
-         log_cb(RETRO_LOG_ERROR, "CCD SUB file size mismatch.\n");
+         //log_cb(RETRO_LOG_ERROR, "CCD SUB file size mismatch.\n");
          return false;
       }
 
@@ -353,7 +353,7 @@ bool CDAccess_CCD::CheckSubQSanity(void)
                   !BCD_is_valid(am_bcd) || !BCD_is_valid(as_bcd) || !BCD_is_valid(af_bcd) ||
                   rs_bcd > 0x59 || rf_bcd > 0x74 || as_bcd > 0x59 || af_bcd > 0x74)
             {
-               log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(bad BCD/out of range): %02x:%02x:%02x %02x:%02x:%02x\n", rm_bcd, rs_bcd, rf_bcd, am_bcd, as_bcd, af_bcd);
+               //log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(bad BCD/out of range): %02x:%02x:%02x %02x:%02x:%02x\n", rm_bcd, rs_bcd, rf_bcd, am_bcd, as_bcd, af_bcd);
                return false;
             }
             else
@@ -363,13 +363,13 @@ bool CDAccess_CCD::CheckSubQSanity(void)
 
                if(prev_lba != INT_MAX && abs(lba - prev_lba) > 100)
                {
-                  log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(excessively large jump in AMSF)\n");
+                  //log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(excessively large jump in AMSF)\n");
                   return false;
                }
 
                if(abs((int)(lba - s)) > 100)
                {
-                  log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(AMSF value is out of tolerance)\n");
+                  //log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(AMSF value is out of tolerance)\n");
                   return false;
                }
 
@@ -377,7 +377,7 @@ bool CDAccess_CCD::CheckSubQSanity(void)
 
                if(track < prev_track)
                {
-                  log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(bad track number)\n");
+                  //log_cb(RETRO_LOG_ERROR, "Garbage subchannel Q data detected(bad track number)\n");
                   return false;
                }
 

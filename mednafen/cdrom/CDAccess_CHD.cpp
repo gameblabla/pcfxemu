@@ -69,7 +69,7 @@ bool CDAccess_CHD::Load(const std::string &path, bool image_memcache)
   hunkmem = (uint8_t *)malloc(head->hunkbytes);
   oldhunk = -1;
 
-  log_cb(RETRO_LOG_INFO, "chd_load '%s' hunkbytes=%d\n", path.c_str(), head->hunkbytes);
+  //log_cb(RETRO_LOG_INFO, "chd_load '%s' hunkbytes=%d\n", path.c_str(), head->hunkbytes);
 
   int plba = -150;
   int numsectors = 0;
@@ -106,13 +106,13 @@ bool CDAccess_CHD::Load(const std::string &path, bool image_memcache)
     if (strcmp(type, "MODE1") && strcmp(type, "MODE1_RAW") && strcmp(type, "MODE2_RAW") &&
         strcmp(type, "AUDIO"))
     {
-      log_cb(RETRO_LOG_ERROR, "chd_parse track type %s unsupported\n", type);
+      //log_cb(RETRO_LOG_ERROR, "chd_parse track type %s unsupported\n", type);
       return 0;
     }
 
     if (strcmp(subtype, "NONE"))
     {
-      log_cb(RETRO_LOG_ERROR, "chd_parse track subtype %s unsupported\n", subtype);
+      //log_cb(RETRO_LOG_ERROR, "chd_parse track subtype %s unsupported\n", subtype);
       return 0;
     }
 
@@ -157,7 +157,7 @@ bool CDAccess_CHD::Load(const std::string &path, bool image_memcache)
 
     Tracks[NumTracks].subq_control = (strcmp(type, "AUDIO") == 0) ? 0 : 4;
 
-    //log_cb(RETRO_LOG_INFO, "chd_parse '%s' track=%d lba=%d, pregap=%d pregap_dv=%d postgap=%d sectors=%d\n", tmp, NumTracks, Tracks[NumTracks].LBA, Tracks[NumTracks].pregap, Tracks[NumTracks].pregap_dv, Tracks[NumTracks].postgap, Tracks[NumTracks].sectors);
+    ////log_cb(RETRO_LOG_INFO, "chd_parse '%s' track=%d lba=%d, pregap=%d pregap_dv=%d postgap=%d sectors=%d\n", tmp, NumTracks, Tracks[NumTracks].LBA, Tracks[NumTracks].pregap, Tracks[NumTracks].pregap_dv, Tracks[NumTracks].postgap, Tracks[NumTracks].sectors);
 
     plba += frames - Tracks[NumTracks].pregap_dv;
     plba += Tracks[NumTracks].postgap;
@@ -173,7 +173,7 @@ bool CDAccess_CHD::Load(const std::string &path, bool image_memcache)
   FirstTrack = 1;
   LastTrack = NumTracks;
   total_sectors = numsectors;
-  //log_cb(RETRO_LOG_INFO, "chd total_sectors '%d'\n", total_sectors);
+  ////log_cb(RETRO_LOG_INFO, "chd total_sectors '%d'\n", total_sectors);
 
   /* add track */
   toc.tracks[100].adr = 1;
@@ -221,7 +221,9 @@ bool CDAccess_CHD::Read_CHD_Hunk_RAW(uint8_t *buf, int32_t lba, CHDFILE_TRACK_IN
   {
     err = chd_read(chd, hunknum, hunkmem);
     if (err != CHDERR_NONE)
-      log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    {
+      //log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    }
     else
       oldhunk = hunknum;
   }
@@ -245,7 +247,9 @@ bool CDAccess_CHD::Read_CHD_Hunk_M1(uint8_t *buf, int32_t lba, CHDFILE_TRACK_INF
   {
     err = chd_read(chd, hunknum, hunkmem);
     if (err != CHDERR_NONE)
-      log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    {
+      //log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    }
     else
       oldhunk = hunknum;
   }
@@ -269,7 +273,9 @@ bool CDAccess_CHD::Read_CHD_Hunk_M2(uint8_t *buf, int32_t lba, CHDFILE_TRACK_INF
   {
     err = chd_read(chd, hunknum, hunkmem);
     if (err != CHDERR_NONE)
-      log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    {
+      //log_cb(RETRO_LOG_ERROR, "chd_read_sector failed lba=%d error=%d\n", lba, err);
+    }
     else
       oldhunk = hunknum;
   }

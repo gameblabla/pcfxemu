@@ -55,6 +55,7 @@
 #include <sys/sys_time.h>
 #else
 #include <pthread.h>
+#include <sys/time.h>
 #include <time.h>
 #endif
 

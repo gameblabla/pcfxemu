@@ -24,9 +24,9 @@
 
 int setting_initial_scanline = 0;
 int setting_last_scanline = 239;
-int setting_high_dotclock_width = 1024;
+int setting_high_dotclock_width = 256;
 int setting_nospritelimit = 0;
-int setting_resamp_quality = 3;
+int setting_resamp_quality = 0;
 int setting_suppress_channel_reset_clicks = 1;
 int setting_emulate_buggy_codec = 0;
 int setting_rainbow_chromaip = 0;

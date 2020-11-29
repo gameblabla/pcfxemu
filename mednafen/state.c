@@ -304,7 +304,7 @@ static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)
    while (st->loc < (temp + size))
    {
       SFORMAT *tmp;
-      uint32_t recorded_size;	// In bytes
+      uint32_t recorded_size = 0;	// In bytes
       uint8_t toa[1 + 256];	// Don't change to char unless cast toa[0] to unsigned to smem_read() and other places.
 
       if(smem_read(st, toa, 1) != 1)
