@@ -110,7 +110,6 @@ void V810_FP_Ops::fpim_round(fpim* df)
  {
   const unsigned sa = vbc - 24;
 
-  if(1) // round to nearest
   {
    uint64 old_f = df->f;
 
@@ -122,8 +121,6 @@ void V810_FP_Ops::fpim_round(fpim* df)
     exception_flags |= flag_inexact;
    }
   }
-  else
-   abort();
  }
 }
 

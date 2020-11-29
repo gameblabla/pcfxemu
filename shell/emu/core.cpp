@@ -952,19 +952,14 @@ bool Load_Game_Memory(char* path)
 	switch(option.type_controller)
 	{
 		default:
-			for (unsigned i = 0; i < MAX_PLAYERS; i++)
-			{
-				FXINPUT_SetInput(i, 0, &input_buf[i]);
-			}
+			FXINPUT_SetInput(0, 0, &input_buf[0]);
 		break;
 		case 1:
-			for (unsigned i = 0; i < MAX_PLAYERS; i++)
-			{
-				FXINPUT_SetInput(i, 1, &mousedata[i]);
-			}
+			FXINPUT_SetInput(0, 1, &mousedata[0]);
+
 		break;
 	}
-	
+	input_buf[1] = 0;
 	KING_SetPixelFormat();
 	SoundBox_SetSoundRate(SOUND_OUTPUT_FREQUENCY);
 	return 1;
@@ -989,7 +984,6 @@ void Clean_Emu(void)
 
 static void update_input(void)
 {
-	input_buf[1] = 0;
 	Read_General_Input();
 	switch(option.type_controller)
 	{

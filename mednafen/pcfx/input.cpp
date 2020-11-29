@@ -37,7 +37,7 @@ static const int TapMap[2][TAP_PORTS] =
 
 
 static void RemakeDevices(int which = -1);
-static uint8 MultiTapEnabled;
+//static uint8 MultiTapEnabled;
 
 // Mednafen-specific input type numerics
 enum
@@ -243,11 +243,11 @@ void FXINPUT_Write16(uint32 A, uint16 V, const v810_timestamp_t timestamp)
 	     if((V & 0x1) && !(control[w] & 0x1))
 	     {
 	      //printf("Start: %d\n", w);
-	      if(MultiTapEnabled & (1 << w))
+	      /*if(MultiTapEnabled & (1 << w))
 	      {
 	       if(V & 0x2)
 	        TapCounter[w] = 0;
-	      }
+	      }*/
 	      LatchPending[w] = 1536;
 	      PCFX_SetEvent(PCFX_EVENT_PAD, CalcNextEventTS(timestamp));
 	     }
@@ -285,7 +285,7 @@ v810_timestamp_t FXINPUT_Update(const v810_timestamp_t timestamp)
    {
     //printf("Update: %d, %d\n", i, timestamp / 1365);
 
-    if(MultiTapEnabled & (1 << i))
+    /*if(MultiTapEnabled & (1 << i))
     {
      if(TapCounter[i] >= TAP_PORTS)
       data_latch[i] = FX_SIG_TAP << 28;
@@ -294,7 +294,7 @@ v810_timestamp_t FXINPUT_Update(const v810_timestamp_t timestamp)
       data_latch[i] = devices[TapMap[i][TapCounter[i]]]->Read();
      }
     }
-    else
+    else*/
     {
      data_latch[i] = devices[i]->Read();
     }
@@ -303,13 +303,13 @@ v810_timestamp_t FXINPUT_Update(const v810_timestamp_t timestamp)
     control[i] &= ~1;
     PCFXIRQ_Assert(PCFXIRQ_SOURCE_INPUT, TRUE);
 
-    if(MultiTapEnabled & (1 << i))
+    /*if(MultiTapEnabled & (1 << i))
     {
      if(TapCounter[i] < TAP_PORTS)
      {
       TapCounter[i]++;
      }
-    }
+    }*/
 
    }
   }
@@ -364,7 +364,7 @@ static void SyncSettings(void)
  //MDFNGameInfo->mouse_sensitivity = MDFN_GetSettingF("pcfx.mouse_sensitivity");
  //InputDeviceInfo[1].IDII = MDFN_GetSettingB("pcfx.disable_softreset") ? PCFX_GamepadIDII_DSR : PCFX_GamepadIDII;
  //InputDeviceInfo[1].IDII = PCFX_GamepadIDII;
- MultiTapEnabled = 0;
+ //MultiTapEnabled = 0;
  //MultiTapEnabled = MDFN_GetSettingB("pcfx.input.port1.multitap");
  //MultiTapEnabled |= MDFN_GetSettingB("pcfx.input.port2.multitap") << 1;
 }
