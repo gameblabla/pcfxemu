@@ -702,7 +702,7 @@ static void PCFX_CDSelect(void)
 
 static void CloseGame(void)
 {
-   unsigned i;
+   uint_fast8_t i;
 
    for(i = 0; i < 2; i++)
    {
@@ -1029,7 +1029,10 @@ static void MDFNI_CloseGame(void)
    CloseGame();
 
    for(unsigned i = 0; i < CDInterfaces.size(); i++)
+   {
       delete CDInterfaces[i];
+      CDInterfaces[i] = NULL;
+   }
    CDInterfaces.clear();
 }
 
@@ -1404,8 +1407,8 @@ int main(int argc, char* argv[])
 		}
     }
     
-	Clean();
 	Clean_Emu();
+	Clean();
     Audio_Close();
     Video_Close();
 
