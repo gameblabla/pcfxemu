@@ -1,21 +1,8 @@
     if(fx_vce.dot_clock) // No cellophane in 7.16MHz pixel mode
     {
-     if(HighDotClockWidth == 341)
-      for(unsigned int x = 0; x < 341; x++)
-      {
-       LAYER_MIX_BODY(x * 256 / 341, x);
-       LAYER_MIX_FINAL_NOCELLO;
-      }
-     else if(HighDotClockWidth == 256)
       for(unsigned int x = 0; x < 256; x++)
       {
        LAYER_MIX_BODY(x, x * 341 / 256);
-       LAYER_MIX_FINAL_NOCELLO;
-      }
-     else
-      for(unsigned int x = 0; x < 1024; x++)
-      {
-       LAYER_MIX_BODY(x / 4, x / 3);
        LAYER_MIX_FINAL_NOCELLO;
       }
     }
