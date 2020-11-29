@@ -409,9 +409,10 @@ InputInfoStruct PCFXInputInfo =
 static void SyncSettings(void)
 {
  //MDFNGameInfo->mouse_sensitivity = MDFN_GetSettingF("pcfx.mouse_sensitivity");
- InputDeviceInfo[1].IDII = MDFN_GetSettingB("pcfx.disable_softreset") ? PCFX_GamepadIDII_DSR : PCFX_GamepadIDII;
-
- MultiTapEnabled = MDFN_GetSettingB("pcfx.input.port1.multitap");
- MultiTapEnabled |= MDFN_GetSettingB("pcfx.input.port2.multitap") << 1;
+ //InputDeviceInfo[1].IDII = MDFN_GetSettingB("pcfx.disable_softreset") ? PCFX_GamepadIDII_DSR : PCFX_GamepadIDII;
+ InputDeviceInfo[1].IDII = PCFX_GamepadIDII;
+ MultiTapEnabled = 0;
+ //MultiTapEnabled = MDFN_GetSettingB("pcfx.input.port1.multitap");
+ //MultiTapEnabled |= MDFN_GetSettingB("pcfx.input.port2.multitap") << 1;
 }
 

@@ -57,7 +57,6 @@ char GameName_emu[512];
 uint8_t exit_vb = 0;
 extern uint32_t emulator_state;
 
-static MDFNGI *game;
 std::string retro_base_directory;
 std::string retro_save_directory;
 
@@ -373,16 +372,16 @@ static void VDCB_IRQHook(bool asserted)
 
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
-   std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios"));
-   MDFNFILE *BIOSFile      = file_open(biospath.c_str());
-
+	std::string biospath;
 	biospath = retro_base_directory + "/pcfx.rom";
 
-   if(!BIOSFile)
-   {
+	MDFNFILE *BIOSFile = file_open(biospath.c_str());
+
+	if(!BIOSFile)
+	{
 		printf("Can't load BIOS\n");
 		return(0);
-   }
+	}
 
    #ifdef HAVE_HUC6273
    if(EmuFlags & CDGE_FLAG_FXGA)
@@ -419,7 +418,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
    for(int i = 0; i < 2; i++)
    {
-      fx_vdc_chips[i] = new VDC(MDFN_GetSettingB("pcfx.nospritelimit"), 65536);
+      fx_vdc_chips[i] = new VDC(setting_nospritelimit, 65536);
       fx_vdc_chips[i]->SetWSHook(NULL);
       fx_vdc_chips[i]->SetIRQHook(i ? VDCB_IRQHook : VDCA_IRQHook);
 
@@ -427,8 +426,8 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
       //fx_vdc_chips[1] = FXVDC_Init(PCFXIRQ_SOURCE_VDCB, MDFN_GetSettingB("pcfx.nospritelimit"));
    }
 
-   SoundBox_Init(MDFN_GetSettingB("pcfx.adpcm.emulate_buggy_codec"), MDFN_GetSettingB("pcfx.adpcm.suppress_channel_reset_clicks"));
-   RAINBOW_Init(MDFN_GetSettingB("pcfx.rainbow.chromaip"));
+   SoundBox_Init();
+   RAINBOW_Init(setting_rainbow_chromaip);
    FXINPUT_Init();
    FXTIMER_Init();
 
@@ -452,7 +451,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    SCSICD_SetDisc(true, NULL, true);
    SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
 
-   BRAMDisabled = MDFN_GetSettingB("pcfx.disable_bram");
+   BRAMDisabled = 0;
 
    /*if(BRAMDisabled)
       MDFN_printf("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n");*/
@@ -649,7 +648,7 @@ static int LoadCD(std::vector<CDIF *> *CDInterfaces)
  if(!LoadCommon(CDInterfaces))
   return(0);
 
- printf("Emulated CD-ROM drive speed: %ux\n", (unsigned int)MDFN_GetSettingUI("pcfx.cdspeed"));
+ //printf("Emulated CD-ROM drive speed: %ux\n", (unsigned int)MDFN_GetSettingUI("pcfx.cdspeed"));
 
  PCFX_Power();
 
@@ -811,8 +810,6 @@ static Deinterlacer deint;
 #define MEDNAFEN_CORE_VERSION "v0.9.36.5"
 #define MEDNAFEN_CORE_EXTENSIONS "cue|ccd|toc|chd"
 #define MEDNAFEN_CORE_TIMING_FPS 59.94
-#define MEDNAFEN_CORE_GEOMETRY_BASE_W (game->nominal_width)
-#define MEDNAFEN_CORE_GEOMETRY_BASE_H (game->nominal_height)
 #define MEDNAFEN_CORE_GEOMETRY_MAX_W 256
 #define MEDNAFEN_CORE_GEOMETRY_MAX_H 240
 #define MEDNAFEN_CORE_GEOMETRY_ASPECT_RATIO (4.0 / 3.0)
@@ -828,8 +825,6 @@ void Emu_Init(void)
    CDUtility_Init();
    retro_base_directory = std::string(home_path);
    retro_save_directory = std::string(sram_path);
-   setting_initial_scanline = 0;
-   setting_last_scanline = 239;
 }
 
 void retro_reset(void)
@@ -839,16 +834,6 @@ void retro_reset(void)
 
 
 static float mouse_sensitivity = 1.25f;
-
-static void check_variables(void)
-{
-	setting_high_dotclock_width = 256;
-	setting_nospritelimit = 0;
-	setting_resamp_quality = 0;
-	setting_emulate_buggy_codec = 0;
-	setting_suppress_channel_reset_clicks = 1;
-	setting_rainbow_chromaip = 0;
-}
 
 #define MAX_PLAYERS 2
 #define MAX_BUTTONS 15
@@ -1012,7 +997,6 @@ static uint8_t MDFNI_LoadGame(const char *name)
 
 bool Load_Game_Memory(char* path)
 {
-   check_variables();
 	MDFNI_LoadGame(path);
 #ifdef NEED_DEINTERLACER
 	PrevInterlaced = false;
@@ -1051,9 +1035,6 @@ static void MDFNI_CloseGame(void)
 
 void Clean_Emu(void)
 {
-   if (!game)
-      return;
-
    MDFNI_CloseGame();
 }
 
@@ -1114,7 +1095,6 @@ void Emulation_Run()
 
 	update_input();
 
-	spec.surface = NULL;
 	spec.SoundRate = SOUND_OUTPUT_FREQUENCY;
 	spec.SoundBuf = sound_buf;
 	spec.LineWidths = rects;
@@ -1122,8 +1102,6 @@ void Emulation_Run()
 	spec.SoundVolume = 1.0;
 	spec.soundmultiplier = 1.0;
 	spec.SoundBufSize = 0;
-	spec.VideoFormatChanged = false;
-	spec.SoundFormatChanged = false;
 #if defined(FRAMESKIP) || defined(FORCE_FRAMESKIP)
 #ifdef FORCE_FRAMESKIP
 	FrameSkip = 4;

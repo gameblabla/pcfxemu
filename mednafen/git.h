@@ -167,15 +167,6 @@ enum
 
 typedef struct
 {
-	// Pitch(32-bit) must be equal to width and >= the "fb_width" specified in the MDFNGI struct for the emulated system.
-	// Height must be >= to the "fb_height" specified in the MDFNGI struct for the emulated system.
-	// The framebuffer pointed to by surface->pixels is written to by the system emulation code.
-	MDFN_Surface *surface;
-
-	// Will be set to TRUE if the video pixel format has changed since the last call to Emulate(), FALSE otherwise.
-	// Will be set to TRUE on the first call to the Emulate() function/method
-	bool VideoFormatChanged;
-
 	// Set by the system emulation code every frame, to denote the horizontal and vertical offsets of the image, and the size
 	// of the image.  If the emulated system sets the elements of LineWidths, then the horizontal offset(x) and width(w) of this structure
 	// are ignored while drawing the image.
@@ -186,26 +177,12 @@ typedef struct
 	// such a situation by outputting at a constant width-per-frame that is the least-common-multiple of the screen widths, then
 	// you can ignore this.  If you do wish to use this, you must set all elements every frame.
 	int32 *LineWidths;
-
-	// TODO
-	bool *IsFMV;
-
-	// Set(optionally) by emulation code.  If InterlaceOn is true, then assume field height is 1/2 DisplayRect.h, and
-	// only every other line in surface (with the start line defined by InterlacedField) has valid data
-	// (it's up to internal Mednafen code to deinterlace it).
-	bool InterlaceOn;
-	bool InterlaceField;
+	
 
 	// Skip rendering this frame if true.  Set by the driver code.
 	int skip;
 
 	//
-	// If sound is disabled, the driver code must set SoundRate to false, SoundBuf to NULL, SoundBufMaxSize to 0.
-
-        // Will be set to TRUE if the sound format(only rate for now, at least) has changed since the last call to Emulate(), FALSE otherwise.
-        // Will be set to TRUE on the first call to the Emulate() function/method
-	bool SoundFormatChanged;
-
 	// Sound rate.  Set by driver side.
 	float SoundRate;
 
@@ -238,14 +215,6 @@ typedef struct
 	// performance possible.  HOWEVER, emulation modules must make sure the value is in a range(with minimum and maximum) that their code can handle
 	// before they try to handle it.
 	float soundmultiplier;
-
-	// True if we want to rewind one frame.  Set by the driver code.
-	bool NeedRewind;
-
-	// Sound reversal during state rewinding is normally done in mednafen.cpp, but
-        // individual system emulation code can also do it if this is set, and clear it after it's done.
-        // (Also, the driver code shouldn't touch this variable)
-	bool NeedSoundReverse;
 
 } EmulateSpecStruct;
 

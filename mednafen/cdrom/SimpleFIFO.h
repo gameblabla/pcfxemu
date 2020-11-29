@@ -69,7 +69,7 @@ class SimpleFIFO
  {
   T ret;
 
-  assert(in_count > 0);
+  //assert(in_count > 0);
 
   ret = data[read_pos];
 
@@ -84,14 +84,14 @@ class SimpleFIFO
 
  INLINE uint8 ReadByte(bool peek = false)
  {
-  assert(sizeof(T) == 1);
+  //assert(sizeof(T) == 1);
 
   return(ReadUnit(peek));
  }
 
  INLINE void Write(const T *happy_data, uint32 happy_count)
  {
-  assert(CanWrite() >= happy_count);
+  //assert(CanWrite() >= happy_count);
 
   while(happy_count)
   {
@@ -111,7 +111,7 @@ class SimpleFIFO
 
  INLINE void WriteByte(const T& wr_data)
  {
-  assert(sizeof(T) == 1);
+  //assert(sizeof(T) == 1);
   Write(&wr_data, 1);
  }
 

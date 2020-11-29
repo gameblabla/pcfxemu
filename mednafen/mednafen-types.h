@@ -115,7 +115,7 @@ typedef unsigned char   Boolean; /* 0 or 1 */
 #define MDFN_COLD
 
 #undef require
-#define require( expr ) assert( expr )
+//#define require( expr ) assert( expr )
 
 #include "error.h"
 

@@ -312,7 +312,6 @@ class VDC
 
 	// Pass NULL if you don't want more information about the special meaning of the value in the specified
 	// register.  Otherwise, pass a buffer of at least 256 bytes in size.
-	uint32 GetRegister(const unsigned int id, char *special, const uint32 special_len);
 	void SetRegister(const unsigned int id, const uint32 value);
 
 	#ifdef WANT_DEBUGGER
@@ -383,11 +382,11 @@ class VDC
 
 	 if(DMARunning)
 	 {
-	  assert(VDMA_CycleCounter < 2);
+	  //assert(VDMA_CycleCounter < 2);
 
 	  int32 next_vram_dma_event = ((LENR + 1) * 4) - (DMAReadWrite * 2) - VDMA_CycleCounter;
 
-	  assert(next_vram_dma_event > 0);
+	  //assert(next_vram_dma_event > 0);
 
 	  if(next_vram_dma_event > 0 && next_vram_dma_event < next_event)
 	   next_event = next_vram_dma_event;
@@ -395,7 +394,7 @@ class VDC
 	  //printf("Next VRAM DMA event: %d(LENR = %d)\n", next_vram_dma_event, LENR);
 	 }
 
-         assert(next_event > 0);
+         //assert(next_event > 0);
 	 return(next_event);
 	}
 

@@ -39,8 +39,10 @@ bool MDFN_IsFIROPSafe(const std::string &path)
  // separators in one OS but not in another, and we'd also run more of a risk of missing a special path separator case
  // in some OS.
 
- if(!MDFN_GetSettingB("filesys.untrusted_fip_check"))
-  return(true);
+ /*if(!MDFN_GetSettingB("filesys.untrusted_fip_check"))
+  return(true);*/
+  if (!0)
+  return true;
 
  if(path.find('\0') != string::npos)
   return(false);
