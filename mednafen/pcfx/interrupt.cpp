@@ -41,10 +41,10 @@ static void BuildInterruptCache(void)
 
          if(tmp_prio >= last_prio)
          {
-            if(tmp_prio == last_prio)
+            /*if(tmp_prio == last_prio)
             {
                FXDBG("Undefined IRQ behavior: %d, %d\n", level, tmp_prio);
-            }
+            }*/
             InterruptCache = 8 + tmp_prio;
             last_prio = tmp_prio;
          }
@@ -136,31 +136,6 @@ int PCFXIRQ_StateAction(StateMem *sm, int load, int data_only)
       BuildInterruptCache();
 
    return(ret);
-}
-
-bool PCFXIRQ_SetRegister(const std::string &name, uint32 value)
-{
-   if(name == "IMASK")
-   {
-      InterruptMask = value & 0x7F;
-      BuildInterruptCache();
-   }
-   else if(name == "IPRIO0")
-   {
-      InterruptPriority[0] = value & 0xFFF;
-      BuildInterruptCache();
-   }
-   else if(name == "IPRIO1")
-   {
-      InterruptPriority[1] = value & 0x1FF;
-      BuildInterruptCache();
-   }
-   else if(name == "IPEND")
-   {
-      InterruptAsserted = value;
-      BuildInterruptCache();
-   }
-   return(FALSE);
 }
 
 

@@ -31,9 +31,8 @@ FileStream::FileStream(const char *path, const int mode)
 
    if (!fp)
    {
-      ErrnoHolder ene(errno);
-
-      MDFN_Error(ene.Errno(), "Error opening file:\n%s\n%s", path, ene.StrError());
+      //ErrnoHolder ene(errno);
+      //MDFN_Error(ene.Errno(), "Error opening file:\n%s\n%s", path, ene.StrError());
    }
 }
 

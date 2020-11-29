@@ -27,7 +27,7 @@
 // Halves
 #define Weight1_1(A, B)   (Half(A) + Half(B) + Corr1_1(A, B))
 
-
+#if 0
 void upscale_256x240_to_320x240_bilinearish(uint32_t*  dst, uint32_t*  src, uint_fast16_t width, uint_fast16_t height)
 {
 	uint16_t* Src16 = (uint16_t*) src;
@@ -111,7 +111,7 @@ void upscale_256xXXX_to_320x240(uint32_t*  dst, uint32_t*  src, uint_fast16_t wi
         Eh += height; if(Eh >= 240) { Eh -= 240; dh++; }
     }
 }
-
+#endif
 
 /* alekmaul's scaler taken from mame4all */
 void bitmap_scale(uint32_t startx, uint32_t starty, uint32_t viswidth, uint32_t visheight, uint32_t newwidth, uint32_t newheight,uint32_t pitchsrc,uint32_t pitchdest, uint16_t*  src, uint16_t*  dst)

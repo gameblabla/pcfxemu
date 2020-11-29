@@ -174,10 +174,18 @@ static const char* Return_Text_Button(uint32_t button)
 	}
 }
 
+        
+void Draw_Option(uint32_t numb, uint32_t selection, const char* drawtext, uint32_t x, uint32_t y)
+{
+	char text[18];
+	snprintf(text, sizeof(text), drawtext, Return_Text_Button(option.config_buttons[numb]));
+	if (selection == numb+1) print_string(text, TextRed, 0, x, y+2, (uint16_t*)backbuffer->pixels);
+	else print_string(text, TextWhite, 0, x, y+2, (uint16_t*)backbuffer->pixels);
+}
+
 static void Input_Remapping()
 {
 	SDL_Event Event;
-	char text[50];
 	uint32_t pressed = 0;
 	int32_t currentselection = 1;
 	int32_t exit_input = 0;
@@ -263,62 +271,24 @@ static void Input_Remapping()
 
 		print_string("Press [A] to map to a button", TextWhite, TextBlue, 50, 210, (uint16_t*)backbuffer->pixels);
 		print_string("Press [B] to Exit", TextWhite, TextBlue, 85, 225, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "UP   : %s\n", Return_Text_Button(option.config_buttons[0]));
-		if (currentselection == 1) print_string(text, TextRed, 0, 5, 25+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 25+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "DOWN : %s\n", Return_Text_Button(option.config_buttons[1]));
-		if (currentselection == 2) print_string(text, TextRed, 0, 5, 45+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 45+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "LEFT : %s\n", Return_Text_Button(option.config_buttons[2]));
-		if (currentselection == 3) print_string(text, TextRed, 0, 5, 65+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 65+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "RIGHT: %s\n", Return_Text_Button(option.config_buttons[3]));
-		if (currentselection == 4) print_string(text, TextRed, 0, 5, 85+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 85+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "A    : %s\n", Return_Text_Button(option.config_buttons[4]));
-		if (currentselection == 5) print_string(text, TextRed, 0, 5, 105+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 105+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "B    : %s\n", Return_Text_Button(option.config_buttons[5]));
-		if (currentselection == 6) print_string(text, TextRed, 0, 5, 125+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 125+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "C    : %s\n", Return_Text_Button(option.config_buttons[6]));
-		if (currentselection == 7) print_string(text, TextRed, 0, 5, 145+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 145+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "X    : %s\n", Return_Text_Button(option.config_buttons[7]));
-		if (currentselection == 8) print_string(text, TextRed, 0, 5, 165+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 165+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "Y    : %s\n", Return_Text_Button(option.config_buttons[8]));
-		if (currentselection == 9) print_string(text, TextRed, 0, 165, 25+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 25+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "Z    : %s\n", Return_Text_Button(option.config_buttons[9]));
-		if (currentselection == 10) print_string(text, TextRed, 0, 165, 45+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 45+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "START: %s\n", Return_Text_Button(option.config_buttons[10]));
-		if (currentselection == 11) print_string(text, TextRed, 0, 165, 65+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 65+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "SLECT: %s\n", Return_Text_Button(option.config_buttons[11]));
-		if (currentselection == 12) print_string(text, TextRed, 0, 165, 85+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 85+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "MOUSE1: %s\n", Return_Text_Button(option.config_buttons[12]));
-		if (currentselection == 13) print_string(text, TextRed, 0, 165, 105+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 105+2, (uint16_t*)backbuffer->pixels);
-
-		snprintf(text, sizeof(text), "MOUSE2: %s\n", Return_Text_Button(option.config_buttons[13]));
-		if (currentselection == 14) print_string(text, TextRed, 0, 165, 125+2, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 165, 125+2, (uint16_t*)backbuffer->pixels);
+		
+		Draw_Option(0, currentselection, "UP   : %s\n", 5, 25);
+		Draw_Option(1, currentselection, "DOWN : %s\n", 5, 45);
+		Draw_Option(2, currentselection, "LEFT : %s\n", 5, 65);
+		Draw_Option(3, currentselection, "RIGHT: %s\n", 5, 85);
+		
+		Draw_Option(4, currentselection, "A    : %s\n", 5, 105);
+		Draw_Option(5, currentselection, "B    : %s\n", 5, 125);
+		Draw_Option(6, currentselection, "C    : %s\n", 5, 145);
+		Draw_Option(7, currentselection, "X    : %s\n", 5, 165);
+		
+		Draw_Option(8, currentselection, "Y      : %s\n", 165, 25);
+		Draw_Option(9, currentselection, "Z      : %s\n", 165, 45);
+		Draw_Option(10, currentselection,"START  : %s\n", 165, 65);
+		Draw_Option(11, currentselection,"SLECT  : %s\n", 165, 85);
+		
+		Draw_Option(12, currentselection,"MOUSE 1: %s\n", 165, 105);
+		Draw_Option(13, currentselection,"MOUSE 2: %s\n", 165, 125);	
 
 		Update_Video_Menu();
 	}
@@ -334,7 +304,7 @@ static void Input_Remapping()
 
 void Menu()
 {
-	char text[50];
+	char text[28];
     int16_t pressed = 0;
     int16_t currentselection = 1;
     SDL_Event Event;
@@ -352,88 +322,45 @@ void Menu()
 
 		print_string("PCFXEmu - Built on " __DATE__, TextWhite, 0, 5, 15, (uint16_t*)backbuffer->pixels);
 
-		if (currentselection == 1) print_string("Continue", TextRed, 0, 5, 45, (uint16_t*)backbuffer->pixels);
-		else  print_string("Continue", TextWhite, 0, 5, 45, (uint16_t*)backbuffer->pixels);
+		Draw_Option(0, currentselection, "Continue", 5, 45);
 
 		snprintf(text, sizeof(text), "Load State %d", save_slot);
-
-		if (currentselection == 2) print_string(text, TextRed, 0, 5, 65, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 65, (uint16_t*)backbuffer->pixels);
+		Draw_Option(1, currentselection, text, 5, 65);
 
 		snprintf(text, sizeof(text), "Save State %d", save_slot);
-
-		if (currentselection == 3) print_string(text, TextRed, 0, 5, 85, (uint16_t*)backbuffer->pixels);
-		else print_string(text, TextWhite, 0, 5, 85, (uint16_t*)backbuffer->pixels);
+		Draw_Option(2, currentselection, text, 5, 85);
 
 		#ifdef SCALING_SOFTWARE
-        if (currentselection == 4)
-        {
-			switch(option.fullscreen)
-			{
-				case 0:
-					print_string("Scaling : Native", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 1:
-					print_string("Scaling : Stretched", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 2:
-					print_string("Scaling : Bilinear", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 3:
-					print_string("Scaling : EPX/Scale2x", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-			}
-        }
-        else
-        {
-			switch(option.fullscreen)
-			{
-				case 0:
-					print_string("Scaling : Native", TextWhite, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 1:
-					print_string("Scaling : Stretched", TextWhite, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 2:
-					print_string("Scaling : Bilinear", TextWhite, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-				case 3:
-					print_string("Scaling : EPX/Scale2x", TextWhite, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-				break;
-			}
-        }
+		switch(option.fullscreen)
+		{
+			case 0:
+				print_string("Scaling : Native", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+			break;
+			case 1:
+				print_string("Scaling : Stretched", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+			break;
+			case 2:
+				print_string("Scaling : Bilinear", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+			break;
+			case 3:
+				print_string("Scaling : EPX/Scale2x", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+			break;
+		}
+		Draw_Option(3-SCALING_SOFTWARE_OFFSET, currentselection-SCALING_SOFTWARE_OFFSET, text, 5, 105);
 		#endif
 
-		if (currentselection == 5-SCALING_SOFTWARE_OFFSET)
+		switch(option.type_controller)
 		{
-			switch(option.type_controller)
-			{
-				case 0:
-					print_string("PAD Type : Pad", TextRed, 0, 5, 125, (uint16_t*)backbuffer->pixels);
-				break;
-				case 1:
-					print_string("PAD Type : Mouse", TextRed, 0, 5, 125, (uint16_t*)backbuffer->pixels);
-				break;
-			}
+			default:
+				snprintf(text, sizeof(text), "PAD Type : Pad");
+			break;
+			case 1:
+				snprintf(text, sizeof(text), "PAD Type : Mouse");
+			break;
 		}
-		else
-		{
-			switch(option.type_controller)
-			{
-				case 0:
-					print_string("PAD Type : Pad", TextWhite, 0, 5, 125, (uint16_t*)backbuffer->pixels);
-				break;
-				case 1:
-					print_string("PAD Type : Mouse", TextWhite, 0, 5, 125, (uint16_t*)backbuffer->pixels);
-				break;
-			}
-		}
-
-		if (currentselection == 6-SCALING_SOFTWARE_OFFSET) print_string("Input remapping", TextRed, 0, 5, 145, (uint16_t*)backbuffer->pixels);
-		else print_string("Input remapping", TextWhite, 0, 5, 145, (uint16_t*)backbuffer->pixels);
-
-		if (currentselection == 7-SCALING_SOFTWARE_OFFSET) print_string("Quit", TextRed, 0, 5, 165, (uint16_t*)backbuffer->pixels);
-		else print_string("Quit", TextWhite, 0, 5, 165, (uint16_t*)backbuffer->pixels);
+		Draw_Option(4-SCALING_SOFTWARE_OFFSET, currentselection, text, 5, 125);
+		Draw_Option(5-SCALING_SOFTWARE_OFFSET, currentselection, "Input remapping", 5, 145);
+		Draw_Option(6-SCALING_SOFTWARE_OFFSET, currentselection, "Quit", 5, 165);
 
 		print_string("Libretro Fork by gameblabla", TextWhite, 0, 5, 205, (uint16_t*)backbuffer->pixels);
 		print_string("Credits: Ryphecha, libretro", TextWhite, 0, 5, 225, (uint16_t*)backbuffer->pixels);
@@ -503,7 +430,7 @@ void Menu()
 							#endif
 							case 5-SCALING_SOFTWARE_OFFSET:
 							option.type_controller++;
-							if (option.type_controller < 1)
+							if (option.type_controller > 1)
 								option.type_controller = 0;
 							break;
                         }
@@ -549,12 +476,7 @@ void Menu()
 		Update_Video_Menu();
     }
 
-    SDL_FillRect(sdl_screen, NULL, 0);
-    SDL_Flip(sdl_screen);
-    #ifdef SDL_TRIPLEBUF
-    SDL_FillRect(sdl_screen, NULL, 0);
-    SDL_Flip(sdl_screen);
-    #endif
+	Clear_Video();
 
     if (currentselection == 7-SCALING_SOFTWARE_OFFSET)
     {
