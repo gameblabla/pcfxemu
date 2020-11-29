@@ -17,7 +17,6 @@ int PCFXIRQ_StateAction(StateMem *sm, int load, int data_only);
 
 void PCFXIRQ_Reset(void);
 
-bool PCFXIRQ_GetRegister(const std::string &name, uint32 &value, std::string *special);
 bool PCFXIRQ_SetRegister(const std::string &name, uint32 value);
 
 #endif

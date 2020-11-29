@@ -1632,7 +1632,7 @@ bool KING_Init(void)
     }
    }
 
- SCSICD_Init(SCSICD_PCFX, 3, &FXsbuf[0], &FXsbuf[1], 153600 * MDFN_GetSettingUI("pcfx.cdspeed"), 21477273, KING_CDIRQ, KING_StuffSubchannels);
+ SCSICD_Init(SCSICD_PCFX, 3, &FXsbuf[0], &FXsbuf[1], 153600 * setting_cd_speed, 21477273, KING_CDIRQ, KING_StuffSubchannels);
 
  return(1);
 }
@@ -1759,7 +1759,7 @@ static INLINE void DRAWBG8x1_16M(uint32 *target, const uint16 *cgptr, const uint
  if(cgptr[6] & 0xFF) target[7] = ((cgptr[0x6] & 0x00FF) << 16) | (cgptr[7] & 0xFF00) | (cgptr[7] & 0xFF) | layer_or;
 }
 
-static bool bgmode_warning = 0; // Debug
+//static bool bgmode_warning = 0; // Debug
 
 #include "king-bgfast.inc"
 
@@ -1863,11 +1863,11 @@ static void DrawBG(uint32 *target, int n, bool sub)
 
  if((bgmode & 0x7) >= 6)
  {
-  if(!bgmode_warning)
+  /*if(!bgmode_warning)
   {
-   printf("Unsupported KING BG Mode for KING BG %d: %02x\n", n, bgmode);
+   //printf("Unsupported KING BG Mode for KING BG %d: %02x\n", n, bgmode);
    bgmode_warning = TRUE;
-  }
+  }*/
   return;
  }
 
@@ -2250,18 +2250,6 @@ static uint32 INLINE YUV888_TO_RGB888(uint32 yuv)
  return MAKECOLOR(r, g, b, a);
 }
 
-static uint32 INLINE YUV888_TO_PF(const uint32 yuv, const MDFN_PixelFormat &pf, const uint8 a = 0x00)
-{
- const uint8 y = yuv >> 16;
- uint8 r, g, b;
-
- r = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][0]));
- g = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][1]));
- b = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][2]));
-
- return MAKECOLOR(r, g, b, a);
-}
-
 static uint32 INLINE YUV888_TO_YCbCr888(uint32 yuv)
 {
  uint32 y;
@@ -2295,8 +2283,8 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
  DisplayRect->x = 0;
  DisplayRect->w = 256;
 
- DisplayRect->y = MDFN_GetSettingUI("pcfx.slstart");
- DisplayRect->h = MDFN_GetSettingUI("pcfx.slend") - DisplayRect->y + 1;
+ DisplayRect->y = setting_initial_scanline;
+ DisplayRect->h = setting_last_scanline - DisplayRect->y + 1;
 }
 
 static int rb_type;

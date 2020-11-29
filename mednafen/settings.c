@@ -22,15 +22,13 @@
 
 #include "settings.h"
 
-int setting_initial_scanline = 0;
-int setting_last_scanline = 239;
-int setting_high_dotclock_width = 256;
-int setting_nospritelimit = 0;
-int setting_resamp_quality = 0;
-int setting_suppress_channel_reset_clicks = 1;
-int setting_emulate_buggy_codec = 0;
-int setting_rainbow_chromaip = 0;
+const uint_fast32_t setting_initial_scanline = 0;
+const uint_fast32_t setting_last_scanline = 239;
+const uint_fast32_t setting_nospritelimit = 0;
+const uint_fast32_t setting_rainbow_chromaip = 0;
+const uint_fast32_t setting_cd_speed = 2;
 
+/*
 uint64_t MDFN_GetSettingUI(const char *name)
 {
    if (!strcmp("pcfx.cdspeed", name))
@@ -58,7 +56,7 @@ float MDFN_GetSettingF(const char *name)
    if (!strcmp("pcfx.resamp_rate_error", name))
       return 0.0000009;
    if (!strcmp("pcfx.mouse_sensitivity", name))
-      return  	1.25; /* TODO - make configurable */
+      return  	1.25;
    return 0;
 }
 
@@ -66,29 +64,26 @@ bool MDFN_GetSettingB(const char *name)
 {
    if (!strcmp("cheats", name))
       return 0;
-   /* LIBRETRO */
    if (!strcmp("libretro.cd_load_into_ram", name))
       return 0;
    if (!strcmp("pcfx.disable_softreset", name))
-      return 0; /* TODO - make configurable */
+      return 0;
    if (!strcmp("pcfx.input.port1.multitap", name))
-      return 0; /* TODO - make configurable */
+      return 0;
    if (!strcmp("pcfx.input.port2.multitap", name))
-      return 0; /* TODO - make configurable */
+      return 0;
    if (!strcmp("pcfx.nospritelimit", name))
       return setting_nospritelimit;
    if (!strcmp("pcfx.adpcm.suppress_channel_reset_clicks", name))
       return setting_suppress_channel_reset_clicks;
    if (!strcmp("pcfx.disable_bram", name))
-      return 0; /* TODO - make configurable */
+      return 0; 
    if (!strcmp("pcfx.adpcm.emulate_buggy_codec", name))
       return setting_emulate_buggy_codec;
    if (!strcmp("pcfx.rainbow.chromaip", name))
       return setting_rainbow_chromaip;
-   /* CDROM */
    if (!strcmp("cdrom.lec_eval", name))
       return 1;
-   /* FILESYS */
    if (!strcmp("filesys.untrusted_fip_check", name))
       return 0;
    return 0;
@@ -102,3 +97,4 @@ const char *MDFN_GetSettingS(const char *name)
       return "pcfx.fxscsi";
    return 0;
 }
+*/

@@ -23,7 +23,7 @@
 #include "pce_psg.h"
 
 
-void PCE_PSG::SetVolume(double new_volume)
+void PCE_PSG::SetVolume(float new_volume)
 {
  OutputVolume = new_volume;
 
@@ -177,62 +177,6 @@ void PCE_PSG::PokeWave(const unsigned int ch, uint32 Address, uint32 Length, con
  }
 }
 
-uint32 PCE_PSG::GetRegister(const unsigned int id, char *special, const uint32 special_len)
-{
- uint32 value = 0xDEADBEEF;
- const int ch = (id >> 8) & 0xF;
-
- switch(id & 0xF0FF)
- {
-  default: break;
-
-  case PSG_GSREG_SELECT:
-	value = select;
-	break;
-
-  case PSG_GSREG_GBALANCE:
-	value = globalbalance;
-	break;
-
-  case PSG_GSREG_LFOFREQ:
-	value = lfofreq;
-	break;
-
-  case PSG_GSREG_LFOCTRL:
-	value = lfoctrl;
-	break;
-
-  case PSG_GSREG_CH0_FREQ:
-	value = channel[ch].frequency;
-	break;
-
-  case PSG_GSREG_CH0_CTRL:
-	value = channel[ch].control;
-	break;
-
-  case PSG_GSREG_CH0_BALANCE:
-	value = channel[ch].balance;
-	break;
-
-  case PSG_GSREG_CH0_WINDEX:
-	value = channel[ch].waveform_index;
-	break;
-
-  case PSG_GSREG_CH0_SCACHE:
-	value = channel[ch].dda;
-	break;
-
-  case PSG_GSREG_CH0_NCTRL:
-	value = channel[ch].noisectrl;
-	break;
-
-  case PSG_GSREG_CH0_LFSR:
-	value = channel[ch].lfsr & 0x7FFF;
-	break;
- }
- return(value);
-}
-
 
 void PCE_PSG::SetRegister(const unsigned int id, const uint32 value)
 {
@@ -367,10 +311,10 @@ PCE_PSG::PCE_PSG(Blip_Buffer *bb_l, Blip_Buffer *bb_r, int want_revision)
 
         for(int vl = 0; vl < 32; vl++)
         {
-         double flub = 1;
+         float flub = 1;
 
          if(vl)
-          flub /= pow(2, (double)1 / 4 * vl);                  // ~1.5dB reduction per increment of vl 
+          flub /= pow(2, (float)1 / 4 * vl);                  // ~1.5dB reduction per increment of vl 
 
 	 if(vl == 0x1F)
 	  flub = 0;

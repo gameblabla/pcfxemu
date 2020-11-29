@@ -54,7 +54,7 @@ typedef struct {
 bool SoundBox_SetSoundRate(uint32 rate);
 int32 SoundBox_Flush(const uint32, int16 *SoundBuf, const int32 MaxSoundFrames);
 void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp);
-int SoundBox_Init(bool arg_EmulateBuggyCodec, bool arg_ResetAntiClickEnabled);
+int SoundBox_Init(void);
 
 void SoundBox_Reset(void);
 

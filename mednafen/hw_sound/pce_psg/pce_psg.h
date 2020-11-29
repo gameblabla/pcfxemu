@@ -118,12 +118,9 @@ class PCE_PSG
         void Power(const int32 timestamp);
         void Write(int32 timestamp, uint8 A, uint8 V);
 
-	void SetVolume(double new_volume);
+	void SetVolume(float new_volume);
 
 	void EndFrame(int32 timestamp);
-
-	// TODO: timestamp
-	uint32 GetRegister(const unsigned int id, char *special, const uint32 special_len);
 	void SetRegister(const unsigned int id, const uint32 value);
 
 	void PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uint8 *Buffer);
@@ -151,7 +148,7 @@ class PCE_PSG
 	void RecalcFreqCache(int chnum);
 	void RecalcNoiseFreqCache(int chnum);
 	void RunChannel(int chc, int32 timestamp, bool LFO_On);
-	double OutputVolume;
+	float OutputVolume;
 
         uint8 select;               /* Selected channel (0-5) */
         uint8 globalbalance;        /* Global sound balance */
