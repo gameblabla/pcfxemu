@@ -58,10 +58,6 @@ typedef struct
 	/*const InputDeviceInputVB VirtButton;*/
         const int ConfigOrder;          // Configuration order during in-game config process, -1 for no config.
 	const InputDeviceInputType Type;
-	const char *ExcludeName;	// SettingName of a button that can't be pressed at the same time as this button
-					// due to physical limitations.
-
-	const char *RotateName[3];	// 90, 180, 270
 	//const char *Rotate180Name;
 	//const char *Rotate270Name;
 } InputDeviceInputInfoStruct;

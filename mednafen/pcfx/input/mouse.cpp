@@ -114,11 +114,3 @@ PCFX_Input_Device *PCFXINPUT_MakeMouse(int which)
  return(new PCFX_Input_Mouse(which));
 }
 
-const InputDeviceInputInfoStruct PCFX_MouseIDII[4] =
-{
- { "x_axis", "X Axis", -1, IDIT_X_AXIS_REL },
- { "y_axis", "Y Axis", -1, IDIT_Y_AXIS_REL },
- { "left", "Left Button", 0, IDIT_BUTTON, NULL },
- { "right", "Right Button", 1, IDIT_BUTTON, NULL },
-};
-

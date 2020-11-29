@@ -724,12 +724,12 @@ void cdrom_get_current_config_multiread(libretro_vfs_implementation_file *stream
    int rv = cdrom_send_command(stream, DIRECTION_IN, buf, sizeof(buf), cdb, sizeof(cdb), 0);
    int i;
 
-   printf("[CDROM] get current config multi-read status code %d\n", rv);
+   //printf("[CDROM] get current config multi-read status code %d\n", rv);
 
    if (rv)
       return;
 
-   printf("[CDROM] Feature Header: ");
+	/*printf("[CDROM] Feature Header: ");
 
    for (i = 0; i < 8; i++)
    {
@@ -747,7 +747,7 @@ void cdrom_get_current_config_multiread(libretro_vfs_implementation_file *stream
 
    printf("\n");
 
-   printf("[CDROM] Supported commands: READ (10), READ CD, READ DISC INFORMATION, READ TRACK INFORMATION\n");
+   printf("[CDROM] Supported commands: READ (10), READ CD, READ DISC INFORMATION, READ TRACK INFORMATION\n");*/
 }
 
 void cdrom_get_current_config_cdread(libretro_vfs_implementation_file *stream)
@@ -757,12 +757,12 @@ void cdrom_get_current_config_cdread(libretro_vfs_implementation_file *stream)
    int rv = cdrom_send_command(stream, DIRECTION_IN, buf, sizeof(buf), cdb, sizeof(cdb), 0);
    int i;
 
-   printf("[CDROM] get current config cd read status code %d\n", rv);
+   //printf("[CDROM] get current config cd read status code %d\n", rv);
 
    if (rv)
       return;
 
-   printf("[CDROM] Feature Header: ");
+   /*printf("[CDROM] Feature Header: ");
 
    for (i = 0; i < 8; i++)
    {
@@ -781,7 +781,7 @@ void cdrom_get_current_config_cdread(libretro_vfs_implementation_file *stream)
    if (buf[8 + 2] & 1)
       printf("(current)\n");
 
-   printf("[CDROM] Supported commands: READ CD, READ CD MSF, READ TOC/PMA/ATIP\n");
+   printf("[CDROM] Supported commands: READ CD, READ CD MSF, READ TOC/PMA/ATIP\n");*/
 }
 
 void cdrom_get_current_config_profiles(libretro_vfs_implementation_file *stream)
@@ -791,12 +791,12 @@ void cdrom_get_current_config_profiles(libretro_vfs_implementation_file *stream)
    int rv = cdrom_send_command(stream, DIRECTION_IN, buf, sizeof(buf), cdb, sizeof(cdb), 0);
    int i;
 
-   printf("[CDROM] get current config profiles status code %d\n", rv);
+   //printf("[CDROM] get current config profiles status code %d\n", rv);
 
    if (rv)
       return;
 
-   printf("[CDROM] Feature Header: ");
+   /*printf("[CDROM] Feature Header: ");
 
    for (i = 0; i < 8; i++)
    {
@@ -826,7 +826,7 @@ void cdrom_get_current_config_profiles(libretro_vfs_implementation_file *stream)
          printf("(current)\n");
       else
          printf("\n");
-   }
+   }*/
 }
 
 void cdrom_get_current_config_core(libretro_vfs_implementation_file *stream)
@@ -838,12 +838,12 @@ void cdrom_get_current_config_core(libretro_vfs_implementation_file *stream)
    int i;
    const char *intf_std_name = "Unknown";
 
-   printf("[CDROM] get current config core status code %d\n", rv);
+   //printf("[CDROM] get current config core status code %d\n", rv);
 
    if (rv)
       return;
 
-   printf("[CDROM] Feature Header: ");
+   /*printf("[CDROM] Feature Header: ");
 
    for (i = 0; i < 8; i++)
    {
@@ -889,7 +889,7 @@ void cdrom_get_current_config_core(libretro_vfs_implementation_file *stream)
          break;
    }
 
-   printf("[CDROM] Physical Interface Standard: %u (%s)\n", intf_std, intf_std_name);
+   printf("[CDROM] Physical Interface Standard: %u (%s)\n", intf_std, intf_std_name);*/
 }
 
 int cdrom_read_subq(libretro_vfs_implementation_file *stream, unsigned char *buf, size_t len)

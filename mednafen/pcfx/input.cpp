@@ -162,18 +162,21 @@ static void RemakeDevices(int which)
  }
 }
 
-void FXINPUT_SetInput(int port, const char *type, void *ptr)
+void FXINPUT_SetInput(int port, uint_fast8_t type, void *ptr)
 {
  data_ptr[port] = ptr;
-
- if(!strcasecmp(type, "mouse"))
+ switch(type)
  {
-  InputTypes[port] = FXIT_MOUSE;
+	case 0:
+		InputTypes[port] = FXIT_GAMEPAD;
+	break;
+	case 1:
+		InputTypes[port] = FXIT_MOUSE;
+	break;
+	default:
+		InputTypes[port] = FXIT_NONE;
+	break; 
  }
- else if(!strcasecmp(type, "gamepad"))
-  InputTypes[port] = FXIT_GAMEPAD;
- else
-  InputTypes[port] = FXIT_NONE;
  RemakeDevices(port);
 }
 
@@ -261,7 +264,7 @@ void FXINPUT_Write8(uint32 A, uint8 V, const v810_timestamp_t timestamp)
 
 void FXINPUT_Frame(void)
 {
- for(int i = 0; i < TOTAL_PORTS; i++)
+ for(uint_fast8_t i = 0; i < TOTAL_PORTS; i++)
  {
   devices[i]->Frame(data_ptr[i]);
  }
@@ -352,65 +355,15 @@ int FXINPUT_StateAction(StateMem *sm, int load, int data_only)
  return(ret);
 }
 
-// If we add more devices to this array, REMEMBER TO UPDATE the hackish array indexing in the SyncSettings() function
-// below.
-static InputDeviceInfoStruct InputDeviceInfo[] =
-{
- // None
- {
-  "none",
-  "none",
-  NULL,
-  NULL,
-  0,
-  NULL,
- },
 
- // Gamepad
- {
-  "gamepad",
-  "Gamepad",
-  NULL,
-  NULL,
-  sizeof(PCFX_GamepadIDII) / sizeof(InputDeviceInputInfoStruct),
-  PCFX_GamepadIDII,
- },
 
- // Mouse
- {
-  "mouse",
-  "Mouse",
-  NULL,
-  NULL,
-  sizeof(PCFX_MouseIDII) / sizeof(InputDeviceInputInfoStruct),
-  PCFX_MouseIDII
- }
-};
-
-static const InputPortInfoStruct PortInfo[] =
-{
- { "port1", "Port 1", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port2", "Port 2", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port3", "Port 3", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port4", "Port 4", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port5", "Port 5", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port6", "Port 6", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port7", "Port 7", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
- { "port8", "Port 8", sizeof(InputDeviceInfo) / sizeof(InputDeviceInfoStruct), InputDeviceInfo, "gamepad" },
-};
-
-InputInfoStruct PCFXInputInfo =
-{
- sizeof(PortInfo) / sizeof(InputPortInfoStruct),
- PortInfo
-};
 
 
 static void SyncSettings(void)
 {
  //MDFNGameInfo->mouse_sensitivity = MDFN_GetSettingF("pcfx.mouse_sensitivity");
  //InputDeviceInfo[1].IDII = MDFN_GetSettingB("pcfx.disable_softreset") ? PCFX_GamepadIDII_DSR : PCFX_GamepadIDII;
- InputDeviceInfo[1].IDII = PCFX_GamepadIDII;
+ //InputDeviceInfo[1].IDII = PCFX_GamepadIDII;
  MultiTapEnabled = 0;
  //MultiTapEnabled = MDFN_GetSettingB("pcfx.input.port1.multitap");
  //MultiTapEnabled |= MDFN_GetSettingB("pcfx.input.port2.multitap") << 1;
