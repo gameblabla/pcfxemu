@@ -40,6 +40,7 @@
 #include <math.h>
 
 #include "video_blit.h"
+#include "Blip_Buffer.h"
 
 #include "pcfx.h"
 #include "king.h"
@@ -51,7 +52,6 @@
 #include "../cdrom/scsicd.h"
 #include "../clamp.h"
 #include "../state_helpers.h"
-#include "../sound/OwlResampler.h"
 
 
 #ifdef _WIN32
@@ -1570,7 +1570,7 @@ uint16 KING_GetADPCMHalfWord(int ch)
 }
 
 static uint32 HighDotClockWidth;
-extern RavenBuffer* FXCDDABufs[2]; // FIXME, externals are evil!
+extern Blip_Buffer FXsbuf[2];
 
 bool KING_Init(void)
 {
@@ -1636,7 +1636,7 @@ bool KING_Init(void)
     }
    }
 
- SCSICD_Init(SCSICD_PCFX, 3, FXCDDABufs[0]->Buf(), FXCDDABufs[1]->Buf(), 153600 * MDFN_GetSettingUI("pcfx.cdspeed"), 21477273, KING_CDIRQ, KING_StuffSubchannels);
+ SCSICD_Init(SCSICD_PCFX, 3, &FXsbuf[0], &FXsbuf[1], 153600 * MDFN_GetSettingUI("pcfx.cdspeed"), 21477273, KING_CDIRQ, KING_StuffSubchannels);
 
  return(1);
 }

@@ -298,12 +298,12 @@ static void Emulate(EmulateSpecStruct *espec)
  // new_base_ts is guaranteed to be <= v810_timestamp
  //
  v810_timestamp_t new_base_ts;
- espec->SoundBufSize = SoundBox_Flush(v810_timestamp, &new_base_ts, espec->SoundBuf, espec->SoundBufMaxSize);
+ espec->SoundBufSize = SoundBox_Flush(v810_timestamp, espec->SoundBuf, espec->SoundBufMaxSize);
 
  KING_ResetTS(new_base_ts);
  FXTIMER_ResetTS(new_base_ts);
  FXINPUT_ResetTS(new_base_ts);
- SoundBox_ResetTS(new_base_ts);
+ SoundBox_ResetTS();
 
  // Call this AFTER all the EndFrame/Flush/ResetTS stuff
  RebaseTS(v810_timestamp, new_base_ts);
@@ -343,7 +343,7 @@ static void PCFX_Reset(void)
  }
 
  KING_Reset(timestamp);	// SCSICD_Power() is called from KING_Reset()
- SoundBox_Reset(timestamp);
+ SoundBox_Reset();
  RAINBOW_Reset();
 #ifdef HAVE_HUC6273
  if(WantHuC6273)

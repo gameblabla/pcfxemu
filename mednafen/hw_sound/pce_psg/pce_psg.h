@@ -1,33 +1,36 @@
 #ifndef _PCE_PSG_H
 #define _PCE_PSG_H
 
+#include <Blip_Buffer.h>
+#include <Stereo_Buffer.h>
+
 class PCE_PSG;
 
 struct psg_channel
 {
+        int32 counter;
+        uint16 frequency;       /* Channel frequency */
+	uint32 freq_cache;
+        uint8 control;          /* Channel enable, DDA, volume */
+        uint8 balance;          /* Channel balance */
         uint8 waveform[32];     /* Waveform data */
         uint8 waveform_index;   /* Waveform data index */
         uint8 dda;
-        uint8 control;          /* Channel enable, DDA, volume */
         uint8 noisectrl;        /* Noise enable/ctrl (channels 4,5 only) */
-
-        int32 vl[2];    //vll, vlr;
-
-        int32 counter;
-
-        void (PCE_PSG::*UpdateOutput)(const int32 timestamp, psg_channel *ch);
-
-        uint32 freq_cache;
-        uint32 noise_freq_cache;        // Channel 4,5 only
+	uint32 noise_freq_cache;	// Channel 4,5 only
         int32 noisecount;
         uint32 lfsr;
 
-        int32 samp_accum;         // The result of adding up all the samples in the waveform buffer(part of an optimization for high-frequency playback).
-        int32 blip_prev_samp[2];
-        int32 lastts;
+	//int32 sample_cache[2];
 
-        uint16 frequency;       /* Channel frequency */
-        uint8 balance;          /* Channel balance */
+        int32 vl[2];	//vll, vlr;
+
+        int samp_accum;		// The result of adding up all the samples in the waveform buffer(part of an optimization for high-frequency playback).
+
+	int32 blip_prev_samp[2];
+	int32 lastts;
+
+	void (PCE_PSG::*UpdateOutput)(const int32 timestamp, psg_channel *ch);
 };
 
 // Only CH4 and CH5 have NCTRL and LFSR, but it's here for the other channels for "consistency".
@@ -102,11 +105,12 @@ class PCE_PSG
 	{
 	 REVISION_HUC6280 = 0,
 	 REVISION_HUC6280A,
+	 REVISION_ENHANCED,
 	 _REVISION_COUNT
 	};
 
 
-        PCE_PSG(int32* hr_l, int32* hr_r, int want_revision);
+        PCE_PSG(Blip_Buffer *bb_l, Blip_Buffer *bb_r, int want_revision);
         ~PCE_PSG();
 
 	int StateAction(StateMem *sm, int load, int data_only);
@@ -114,10 +118,9 @@ class PCE_PSG
         void Power(const int32 timestamp);
         void Write(int32 timestamp, uint8 A, uint8 V);
 
-	void SetVolume(float new_volume);
+	void SetVolume(double new_volume);
 
-	void Update(int32 timestamp);
-	void ResetTS(int32 ts_base = 0);
+	void EndFrame(int32 timestamp);
 
 	// TODO: timestamp
 	uint32 GetRegister(const unsigned int id, char *special, const uint32 special_len);
@@ -128,23 +131,27 @@ class PCE_PSG
 
         private:
 
+	void Update(int32 timestamp);
+
 	void UpdateSubLFO(int32 timestamp);
 	void UpdateSubNonLFO(int32 timestamp);
 
 	void RecalcUOFunc(int chnum);
-        void UpdateOutputSub(const int32 timestamp, psg_channel *ch, const int32 samp0, const int32 samp1);
 	void UpdateOutput_Off(const int32 timestamp, psg_channel *ch);
-	void UpdateOutput_Accum_HuC6280(const int32 timestamp, psg_channel *ch);
-	void UpdateOutput_Accum_HuC6280A(const int32 timestamp, psg_channel *ch);
+	void UpdateOutput_Accum(const int32 timestamp, psg_channel *ch);
         void UpdateOutput_Norm(const int32 timestamp, psg_channel *ch);
         void UpdateOutput_Noise(const int32 timestamp, psg_channel *ch);
-        void (PCE_PSG::*UpdateOutput_Accum)(const int32 timestamp, psg_channel *ch);
+
+//        void UpdateOutput_Norm_IL(const int32 timestamp, psg_channel *ch);
+//        void UpdateOutput_Noise_IL(const int32 timestamp, psg_channel *ch);
+
 
 	int32 GetVL(const int chnum, const int lr);
 
 	void RecalcFreqCache(int chnum);
 	void RecalcNoiseFreqCache(int chnum);
 	void RunChannel(int chc, int32 timestamp, bool LFO_On);
+	double OutputVolume;
 
         uint8 select;               /* Selected channel (0-5) */
         uint8 globalbalance;        /* Global sound balance */
@@ -161,7 +168,9 @@ class PCE_PSG
         int32 lastts;
 	int revision;
 
-	int32* HRBufs[2];
+	bool SoundEnabled;
+	Blip_Buffer *sbuf[2];
+	Blip_Synth<blip_good_quality, 8192> Synth;
 
         int32 dbtable_volonly[32];
 
