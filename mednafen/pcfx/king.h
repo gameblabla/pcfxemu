@@ -25,7 +25,7 @@ void KING_SetLayerEnableMask(uint64 mask);
 
 int KING_StateAction(StateMem *sm, int load, int data_only);
 
-void KING_SetGraphicsDecode(MDFN_Surface *surface, int line, int which, int xscroll, int yscroll, int pbn);
+//void KING_SetGraphicsDecode(MDFN_Surface *surface, int line, int which, int xscroll, int yscroll, int pbn);
 
 void KING_NotifyOfBPE(bool read, bool write);
 

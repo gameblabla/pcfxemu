@@ -42,17 +42,12 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
  {
-  if(BRAMDisabled)
-   return(0xFF);
 
   //printf("%d\n", (A - 0xE0000000) >> 1);
   return(BackupRAM[(A & 0xFFFF) >> 1]);
  }
  else if(A >= 0xE8000000 && A <= 0xE9FFFFFF)
  {
-  if(BRAMDisabled)
-   return(0xFF);
-
   if(!(BackupControl & 0x2))
   {
    FXDBG("Read8 from external BRAM when not enabled.");
@@ -113,17 +108,12 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF)
  {
-  if(BRAMDisabled)
-   return(0xFFFF);
 
   //printf("%d\n", (A - 0xE0000000) >> 1);
   return(BackupRAM[(A & 0xFFFF) >> 1]);
  }
  else if(A >= 0xE8000000 && A <= 0xE9FFFFFF)
  {
-  if(BRAMDisabled)
-   return(0xFFFF);
-
   if(!(BackupControl & 0x2))
   {
    FXDBG("Read16 from external BRAM when not enabled.");
@@ -194,9 +184,6 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
  {
-  if(BRAMDisabled)
-   return;
-
   if(BackupControl & 0x1)
   {
    BackupRAM[(A & 0xFFFF) >> 1] = V;
@@ -205,19 +192,10 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8
  else if(A >= 0xE8000000 && A <= 0xE9FFFFFF)
  {
   //printf("ExWrite: %08x", A);
-  if(BRAMDisabled)
-   return;
-
   if(BackupControl & 0x2)
   {
    ExBackupRAM[(A & 0xFFFF) >> 1] = V;
   }
- }
- else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
- {
-  FXDBG("PIO B Write: %08x %02x", A, V);
-
-  // PIO?
  }
  else if(A >= 0x80000000 && A <= 0x807FFFFF)
  {
@@ -239,8 +217,6 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF)
  {
-  if(BRAMDisabled)
-   return;
 
   if(BackupControl & 0x1)
   {
@@ -250,23 +226,10 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  else if(A >= 0xE8000000 && A <= 0xE9FFFFFF)
  {
   //printf("ExWrite16: %08x", A);
-  if(BRAMDisabled)
-   return;
-
   if(BackupControl & 0x2)
   {
    ExBackupRAM[(A & 0xFFFF) >> 1] = (uint8)V;
   }
- }
- else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
- {
-  FXDBG("PIO H Write: %08x %04x", A, V);
-
-  // PIO?
- }
- else if(A >= 0xA0000000 && A <= 0xAFFFFFFF) // Read only
- {
-
  }
  else if(A >= 0xB0000000 && A <= 0xB3FFFFFF)
  {
@@ -293,10 +256,6 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
   //FXDBG("Mem->IO H Write Translation: %08x %04x -> %08x", A, V, A & 0x7FFFFF);
 
   port_whword(timestamp, A & 0x7FFFFF, V);
- }
- else
- {
-  FXDBG("Unknown hword write: %08x %04x", A, V);
  }
 }
 

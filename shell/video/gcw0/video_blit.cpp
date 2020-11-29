@@ -45,6 +45,17 @@ const uint32_t internal_pitch = 256;
 SDL_Joystick* sdl_joy;
 #endif
 
+void Clear_Video()
+{
+	SDL_FillRect(sdl_screen, NULL, 0);
+	SDL_Flip(sdl_screen);
+	SDL_FillRect(sdl_screen, NULL, 0);
+	SDL_Flip(sdl_screen);
+	SDL_FillRect(sdl_screen, NULL, 0);
+	SDL_Flip(sdl_screen);
+}
+
+
 void Init_Video()
 {
 	#ifdef ENABLE_JOYSTICKCODE
@@ -69,26 +80,13 @@ void Init_Video()
 void Set_Video_Menu()
 {
 	sdl_screen = SDL_SetVideoMode(320, 240, 16, SDL_FLAGS);
-	
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
+	Clear_Video();
 }
 
 void Set_Video_InGame()
 {
 	sdl_screen = SDL_SetVideoMode(256, 240, 16, SDL_FLAGS);
-
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
-	SDL_FillRect(sdl_screen, NULL, 0);
-	SDL_Flip(sdl_screen);
-	
+	Clear_Video();
 	internal_pix = (uint16_t*)sdl_screen->pixels;
 }
 

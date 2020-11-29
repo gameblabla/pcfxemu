@@ -309,10 +309,7 @@ v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp)
     if(psg.ADPCMPredictor[ch] > 0x3FFF) { psg.ADPCMPredictor[ch] = 0x3FFF; /*printf("Overflow: %d\n", ch);*/ }
     if(psg.ADPCMPredictor[ch] < -0x4000) { psg.ADPCMPredictor[ch] = -0x4000; /*printf("Underflow: %d\n", ch);*/ }
    }
-   else
-   {
 
-   }
 
    if(SoundEnabled)
    {

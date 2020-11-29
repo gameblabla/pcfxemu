@@ -503,18 +503,12 @@ int CDIF::ReadSector(uint8_t* buf, int32_t lba, uint32_t sector_count, bool supp
 
       if(!ReadRawSector(tmpbuf, lba))
       {
-         puts("CDIF Raw Read error");
+         //puts("CDIF Raw Read error");
          return(false);
       }
 
       if(!ValidateRawSector(tmpbuf))
       {
-         if(!suppress_uncorrectable_message)
-         {
-            MDFN_DispMessage("Uncorrectable data at sector %d", lba);
-            //log_cb(RETRO_LOG_ERROR, "Uncorrectable data at sector %d", lba);
-         }
-
          return(false);
       }
 

@@ -11,7 +11,7 @@ extern int32_t screen_width;
 
 static inline void setPixel(uint16_t* buffer, uint32_t x, uint32_t y, uint16_t c)
 {
-	if (x < BACKBUFFER_WIDTH_RESOLUTION && y < BACKBUFFER_HEIGHT_RESOLUTION)
+	//if (x < BACKBUFFER_WIDTH_RESOLUTION && y < BACKBUFFER_HEIGHT_RESOLUTION)
 	{
 		*((uint16_t*)buffer + ((x) + (y) * BACKBUFFER_WIDTH_RESOLUTION)) = c;
 	}
@@ -117,7 +117,6 @@ static void drawString(uint16_t* buffer, uint32_t *x, uint32_t *y, uint32_t _x, 
 {
 	uint32_t i;
 	size_t size_font;
-
 	size_font = strnlen(str, (BACKBUFFER_WIDTH_RESOLUTION/8)) + 1;
 	for(i = 0; i <  size_font; i++)
 		drawChar(buffer, x, y, _x, str[i], fc, olc);
@@ -125,7 +124,5 @@ static void drawString(uint16_t* buffer, uint32_t *x, uint32_t *y, uint32_t _x, 
 
 void print_string(const char *s, const uint16_t fg_color, const uint16_t bg_color, uint32_t x, uint32_t y, uint16_t* buffer) 
 {
-	if (!s) return;
-	
 	drawString(buffer, &x, &y, 0, s, fg_color, bg_color);
 }

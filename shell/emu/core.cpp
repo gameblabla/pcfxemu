@@ -21,9 +21,6 @@
 #include "mednafen/general.h"
 #include "mednafen/md5.h"
 #include	"FileWrapper.h"
-#ifdef NEED_DEINTERLACER
-#include	"mednafen/video/Deinterlacer.h"
-#endif
 #include "libretro.h"
 #include <rthreads/rthreads.h>
 
@@ -110,7 +107,7 @@ static uint8* BackupRAM = (uint8*)(SaveRAM + (0x8000 * 0));
 static uint8* ExBackupRAM = (uint8*)(SaveRAM + (0x8000 * 1));
 static uint8 ExBusReset; // I/O Register at 0x0700
 
-static bool BRAMDisabled;	// Cached at game load, don't remove this caching behavior or save game loss may result(if we ever get a GUI).
+//static bool BRAMDisabled;	// Cached at game load, don't remove this caching behavior or save game loss may result(if we ever get a GUI).
 
 // Checks to see if this main-RAM-area access
 // is in the same DRAM page as the last access.
@@ -379,7 +376,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
 	if(!BIOSFile)
 	{
-		printf("Can't load BIOS\n");
+		//printf("Can't load BIOS\n");
 		return(0);
 	}
 
@@ -407,7 +404,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
    if(BIOSFile->size != 1024 * 1024)
    {
-      MDFN_PrintError("BIOS ROM file is incorrect size.\n");
+      //MDFN_PrintError("BIOS ROM file is incorrect size.\n");
       return(0);
    }
 
@@ -451,12 +448,12 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    SCSICD_SetDisc(true, NULL, true);
    SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
 
-   BRAMDisabled = 0;
+   /*BRAMDisabled = 0;
 
-   /*if(BRAMDisabled)
+   if(BRAMDisabled)
       MDFN_printf("Warning: BRAM is disabled per pcfx.disable_bram setting.  This is simulating a malfunction.\n");*/
 
-   if(!BRAMDisabled)
+   //if(!BRAMDisabled)
    {
       // Initialize Save RAM
       memset(SaveRAM, 0, sizeof(SaveRAM));
@@ -482,7 +479,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    }
 
    // Default to 16-bit bus.
-   for(int i = 0; i < 256; i++)
+   for(uint_fast16_t i = 0; i < 256; i++)
    {
       PCFX_V810.SetMemReadBus32(i, FALSE);
       PCFX_V810.SetMemWriteBus32(i, FALSE);
@@ -493,21 +490,21 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    PCFX_V810.SetMemWriteBus32(0, TRUE);
 
    // Bitstring read range
-   for(int i = 0xA0; i <= 0xAF; i++)
+   for(uint_fast8_t i = 0xA0; i <= 0xAF; i++)
    {
       PCFX_V810.SetMemReadBus32(i, FALSE);       // Reads to the read range are 16-bit, and
       PCFX_V810.SetMemWriteBus32(i, TRUE);       // writes are 32-bit.
    }
 
    // Bitstring write range
-   for(int i = 0xB0; i <= 0xBF; i++)
+   for(uint_fast8_t i = 0xB0; i <= 0xBF; i++)
    {
       PCFX_V810.SetMemReadBus32(i, TRUE);	// Reads to the write range are 32-bit,
       PCFX_V810.SetMemWriteBus32(i, FALSE);	// but writes are 16-bit!
    }
 
    // BIOS area
-   for(int i = 0xF0; i <= 0xFF; i++)
+   for(uint_fast16_t i = 0xF0; i <= 0xFF; i++)
    {
       PCFX_V810.SetMemReadBus32(i, FALSE);
       PCFX_V810.SetMemWriteBus32(i, FALSE);
@@ -529,30 +526,6 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
  const CDGameEntry *found_entry = NULL;
  TOC toc;
 
-#if 0
- puts("{");
- puts(" ,");
- puts(" ,");
- puts(" 0,");
- puts(" 1,");
- puts(" {");
- puts("  {");
-
- for(int i = CDIF_GetFirstTrack(); i <= CDIF_GetLastTrack(); i++)
- {
-    CDIF_Track_Format tf;
-
-    CDIF_GetTrackFormat(i, tf);
-
-    printf("   { %d, %s, %d },\n", i, (tf == CDIF_FORMAT_AUDIO) ? "CDIF_FORMAT_AUDIO" : "CDIF_FORMAT_MODE1", CDIF_GetTrackStartPositionLBA(i));
- }
- printf("   { -1, (CDIF_Track_Format)-1, %d },\n", CDIF_GetSectorCountLBA());
- puts("  }");
- puts(" }");
- puts("},");
- //exit(1);
-#endif
-
  for(unsigned if_disc = 0; if_disc < CDInterfaces->size(); if_disc++)
  {
   (*CDInterfaces)[if_disc]->ReadTOC(&toc);
@@ -563,7 +536,7 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
    {
     const CDGameEntry *entry = &GameList[g];
 
-    assert(entry->discs == 1 || entry->discs == 2);
+    //assert(entry->discs == 1 || entry->discs == 2);
 
     for(unsigned int disc = 0; disc < entry->discs; disc++)
     {
@@ -572,7 +545,7 @@ static void DoMD5CDVoodoo(std::vector<CDIF *> *CDInterfaces)
 
      while(et->tracknum != -1 && GameFound)
      {
-      assert(et->tracknum > 0 && et->tracknum < 100);
+     // assert(et->tracknum > 0 && et->tracknum < 100);
 
       if(toc.tracks[et->tracknum].lba != et->lba)
        GameFound = FALSE;
@@ -655,20 +628,10 @@ static int LoadCD(std::vector<CDIF *> *CDInterfaces)
  return(1);
 }
 
+/*
 static void PCFX_CDInsertEject(void)
 {
  CD_TrayOpen = !CD_TrayOpen;
-
- for(unsigned disc = 0; disc < cdifs->size(); disc++)
- {
-#if 0
-  if(!(*cdifs)[disc]->Eject(CD_TrayOpen))
-  {
-   MDFN_DispMessage("Eject error.");
-   CD_TrayOpen = !CD_TrayOpen;
-  }
-#endif
- }
 
  if(CD_TrayOpen)
   MDFN_DispMessage("Virtual CD Drive Tray Open");
@@ -677,6 +640,7 @@ static void PCFX_CDInsertEject(void)
 
  SCSICD_SetDisc(CD_TrayOpen, (CD_SelectedDisc >= 0 && !CD_TrayOpen) ? (*cdifs)[CD_SelectedDisc] : NULL);
 }
+
 
 static void PCFX_CDEject(void)
 {
@@ -699,6 +663,7 @@ static void PCFX_CDSelect(void)
    MDFN_DispMessage("Disc %d of %d selected.", CD_SelectedDisc + 1, (int)cdifs->size());
  }
 }
+*/
 
 static void CloseGame(void)
 {
@@ -723,7 +688,7 @@ static void CloseGame(void)
    BIOSROM = NULL;
 }
 
-static void DoSimpleCommand(int cmd)
+/*static void DoSimpleCommand(int cmd)
 {
  switch(cmd)
  {
@@ -742,7 +707,7 @@ static void DoSimpleCommand(int cmd)
   case MDFN_MSC_RESET: PCFX_Reset(); break;
   case MDFN_MSC_POWER: PCFX_Power(); break;
  }
-}
+}*/
 
 extern "C" int StateAction(StateMem *sm, int load, int data_only)
 {
@@ -754,8 +719,8 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
       SFARRAY16(Last_VDC_AR, 2),
       SFVAR(BackupControl),
       SFVAR(ExBusReset),
-      SFARRAY(BackupRAM, BRAMDisabled ? 0 : 0x8000),
-      SFARRAY(ExBackupRAM, BRAMDisabled ? 0 : 0x8000),
+      SFARRAY(BackupRAM, 0x8000),
+      SFARRAY(ExBackupRAM, 0x8000),
 
       SFVAR(CD_TrayOpen),
       SFVAR(CD_SelectedDisc),
@@ -800,11 +765,6 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
    return(ret);
 }
 
-#ifdef NEED_DEINTERLACER
-static bool PrevInterlaced;
-static Deinterlacer deint;
-#endif
-
 #define MEDNAFEN_CORE_NAME_MODULE "pcfx"
 #define MEDNAFEN_CORE_NAME "Beetle PC-FX"
 #define MEDNAFEN_CORE_VERSION "v0.9.36.5"
@@ -827,10 +787,10 @@ void Emu_Init(void)
    retro_save_directory = std::string(sram_path);
 }
 
-void retro_reset(void)
+/*void retro_reset(void)
 {
    DoSimpleCommand(MDFN_MSC_RESET);
-}
+}*/
 
 
 static float mouse_sensitivity = 1.25f;
@@ -865,13 +825,13 @@ static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsig
       {
          if(efp == path)
          {
-            MDFN_Error(0, "M3U at \"%s\" references self.", efp.c_str());
+            //MDFN_Error(0, "M3U at \"%s\" references self.", efp.c_str());
             return false;
          }
 
          if(depth == 99)
          {
-            MDFN_Error(0, "M3U load recursion too deep!");
+            //MDFN_Error(0, "M3U load recursion too deep!");
             return false;
          }
 
@@ -884,16 +844,6 @@ static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsig
    return true;
 }
 
-void MDFND_DispMessage(unsigned char *str)
-{
-   /*if (log_cb)
-      log_cb(RETRO_LOG_INFO, "%s\n", str);*/
-    //printf("%s\n", str);
-}
-
-void MDFN_ResetMessages(void)
-{
-}
 
  static std::vector<CDIF *> CDInterfaces;	// FIXME: Cleanup on error out.
 // TODO: LoadCommon()
@@ -902,7 +852,7 @@ uint8_t MDFNI_LoadCD(const char *devicename)
 {
  uint8 LayoutMD5[16];
 
- printf("Loading %s...\n", devicename);
+ //printf("Loading %s...\n", devicename);
 
   if(devicename && strlen(devicename) > 4 && !strcasecmp(devicename + strlen(devicename) - 4, ".m3u"))
   {
@@ -931,7 +881,7 @@ uint8_t MDFNI_LoadCD(const char *devicename)
 
   CDInterfaces[i]->ReadTOC(&toc);
 
-  printf("CD %d Layout:\n", i + 1);
+  /*printf("CD %d Layout:\n", i + 1);
 
   for(int32 track = toc.first_track; track <= toc.last_track; track++)
   {
@@ -939,7 +889,7 @@ uint8_t MDFNI_LoadCD(const char *devicename)
   }
 
   printf("Leadout: %6d\n", toc.tracks[100].lba);
-  printf("\n");
+  printf("\n");*/
  }
 
  // Calculate layout MD5.  The system emulation LoadCD() code is free to ignore this value and calculate
@@ -969,7 +919,7 @@ uint8_t MDFNI_LoadCD(const char *devicename)
   mednafen_md5_finish(&layout_md5, LayoutMD5);
  }
 
- printf("Using module: pcfx\n\n");
+ //printf("Using module: pcfx\n\n");
 
  if(!(LoadCD(&CDInterfaces)))
  {
@@ -980,15 +930,16 @@ uint8_t MDFNI_LoadCD(const char *devicename)
  }
 
  //MDFNI_SetLayerEnableMask(~0ULL);
-
- MDFN_ResetMessages();   // Save state, status messages, etc.
-
  return 0;
 }
 
 static uint8_t MDFNI_LoadGame(const char *name)
 {
-	if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".ccd") || !strcasecmp(name + strlen(name) - 4, ".chd") || !strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".m3u")))
+	if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".ccd") ||
+#ifdef HAVE_CHD
+	!strcasecmp(name + strlen(name) - 4, ".chd") ||
+#endif
+	!strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".m3u")))
 	{
 		return (MDFNI_LoadCD(name));
 	}
@@ -998,11 +949,6 @@ static uint8_t MDFNI_LoadGame(const char *name)
 bool Load_Game_Memory(char* path)
 {
 	MDFNI_LoadGame(path);
-#ifdef NEED_DEINTERLACER
-	PrevInterlaced = false;
-	deint.ClearState();
-#endif
-
 	switch(option.type_controller)
 	{
 		default:
@@ -1116,23 +1062,6 @@ void Emulation_Run()
 	spec.skip = 0;
 #endif
 	Emulate(&spec);
-
-#ifdef NEED_DEINTERLACER
-   if (spec.InterlaceOn)
-   {
-      if (!PrevInterlaced)
-         deint.ClearState();
-
-      deint.Process(spec.surface, spec.DisplayRect, spec.LineWidths, spec.InterlaceField);
-
-      PrevInterlaced = true;
-
-      spec.InterlaceOn = false;
-      spec.InterlaceField = 0;
-   }
-   else
-      PrevInterlaced = false;
-#endif
 
    //int16 *const SoundBuf = spec.SoundBuf + spec.SoundBufSizeALMS * curgame->soundchan;
    int32 SoundBufSize = spec.SoundBufSize - spec.SoundBufSizeALMS;
@@ -1259,37 +1188,6 @@ std::string MDFN_MakeFName(MakeFName_Type type, int id1, const char *cd1)
       log_cb(RETRO_LOG_INFO, "MDFN_MakeFName: %s\n", ret.c_str());*/
    return ret;
 }
-
-void MDFND_MidSync(const EmulateSpecStruct *)
-{}
-
-void MDFN_MidLineUpdate(EmulateSpecStruct *espec, int y)
-{
- //MDFND_MidLineUpdate(espec, y);
-}
-
-/* forward declarations */
-extern void MDFND_DispMessage(unsigned char *str);
-
-void MDFN_DispMessage(const char *format, ...)
-{
-}
-
-static int curindent = 0;
-
-void MDFN_indent(int indent)
-{
-	curindent += indent;
-}
-
-void MDFN_printf(const char *format, ...)
-{
-}
-
-void MDFN_PrintError(const char *format, ...)
-{
-}
-
 
 void SaveState(char* path, uint_fast8_t state)
 {	

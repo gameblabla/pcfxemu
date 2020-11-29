@@ -27,6 +27,6 @@ void Set_Video_InGame(void);
 void Video_Close(void);
 void Update_Video_Menu(void);
 void Update_Video_Ingame(void);
-
+void Clear_Video(void);
 
 #endif
