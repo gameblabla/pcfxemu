@@ -50,7 +50,7 @@ static void BuildInterruptCache(void)
          }
       }
 
-   PCFX_V810.SetInt(InterruptCache);
+   V810_SetInt(InterruptCache);
 }
 
 void PCFXIRQ_Assert(int source, bool assert)

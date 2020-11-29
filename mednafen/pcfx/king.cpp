@@ -2879,7 +2879,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			 if(!fx_vce.frame_interlaced)
 			  fx_vce.odd_field = 0;
 
-			 PCFX_V810.Exit();
+			 V810_Exit();
 			}
 
 			if(fx_vce.raster_counter == king->RasterIRQLine && (king->RAINBOWTransferControl & 0x2))

@@ -22,7 +22,7 @@ uint16 MDFN_FASTCALL mem_peekhword(const v810_timestamp_t timestamp, const uint3
  return(0xFFFF);
 }
 
-static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
+static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -69,7 +69,7 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
  return(0xFF);
 }
 
-static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
+static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -148,7 +148,7 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
  return(0xFFFF);
 }
 
-static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t &timestamp, uint32 A)
+static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -181,7 +181,7 @@ static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t &timestamp, uint32 A)
  return(0xFFFFFFFF);
 }
 
-static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8 V)
+static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t timestamp, uint32 A, uint8 V)
 {
  if(A <= 0x001FFFFF)
  {
@@ -226,7 +226,7 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8
  }
 }
 
-static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint16 V)
+static void MDFN_FASTCALL mem_whword(v810_timestamp_t timestamp, uint32 A, uint16 V)
 {
  if(A <= 0x001FFFFF)
  {
@@ -300,7 +300,7 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  }
 }
 
-static void MDFN_FASTCALL mem_wword(v810_timestamp_t &timestamp, uint32 A, uint32 V)
+static void MDFN_FASTCALL mem_wword(v810_timestamp_t timestamp, uint32 A, uint32 V)
 {
  if(A <= 0x001FFFFF)
  {

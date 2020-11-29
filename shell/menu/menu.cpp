@@ -480,7 +480,7 @@ void Menu()
 							#endif
 							case 5-SCALING_SOFTWARE_OFFSET:
 							option.type_controller--;
-							if (option.type_controller > 2)
+							if (option.type_controller > 1)
 								option.type_controller = 1;
 							break;
                         }

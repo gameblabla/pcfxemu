@@ -1,6 +1,6 @@
 #include "../mednafen-endian.h"
 
-static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
+static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t timestamp, uint32 A)
 {
  if(A <= 0x0FF)
   return(FXINPUT_Read8(A, timestamp));
@@ -61,7 +61,7 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
  return(0x00);
 }
 
-static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
+static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t timestamp, uint32 A)
 {
  if(A <= 0x0FF)
   return(FXINPUT_Read16(A, timestamp));
@@ -118,7 +118,7 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
  return(0x00);
 }
 
-static void MDFN_FASTCALL port_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8 V)
+static void MDFN_FASTCALL port_wbyte(v810_timestamp_t timestamp, uint32 A, uint8 V)
 {
   if(A <= 0x0FF)
    FXINPUT_Write8(A, V, timestamp);
@@ -184,7 +184,7 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t &timestamp, uint32 A, uint
   #endif
 }
 
-static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uint16 V)
+static void MDFN_FASTCALL port_whword(v810_timestamp_t timestamp, uint32 A, uint16 V)
 {
   if(A <= 0x0FF)
    FXINPUT_Write16(A, V, timestamp);

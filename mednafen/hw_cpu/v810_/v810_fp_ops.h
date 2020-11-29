@@ -17,18 +17,17 @@
 
 #include "mednafen/mednafen.h"
 
-class V810_FP_Ops
-{
- public:
+extern unsigned exception_flags;
 
- uint32 mul(uint32 a, uint32 b);
- uint32 div(uint32 a, uint32 b);
- uint32 add(uint32 a, uint32 b);
- uint32 sub(uint32 a, uint32 b);
- int cmp(uint32 a, uint32 b);
 
- uint32 itof(uint32 v);
- uint32 ftoi(uint32 v, bool truncate);
+ uint32 V810_FP_Ops_mul(uint32 a, uint32 b);
+ uint32 V810_FP_Ops_div(uint32 a, uint32 b);
+ uint32 V810_FP_Ops_add(uint32 a, uint32 b);
+ uint32 V810_FP_Ops_sub(uint32 a, uint32 b);
+ int V810_FP_Ops_cmp(uint32 a, uint32 b);
+
+ uint32 V810_FP_Ops_itof(uint32 v);
+ uint32 V810_FP_Ops_ftoi(uint32 v, bool truncate);
 
  enum
  {
@@ -40,34 +39,13 @@ class V810_FP_Ops
   flag_reserved = 0x0020
  };
 
- inline uint32 get_flags(void)
+ inline uint32 V810_FP_Ops_get_flags(void)
  {
   return exception_flags;
  }
 
- inline void clear_flags(void)
+ inline void V810_FP_Ops_clear_flags(void)
  {
   exception_flags = 0;
  }
-
- private:
-
- unsigned exception_flags;
-
- struct fpim
- {
-  uint64 f;
-  int exp;
-  bool sign;
- };
-
- bool fp_is_zero(uint32 v);
- bool fp_is_inf_nan_sub(uint32 v);
-
- uint8 clz64(uint64 v);
- void fpim_decode(fpim* df, uint32 v);
- void fpim_round(fpim* df);
- void fpim_round_int(fpim* df, bool truncate = false);
- uint32 fpim_encode(fpim* df);
-};
 

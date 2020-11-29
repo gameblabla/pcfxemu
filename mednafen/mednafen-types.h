@@ -14,6 +14,8 @@ typedef uint16_t uint16;
 typedef uint32_t uint32;
 typedef uint64_t uint64;
 
+typedef int32 v810_timestamp_t;
+
 #ifdef __GNUC__
 #define MDFN_UNLIKELY(n) __builtin_expect((n) != 0, 0)
 #define MDFN_LIKELY(n) __builtin_expect((n) != 0, 1)

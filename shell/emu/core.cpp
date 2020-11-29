@@ -86,8 +86,6 @@ static std::vector<CDIF*> *cdifs = NULL;
 static bool CD_TrayOpen;
 static int CD_SelectedDisc;	// -1 for no disc
 
-V810 PCFX_V810;
-
 static uint8 *BIOSROM = NULL; 	// 1MB
 static uint8 *RAM = NULL; 	// 2MB
 static uint8 *FXSCSIROM = NULL;	// 512KiB
@@ -183,7 +181,7 @@ static void RebaseTS(const v810_timestamp_t timestamp, const v810_timestamp_t ne
 
 void PCFX_SetEvent(const int type, const v810_timestamp_t next_timestamp)
 {
-	//assert(next_timestamp > PCFX_V810.v810_timestamp);
+	//assert(next_timestamp > v810_timestamp);
 	switch(type)
 	{
 		case PCFX_EVENT_PAD:
@@ -199,8 +197,8 @@ void PCFX_SetEvent(const int type, const v810_timestamp_t next_timestamp)
 			next_king_ts = next_timestamp;
 		break;
 	}
-	if(next_timestamp < PCFX_V810.GetEventNT())
-		PCFX_V810.SetEventNT(next_timestamp);
+	if(next_timestamp < V810_GetEventNT())
+		V810_SetEventNT(next_timestamp);
 }
 
 int32 MDFN_FASTCALL pcfx_event_handler(const v810_timestamp_t timestamp)
@@ -234,7 +232,7 @@ void ForceEventUpdates(const uint32 timestamp)
 	next_timer_ts = FXTIMER_Update(timestamp);
 	next_adpcm_ts = SoundBox_ADPCMUpdate(timestamp);
 	//printf("Meow: %d\n", CalcNextTS());
-	PCFX_V810.SetEventNT(CalcNextTS());
+	V810_SetEventNT(CalcNextTS());
 	//printf("FEU: %d %d %d %d\n", next_pad_ts, next_timer_ts, next_adpcm_ts, next_king_ts);
 }
 
@@ -273,14 +271,14 @@ static CDGameEntry GameList[] =
 
 static void Emulate(EmulateSpecStruct *espec)
 {
- //printf("%d\n", PCFX_V810.v810_timestamp);
+ //printf("%d\n", v810_timestamp);
 
  FXINPUT_Frame();
 
  KING_StartFrame(fx_vdc_chips, espec);	//espec->surface, &espec->DisplayRect, espec->LineWidths, espec->skip);
 
  v810_timestamp_t v810_timestamp;
- v810_timestamp = PCFX_V810.Run(pcfx_event_handler);
+ v810_timestamp = V810_Run(pcfx_event_handler);
 
 
  PCFX_FixNonEvents();
@@ -310,12 +308,12 @@ static void Emulate(EmulateSpecStruct *espec)
 
  espec->MasterCycles = v810_timestamp - new_base_ts;
 
- PCFX_V810.ResetTS(new_base_ts);
+ V810_ResetTS(new_base_ts);
 }
 
 static void PCFX_Reset(void)
 {
- const uint32 timestamp = PCFX_V810.v810_timestamp;
+ const uint32 timestamp = v810_timestamp;
 
  //printf("Reset: %d\n", timestamp);
 
@@ -351,7 +349,7 @@ static void PCFX_Reset(void)
 #endif
  PCFXIRQ_Reset();
  FXTIMER_Reset();
- PCFX_V810.Reset();
+ V810_Reset();
 
  // Force device updates so we can get new next event timestamp values.
  ForceEventUpdates(timestamp);
@@ -394,18 +392,18 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    }
    #endif
 
-   PCFX_V810.Init();
+   V810_Init();
 
    uint32 RAM_Map_Addresses[1] = { 0x00000000 };
    uint32 BIOSROM_Map_Addresses[1] = { 0xFFF00000 };
 
-   RAM = PCFX_V810.SetFastMap(RAM_Map_Addresses, 0x00200000, 1, "RAM");
+   RAM = V810_SetFastMap(RAM_Map_Addresses, 0x00200000, 1, "RAM");
 
    // todo: cleanup on error
    if(!RAM)
       return(0);
 
-   BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1, "BIOS ROM");
+   BIOSROM = V810_SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1, "BIOS ROM");
    if(!BIOSROM)
       return(0);
 
@@ -439,7 +437,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 
       uint32 FXSCSI_Map_Addresses[1] = { 0x80780000 };
 
-      if(!(FXSCSIROM = PCFX_V810.SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, "FX-SCSI ROM")))
+      if(!(FXSCSIROM = V810_SetFastMap(FXSCSI_Map_Addresses, 0x0080000, 1, "FX-SCSI ROM")))
       {
          return(0);
       }
@@ -529,40 +527,40 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    // Default to 16-bit bus.
    for(int i = 0; i < 256; i++)
    {
-      PCFX_V810.SetMemReadBus32(i, FALSE);
-      PCFX_V810.SetMemWriteBus32(i, FALSE);
+      V810_SetMemReadBus32(i, FALSE);
+      V810_SetMemWriteBus32(i, FALSE);
    }
 
    // 16MiB RAM area.
-   PCFX_V810.SetMemReadBus32(0, TRUE);
-   PCFX_V810.SetMemWriteBus32(0, TRUE);
+   V810_SetMemReadBus32(0, TRUE);
+   V810_SetMemWriteBus32(0, TRUE);
 
    // Bitstring read range
    for(int i = 0xA0; i <= 0xAF; i++)
    {
-      PCFX_V810.SetMemReadBus32(i, FALSE);       // Reads to the read range are 16-bit, and
-      PCFX_V810.SetMemWriteBus32(i, TRUE);       // writes are 32-bit.
+      V810_SetMemReadBus32(i, FALSE);       // Reads to the read range are 16-bit, and
+      V810_SetMemWriteBus32(i, TRUE);       // writes are 32-bit.
    }
 
    // Bitstring write range
    for(int i = 0xB0; i <= 0xBF; i++)
    {
-      PCFX_V810.SetMemReadBus32(i, TRUE);	// Reads to the write range are 32-bit,
-      PCFX_V810.SetMemWriteBus32(i, FALSE);	// but writes are 16-bit!
+      V810_SetMemReadBus32(i, TRUE);	// Reads to the write range are 32-bit,
+      V810_SetMemWriteBus32(i, FALSE);	// but writes are 16-bit!
    }
 
    // BIOS area
    for(int i = 0xF0; i <= 0xFF; i++)
    {
-      PCFX_V810.SetMemReadBus32(i, FALSE);
-      PCFX_V810.SetMemWriteBus32(i, FALSE);
+      V810_SetMemReadBus32(i, FALSE);
+      V810_SetMemWriteBus32(i, FALSE);
    }
 
-   PCFX_V810.SetMemReadHandlers(mem_rbyte, mem_rhword, mem_rword);
-   PCFX_V810.SetMemWriteHandlers(mem_wbyte, mem_whword, mem_wword);
+   V810_SetMemReadHandlers(mem_rbyte, mem_rhword, mem_rword);
+   V810_SetMemWriteHandlers(mem_wbyte, mem_whword, mem_wword);
 
-   PCFX_V810.SetIOReadHandlers(port_rbyte, port_rhword, NULL);
-   PCFX_V810.SetIOWriteHandlers(port_wbyte, port_whword, NULL);
+   V810_SetIOReadHandlers(port_rbyte, port_rhword, NULL);
+   V810_SetIOWriteHandlers(port_wbyte, port_whword, NULL);
 
 
 
@@ -765,7 +763,7 @@ static void CloseGame(void)
    RAINBOW_Close();
    KING_Close();
    SoundBox_Kill();
-   PCFX_V810.Kill();
+   V810_Kill();
 
    // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
    RAM = NULL;
@@ -795,7 +793,7 @@ static void DoSimpleCommand(int cmd)
 
 extern "C" int StateAction(StateMem *sm, int load, int data_only)
 {
-   const v810_timestamp_t timestamp = PCFX_V810.v810_timestamp;
+   const v810_timestamp_t timestamp = v810_timestamp;
 
    SFORMAT StateRegs[] =
    {
@@ -820,7 +818,7 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
    ret &= FXINPUT_StateAction(sm, load, data_only);
    ret &= PCFXIRQ_StateAction(sm, load, data_only);
    ret &= KING_StateAction(sm, load, data_only);
-   ret &= PCFX_V810.StateAction(sm, load, data_only);
+   ret &= V810_StateAction(sm, load, data_only);
    ret &= FXTIMER_StateAction(sm, load, data_only);
    ret &= SoundBox_StateAction(sm, load, data_only);
    ret &= SCSICD_StateAction(sm, load, data_only, "CDRM");

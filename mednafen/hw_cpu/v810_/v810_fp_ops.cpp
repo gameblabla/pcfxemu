@@ -18,24 +18,42 @@
 #include "v810_fp_ops.h"
 #include <algorithm>
 
-bool V810_FP_Ops::fp_is_zero(uint32 v)
+unsigned exception_flags;
+
+struct fpim
+{
+  uint64 f;
+  int exp;
+  bool sign;
+};
+
+bool V810_FP_Ops_fp_is_zero(uint32 v);
+bool V810_FP_Ops_fp_is_inf_nan_sub(uint32 v);
+
+uint8 V810_FP_Ops_clz64(uint64 v);
+void V810_FP_Ops_fpim_decode(fpim* df, uint32 v);
+void V810_FP_Ops_fpim_round(fpim* df);
+void V810_FP_Ops_fpim_round_int(fpim* df, bool truncate = false);
+uint32 V810_FP_Ops_fpim_encode(fpim* df);
+
+bool V810_FP_Ops_fp_is_zero(uint32 v)
 {
  return((v & 0x7FFFFFFF) == 0);
 }
 
 #if 0
-bool V810_FP_Ops::fp_is_nan(uint32 v)
+bool V810_FP_Ops_fp_is_nan(uint32 v)
 {
  return((v & 0x7FFFFFFF) > (255 << 23));
 }
 
-bool V810_FP_Ops::fp_is_inf(uint32 v)
+bool V810_FP_Ops_fp_is_inf(uint32 v)
 {
  return((v & 0x7FFFFFFF) == (255 << 23));
 }
 #endif
 
-bool V810_FP_Ops::fp_is_inf_nan_sub(uint32 v)
+bool V810_FP_Ops_fp_is_inf_nan_sub(uint32 v)
 {
  if((v & 0x7FFFFFFF) == 0)
   return(false);
@@ -49,7 +67,7 @@ bool V810_FP_Ops::fp_is_inf_nan_sub(uint32 v)
  return(false);
 }
 
-uint8 V810_FP_Ops::clz64(uint64 v)
+uint8 V810_FP_Ops_clz64(uint64 v)
 {
  uint8 ret = 0;
 
@@ -95,16 +113,16 @@ uint8 V810_FP_Ops::clz64(uint64 v)
  return(ret);
 }
 
-void V810_FP_Ops::fpim_decode(fpim* df, uint32 v)
+void V810_FP_Ops_fpim_decode(fpim* df, uint32 v)
 {
  df->exp = ((v >> 23) & 0xFF) - 127;
  df->f = (v & 0x7FFFFF) | ((v & 0x7FFFFFFF) ? 0x800000 : 0);
  df->sign = v >> 31;
 }
 
-void V810_FP_Ops::fpim_round(fpim* df)
+void V810_FP_Ops_fpim_round(fpim* df)
 {
- int vbc = 64 - clz64(df->f);
+ int vbc = 64 - V810_FP_Ops_clz64(df->f);
 
  if(vbc > 24)
  {
@@ -127,7 +145,7 @@ void V810_FP_Ops::fpim_round(fpim* df)
  }
 }
 
-void V810_FP_Ops::fpim_round_int(fpim* df, bool truncate)
+void V810_FP_Ops_fpim_round_int(fpim* df, bool truncate)
 {
  if(df->exp < 23)
  {
@@ -156,9 +174,9 @@ void V810_FP_Ops::fpim_round_int(fpim* df, bool truncate)
  }
 }
 
-uint32 V810_FP_Ops::fpim_encode(fpim* df)
+uint32 V810_FP_Ops_fpim_encode(fpim* df)
 {
- const int lzc = clz64(df->f);
+ const int lzc = V810_FP_Ops_clz64(df->f);
  int tmp_exp = df->exp - lzc;
  uint64 tmp_walrus = df->f << lzc;
  int tmp_sign = df->sign;
@@ -182,19 +200,19 @@ uint32 V810_FP_Ops::fpim_encode(fpim* df)
  return (tmp_sign << 31) | ((tmp_exp + 127) << 23) | (tmp_walrus & 0x7FFFFF);
 }
 
-uint32 V810_FP_Ops::mul(uint32 a, uint32 b)
+uint32 V810_FP_Ops_mul(uint32 a, uint32 b)
 {
  fpim ins[2];
  fpim res;
 
- if(fp_is_inf_nan_sub(a) || fp_is_inf_nan_sub(b))
+ if(V810_FP_Ops_fp_is_inf_nan_sub(a) || V810_FP_Ops_fp_is_inf_nan_sub(b))
  {
   exception_flags |= flag_reserved;
   return(~0U);
  }
 
- fpim_decode(&ins[0], a);
- fpim_decode(&ins[1], b);
+ V810_FP_Ops_fpim_decode(&ins[0], a);
+ V810_FP_Ops_fpim_decode(&ins[1], b);
 
  //printf("%08x %08x - %d %d %d - %d %d %d\n", a, b, a_exp, a_walrus, a_sign, b_exp, b_walrus, b_sign);
 
@@ -202,12 +220,12 @@ uint32 V810_FP_Ops::mul(uint32 a, uint32 b)
  res.f = ins[0].f * ins[1].f;
  res.sign = ins[0].sign ^ ins[1].sign;
 
- fpim_round(&res);
+ V810_FP_Ops_fpim_round(&res);
 
- return fpim_encode(&res);
+ return V810_FP_Ops_fpim_encode(&res);
 }
 
-uint32 V810_FP_Ops::add(uint32 a, uint32 b)
+uint32 V810_FP_Ops_add(uint32 a, uint32 b)
 {
  fpim ins[2];
  fpim res;
@@ -215,7 +233,7 @@ uint32 V810_FP_Ops::add(uint32 a, uint32 b)
  int64 tr;
  int max_exp;
 
- if(fp_is_inf_nan_sub(a) || fp_is_inf_nan_sub(b))
+ if(V810_FP_Ops_fp_is_inf_nan_sub(a) || V810_FP_Ops_fp_is_inf_nan_sub(b))
  {
   exception_flags |= flag_reserved;
   return(~0U);
@@ -226,8 +244,8 @@ uint32 V810_FP_Ops::add(uint32 a, uint32 b)
   return(a & 0x80000000);
  }
 
- fpim_decode(&ins[0], a);
- fpim_decode(&ins[1], b);
+ V810_FP_Ops_fpim_decode(&ins[0], a);
+ V810_FP_Ops_fpim_decode(&ins[1], b);
 
  max_exp = std::max<int>(ins[0].exp, ins[1].exp);
 
@@ -277,36 +295,36 @@ uint32 V810_FP_Ops::add(uint32 a, uint32 b)
  res.f = tr;
  res.exp = max_exp - 24;
 
- fpim_round(&res);
+ V810_FP_Ops_fpim_round(&res);
 
- return fpim_encode(&res);
+ return V810_FP_Ops_fpim_encode(&res);
 }
 
-uint32 V810_FP_Ops::sub(uint32 a, uint32 b)
+uint32 V810_FP_Ops_sub(uint32 a, uint32 b)
 {
- return add(a, b ^ 0x80000000);
+ return V810_FP_Ops_add(a, b ^ 0x80000000);
 }
 
-uint32 V810_FP_Ops::div(uint32 a, uint32 b)
+uint32 V810_FP_Ops_div(uint32 a, uint32 b)
 {
  fpim ins[2];
  fpim res;
  uint64 mtmp;
 
- if(fp_is_inf_nan_sub(a) || fp_is_inf_nan_sub(b))
+ if(V810_FP_Ops_fp_is_inf_nan_sub(a) || V810_FP_Ops_fp_is_inf_nan_sub(b))
  {
   exception_flags |= flag_reserved;
   return(~0U);
  }
 
- if(fp_is_zero(a) && fp_is_zero(b))
+ if(V810_FP_Ops_fp_is_zero(a) && V810_FP_Ops_fp_is_zero(b))
  {
   exception_flags |= flag_invalid;
   return(~0U);
  }
 
- fpim_decode(&ins[0], a);
- fpim_decode(&ins[1], b);
+ V810_FP_Ops_fpim_decode(&ins[0], a);
+ V810_FP_Ops_fpim_decode(&ins[1], b);
 
  res.sign = ins[0].sign ^ ins[1].sign;
 
@@ -332,23 +350,23 @@ uint32 V810_FP_Ops::div(uint32 a, uint32 b)
    res.f |= 1;
  }
 
- fpim_round(&res);
+ V810_FP_Ops_fpim_round(&res);
 
- return fpim_encode(&res);
+ return V810_FP_Ops_fpim_encode(&res);
 }
 
-int V810_FP_Ops::cmp(uint32 a, uint32 b)
+int V810_FP_Ops_cmp(uint32 a, uint32 b)
 {
  fpim ins[2];
 
- if(fp_is_inf_nan_sub(a) || fp_is_inf_nan_sub(b))
+ if(V810_FP_Ops_fp_is_inf_nan_sub(a) || V810_FP_Ops_fp_is_inf_nan_sub(b))
  {
   exception_flags |= flag_reserved;
   return(~0U);
  }
 
- fpim_decode(&ins[0], a);
- fpim_decode(&ins[1], b);
+ V810_FP_Ops_fpim_decode(&ins[0], a);
+ V810_FP_Ops_fpim_decode(&ins[1], b);
 
  if(ins[0].exp > ins[1].exp)
   return(ins[0].sign ? -1 : 1);
@@ -368,7 +386,7 @@ int V810_FP_Ops::cmp(uint32 a, uint32 b)
  return(0);
 }
 
-uint32 V810_FP_Ops::itof(uint32 v)
+uint32 V810_FP_Ops_itof(uint32 v)
 {
  fpim res;
 
@@ -376,26 +394,26 @@ uint32 V810_FP_Ops::itof(uint32 v)
  res.exp = 23;
  res.f = res.sign ? (0x80000000 - (v & 0x7FFFFFFF)) : (v & 0x7FFFFFFF);
 
- fpim_round(&res);
+ V810_FP_Ops_fpim_round(&res);
 
- return fpim_encode(&res);
+ return V810_FP_Ops_fpim_encode(&res);
 }
 
 
-uint32 V810_FP_Ops::ftoi(uint32 v, bool truncate)
+uint32 V810_FP_Ops_ftoi(uint32 v, bool truncate)
 {
  fpim ins;
  int sa;
  int ret;
 
- if(fp_is_inf_nan_sub(v))
+ if(V810_FP_Ops_fp_is_inf_nan_sub(v))
  {
   exception_flags |= flag_reserved;
   return(~0U);
  }
 
- fpim_decode(&ins, v);
- fpim_round_int(&ins, truncate);
+ V810_FP_Ops_fpim_decode(&ins, v);
+ V810_FP_Ops_fpim_round_int(&ins, truncate);
 
  sa = ins.exp - 23;
 

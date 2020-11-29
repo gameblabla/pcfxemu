@@ -4,12 +4,11 @@
 #ifndef V810_CPU_H_
 #define V810_CPU_H_
 
-#include <stdlib.h>
-#include <math.h>
+#include <vector>
 
-#include "softfloat.h"
-#include "../../mednafen-types.h"
-#include "../../state.h"
+#include "v810_fp_ops.h"
+
+typedef int32 v810_timestamp_t;
 
 #define V810_FAST_MAP_SHIFT	16
 #define V810_FAST_MAP_PSIZE     (1 << V810_FAST_MAP_SHIFT)
@@ -125,51 +124,50 @@ enum
 #define TESTCOND_GE             (!((!!(S_REG[PSW]&PSW_S))^(!!(S_REG[PSW]&PSW_OV))))
 #define TESTCOND_GT             (! (((!!(S_REG[PSW]&PSW_S))^(!!(S_REG[PSW]&PSW_OV))) || (S_REG[PSW]&PSW_Z)) )
 
+// Tag layout
+//  Bit 0-21: TAG31-TAG10
+//  Bit 22-23: Validity bits(one for each 4-byte subblock)
+//  Bit 24-27: NECRV("Reserved")
+//  Bit 28-31: 0
 
-//
-// WARNING: Do NOT instantiate this class in multiple threads in such a way that both threads can be inside a method of this class at the same time.
-// To fix this, you'll need to put locks or something(re-engineer it to use state passed in through pointers) around the SoftFloat code.
-//
-extern v810_timestamp_t next_event_ts;
-extern v810_timestamp_t v810_timestamp;	// Will never be less than 0.
+ // Pass TRUE for vb_mode if we're emulating a VB-specific enhanced V810 CPU core
+ bool V810_Init();
+ void V810_Kill(void);
 
-// Pass TRUE for vb_mode if we're emulating a VB-specific enhanced V810 CPU core
-bool V810_Init(void);
-void V810_Kill(void);
+ void V810_SetInt(int level);
 
-void V810_SetInt(int level);
+ void V810_SetMemWriteBus32(uint8 A, bool value);
+ void V810_SetMemReadBus32(uint8 A, bool value);
 
-void V810_SetMemWriteBus32(uint8 A, bool value);
-void V810_SetMemReadBus32(uint8 A, bool value);
+ void V810_SetMemReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t &, uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t &, uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t &, uint32));
+ void V810_SetMemWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t &, uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t &, uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t &, uint32, uint32));
 
+ void V810_SetIOReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t &, uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t &, uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t &, uint32));
+ void V810_SetIOWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t &, uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t &, uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t &, uint32, uint32));
 
-void V810_SetMemReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t , uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t , uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t , uint32));
-void V810_SetMemWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t , uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t , uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t , uint32, uint32));
-void V810_SetIOReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t , uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t , uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t , uint32));
-void V810_SetIOWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t , uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t , uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t , uint32, uint32));
+ // Length specifies the number of bytes to map in, at each location specified by addresses[] (for mirroring)
+ uint8 *V810_SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses, const char *name);
 
+ INLINE void V810_ResetTS(v810_timestamp_t new_base_timestamp);
+ INLINE void V810_SetEventNT(const v810_timestamp_t timestamp);
+ INLINE v810_timestamp_t V810_GetEventNT(void);
 
-// Length specifies the number of bytes to map in, at each location specified by addresses[] (for mirroring)
-uint8 *V810_SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses, const char *name);
+ v810_timestamp_t V810_Run(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp));
+ void V810_Exit(void);
 
-v810_timestamp_t V810_Run(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp));
-void V810_Exit(void);
+ void V810_Reset(void);
 
-void V810_Reset(void);
+ int V810_StateAction(StateMem *sm, int load, int data_only);
 
-int V810_StateAction(StateMem *sm, int load, int data_only);
-uint32 V810_GetPC(void);
-void V810_SetPC(uint32);
+ uint32 V810_GetPC(void);
+ void V810_SetPC(uint32);
 
-uint32 V810_GetPR(const unsigned int which);
-void V810_SetPR(const unsigned int which, uint32 value);
+ uint32 V810_GetPR(const unsigned int which);
+ void V810_SetPR(const unsigned int which, uint32 value);
 
-uint32 V810_GetSR(const unsigned int which);
-void V810_SetSR(const unsigned int which, uint32 value);
-
-extern void V810_ResetTS(v810_timestamp_t new_base_timestamp);
-#define V810_SetEventNT(a) next_event_ts = a;
-#define V810_GetEventNT(a) next_event_ts
-
+ uint32 V810_GetSR(const unsigned int which);
+ 
+  v810_timestamp_t v810_timestamp;	// Will never be less than 0.
+ 
 #endif
 
