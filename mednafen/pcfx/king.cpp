@@ -332,7 +332,7 @@ static INLINE void RebuildLayerPrioCache(void)
    Done[LAYER_RAINBOW] = true;
   }
  }
- assert(RemapPriority <= 8);
+ //assert(RemapPriority <= 8);
 
  //if(fx_vce.raster_counter == 50)
  // MDFN_DispMessage("%d BG0: %d %d %d %d, VBG: %d, VSPR: %d, RAIN: %d", vr->LayerPriority[0], vr->LayerPriority[1], vr->LayerPriority[2], vr->LayerPriority[3],
@@ -2786,7 +2786,7 @@ static INLINE void RunVDCs(const int master_cycles, uint16 *pixels0, uint16 *pix
  if(pixels1)
   pixels1 += vdc_lb_pos;
 
- assert((vdc_lb_pos + div_clocks) <= 512);
+ //assert((vdc_lb_pos + div_clocks) <= 512);
 
  fx_vce.vdc_event[0] = vdc_chips[0]->Run(div_clocks, pixels0, pixels0 ? false : true);
  fx_vce.vdc_event[1] = vdc_chips[1]->Run(div_clocks, pixels1, pixels1 ? false : true);
@@ -2824,7 +2824,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
    RunVDCs(chunk_clocks, vdc_linebuffers[0], vdc_linebuffers[1]);
   }
 
-  assert(HPhaseCounter >= 0);
+  //assert(HPhaseCounter >= 0);
 
   while(HPhaseCounter <= 0)
   {

@@ -296,7 +296,7 @@ int CDIF_MT::ReadThreadStart()
                   static const int speedmult_ra = 2;
                   int32_t new_lba = msg.args[0];
 
-                  assert((unsigned int)max_ra < (SBSize / 4));
+                  //assert((unsigned int)max_ra < (SBSize / 4));
 
                   if(new_lba == (last_read_lba + 1))
                   {
@@ -323,7 +323,7 @@ int CDIF_MT::ReadThreadStart()
       if(ra_count && ra_lba == LBA_Read_Maximum)
       {
          ra_count = 0;
-         //printf("Ephemeral scarabs: %d!\n", ra_lba);
+         ////printf("Ephemeral scarabs: %d!\n", ra_lba);
       }
 
       if(ra_count)
@@ -417,11 +417,11 @@ bool CDIF_MT::ReadRawSector(uint8_t *buf, int32_t lba)
 
    if(lba < LBA_Read_Minimum || lba > LBA_Read_Maximum)
    {
-      printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
+      //printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
       memset(buf, 0, 2352 + 96);
       return(false);
    }
-   //fprintf(stderr, "%d\n", ra_lba - lba);
+   //f//printf(stderr, "%d\n", ra_lba - lba);
 
    ReadThreadQueue.Write(CDIF_Message(CDIF_MSG_READ_SECTOR, lba));
 
@@ -458,7 +458,7 @@ bool CDIF_MT::ReadRawSectorPWOnly(uint8_t* pwbuf, int32_t lba, bool hint_fullrea
 
    if(lba < LBA_Read_Minimum || lba > LBA_Read_Maximum)
    {
-      printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
+      //printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
       memset(pwbuf, 0, 96);
       return(false);
    }
@@ -533,7 +533,7 @@ int CDIF::ReadSector(uint8_t* buf, int32_t lba, uint32_t sector_count, bool supp
       }
       else
       {
-         printf("CDIF_ReadSector() invalid sector type at LBA=%u\n", (unsigned int)lba);
+         //printf("CDIF_ReadSector() invalid sector type at LBA=%u\n", (unsigned int)lba);
          return(false);
       }
 
@@ -560,7 +560,8 @@ CDIF_ST::CDIF_ST(CDAccess *cda) : disc_cdaccess(cda)
 
    if(disc_toc.first_track < 1 || disc_toc.last_track > 99 || disc_toc.first_track > disc_toc.last_track)
    {
-      throw(MDFN_Error(0, "TOC first(%d)/last(%d) track numbers bad.", disc_toc.first_track, disc_toc.last_track));
+	   
+      //throw(MDFN_Error(0, "TOC first(%d)/last(%d) track numbers bad.", disc_toc.first_track, disc_toc.last_track));
    }
 }
 
@@ -584,7 +585,7 @@ bool CDIF_ST::ReadRawSector(uint8_t *buf, int32_t lba)
 
    if(lba < LBA_Read_Minimum || lba > LBA_Read_Maximum)
    {
-      printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
+      //printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
       memset(buf, 0, 2352 + 96);
       return(false);
    }
@@ -604,7 +605,7 @@ bool CDIF_ST::ReadRawSectorPWOnly(uint8_t* pwbuf, int32_t lba, bool hint_fullrea
 
    if(lba < LBA_Read_Minimum || lba > LBA_Read_Maximum)
    {
-      printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
+      //printf("Attempt to read sector out of bounds; LBA=%d\n", lba);
       memset(pwbuf, 0, 96);
       return(false);
    }

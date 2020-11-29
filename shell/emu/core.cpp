@@ -57,7 +57,6 @@ uint8_t exit_vb = 0;
 extern uint32_t emulator_state;
 
 static MDFNGI *game;
-static bool failed_init;
 std::string retro_base_directory;
 std::string retro_save_directory;
 
@@ -374,7 +373,6 @@ static void SetRegGroups(void);
 
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
-   V810_Emu_Mode cpu_mode;
    std::string biospath    = MDFN_MakeFName(MDFNMKF_FIRMWARE, 0, MDFN_GetSettingS("pcfx.bios"));
    MDFNFILE *BIOSFile      = file_open(biospath.c_str());
 
@@ -1185,7 +1183,6 @@ void Emulation_Run()
 	EmulateSpecStruct spec = {0};
 	static int16_t sound_buf[0x10000];
 	static int32 rects[FB_MAX_HEIGHT];
-	MDFNGI *curgame = game;
 	rects[0] = ~0;
 
 	update_input();
@@ -1226,9 +1223,9 @@ void Emulation_Run()
       PrevInterlaced = false;
 #endif
 
-   int16 *const SoundBuf = spec.SoundBuf + spec.SoundBufSizeALMS * curgame->soundchan;
+   //int16 *const SoundBuf = spec.SoundBuf + spec.SoundBufSizeALMS * curgame->soundchan;
    int32 SoundBufSize = spec.SoundBufSize - spec.SoundBufSizeALMS;
-   const int32 SoundBufMaxSize = spec.SoundBufMaxSize - spec.SoundBufSizeALMS;
+   //const int32 SoundBufMaxSize = spec.SoundBufMaxSize - spec.SoundBufSizeALMS;
 
    spec.SoundBufSize = spec.SoundBufSizeALMS + SoundBufSize;
    Update_Video_Ingame();

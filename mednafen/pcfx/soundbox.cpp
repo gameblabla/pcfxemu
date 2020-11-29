@@ -60,8 +60,8 @@ struct SoundBox
    int32 smalldiv;
 
    int64 ResetAntiClick[2];
-   double VolumeFiltered[2][2];
-   double vf_xv[2][2][1+1], vf_yv[2][2][1+1];
+   float VolumeFiltered[2][2];
+   float vf_xv[2][2][1+1], vf_yv[2][2][1+1];
 
    int32 ADPCMDelta[2];
    int32 ADPCMHaveDelta[2];
@@ -77,7 +77,7 @@ struct SoundBox
 };
 
 static SoundBox sbox;
-static double ADPCMVolTable[0x40];
+static float ADPCMVolTable[0x40];
 
 static bool EmulateBuggyCodec;		// If true, emulate the buggy codec/algorithm used by an official PC-FX ADPCM encoder, rather than how the
 					// hardware actually works.
@@ -134,11 +134,11 @@ int SoundBox_Init(bool arg_EmulateBuggyCodec, bool arg_ResetAntiClickEnabled)
    // Build ADPCM volume table, 1.5dB per step, ADPCM volume settings of 0x0 through 0x1B result in silence.
    for(int x = 0; x < 0x40; x++)
    {
-      double flub = 1;
+      float flub = 1;
       int vti = 0x3F - x;
 
       if(x) 
-         flub /= powf(2, (double)1 / 4 * x);
+         flub /= powf(2, (float)1 / 4 * x);
 
       if(vti <= 0x1B)
          ADPCMVolTable[vti] = 0;
@@ -259,7 +259,7 @@ void SoundBox_SetKINGADPCMControl(uint32 value)
 static void DoVolumeFilter(int ch, int lr)
 {
    sbox.vf_xv[ch][lr][0] = sbox.vf_xv[ch][lr][1]; 
-   sbox.vf_xv[ch][lr][1] = (double)ADPCMVolTable[sbox.ADPCMVolume[ch][lr]] / 2.004348738e+03;
+   sbox.vf_xv[ch][lr][1] = (float)ADPCMVolTable[sbox.ADPCMVolume[ch][lr]] / 2.004348738e+03;
 
    sbox.vf_yv[ch][lr][0] = sbox.vf_yv[ch][lr][1]; 
    sbox.vf_yv[ch][lr][1] = (sbox.vf_xv[ch][lr][0] + sbox.vf_xv[ch][lr][1]) + (  0.9990021696 * sbox.vf_yv[ch][lr][0]);

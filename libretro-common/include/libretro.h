@@ -2144,8 +2144,8 @@ typedef void (RETRO_CALLCONV *retro_location_stop_t)(void);
 
 /* Get the position of the current location. Will set parameters to
  * 0 if no new  location update has happened since the last time. */
-typedef bool (RETRO_CALLCONV *retro_location_get_position_t)(double *lat, double *lon,
-      double *horiz_accuracy, double *vert_accuracy);
+typedef bool (RETRO_CALLCONV *retro_location_get_position_t)(float *lat, float *lon,
+      float *horiz_accuracy, float *vert_accuracy);
 
 /* Callback which signals when the location driver is initialized
  * and/or deinitialized.
@@ -2608,7 +2608,7 @@ struct retro_message_ext
     *   expected that the frontend itself may provide a
     *   notification in this case; if the core sends a
     *   message of type RETRO_MESSAGE_TYPE_NOTIFICATION, an
-    *   uncomfortable 'double-notification' may occur. A message
+    *   uncomfortable 'float-notification' may occur. A message
     *   of RETRO_MESSAGE_TYPE_NOTIFICATION_ALT should therefore
     *   be presented such that visual conflict with regular
     *   notifications does not occur
@@ -2730,8 +2730,8 @@ struct retro_game_geometry
 
 struct retro_system_timing
 {
-   double fps;             /* FPS of video content. */
-   double sample_rate;     /* Sampling rate of audio. */
+   float fps;             /* FPS of video content. */
+   float sample_rate;     /* Sampling rate of audio. */
 };
 
 struct retro_system_av_info

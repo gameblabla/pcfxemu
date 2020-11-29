@@ -93,12 +93,6 @@ int32_t smem_seek(StateMem *st, uint32_t offset, int whence)
       return(-1);
    }
 
-   if(st->loc < 0)
-   {
-      st->loc = 0;
-      return(-1);
-   }
-
    return(0);
 }
 
@@ -262,39 +256,6 @@ static SFORMAT *FindSF(const char *name, SFORMAT *sf)
    }
 
    return NULL;
-}
-
-// Fast raw chunk reader
-static void DOReadChunk(StateMem *st, SFORMAT *sf)
-{
-   while(sf->size || sf->name)       // Size can sometimes be zero, so also check for the text name.  
-      // These two should both be zero only at the end of a struct.
-   {
-      int32_t bytesize;
-      if(!sf->size || !sf->v)
-      {
-         sf++;
-         continue;
-      }
-
-      if(sf->size == (uint32_t) ~0) // Link to another SFORMAT struct
-      {
-         DOReadChunk(st, (SFORMAT *)sf->v);
-         sf++;
-         continue;
-      }
-
-      bytesize = sf->size;
-
-      // Loading raw data, bool types are stored as they appear in memory, not as single bytes in the full state format.
-      // In the SFORMAT structure, the size member for bool entries is the number of bool elements, not the total in-memory size,
-      // so we adjust it here.
-      if(sf->flags & MDFNSTATE_BOOL)
-         bytesize *= sizeof(bool);
-
-      smem_read(st, (uint8_t *)sf->v, bytesize);
-      sf++;
-   }
 }
 
 static int ReadStateChunk(StateMem *st, SFORMAT *sf, int size)

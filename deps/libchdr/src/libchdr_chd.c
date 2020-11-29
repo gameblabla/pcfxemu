@@ -2533,8 +2533,6 @@ static void zlib_codec_free(void *codec)
 	/* deinit the streams */
 	if (data != NULL)
 	{
-		int i;
-
 		inflateEnd(&data->inflater);
 
 		/* free our fast memory */

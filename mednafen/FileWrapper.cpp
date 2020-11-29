@@ -40,12 +40,13 @@ FileWrapper::FileWrapper(const char *path, const int mode, const char *purpose) 
  else
   fp = filestream_open(path, RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
 
- if(!fp)
+  /* Gameblabla - fix later */
+ /*if(!fp)
  {
   ErrnoHolder ene(errno);
 
   throw(MDFN_Error(ene.Errno(), "Error opening file %s", ene.StrError()));
- }
+ }*/
 }
 
 FileWrapper::~FileWrapper()

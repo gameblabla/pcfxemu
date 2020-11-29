@@ -272,7 +272,7 @@ static bool BuildHuffmanLUT(const HuffmanTable *table, HuffmanQuickLUT *qlut, co
     {
      int lut_index = (i << (bitmax - numbits)) + b;
 
-     assert(lut_index < (1 << bitmax));
+     //assert(lut_index < (1 << bitmax));
 
      qlut->lut[lut_index] = table->codes[table->base[numbits] + (i - table->minimum[numbits])];
      qlut->lut_bits[lut_index] = numbits;
@@ -490,8 +490,8 @@ static void decode(int32 *dct, const uint32 *QuantTable, const int32 dc, const H
 {
  int32 coeff;
  int32 zeroes;
- int count;
- int index;
+ uint_fast32_t count;
+ uint_fast8_t index;
 
  dct[0] = (int16)(QuantTable[0] * dc);
  count = 0;

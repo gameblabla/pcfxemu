@@ -102,8 +102,8 @@ void FXTIMER_Write16(uint32 A, uint16 V, const v810_timestamp_t timestamp)
             counter = EFF_PERIOD;
          control = V & 0x7;
 
-         if(V & 0x4)
-            FXDBG("Timer control write with D2 set?");
+         /*if(V & 0x4)
+            FXDBG("Timer control write with D2 set?");*/
 
          PCFXIRQ_Assert(PCFXIRQ_SOURCE_TIMER, (bool)(control & 0x4));
          PCFX_SetEvent(PCFX_EVENT_TIMER, CalcNextEventTS(timestamp));
@@ -154,7 +154,7 @@ bool FXTIMER_GetRegister(const std::string &name, uint32 &value, std::string *sp
       if(special)
       {
          char buf[256];
-         snprintf(buf, 256, "Effective Period: %d; 21477272 / %d = %fHz", EFF_PERIOD, EFF_PERIOD, (double)21477272 / (EFF_PERIOD));
+         snprintf(buf, 256, "Effective Period: %d; 21477272 / %d = %fHz", EFF_PERIOD, EFF_PERIOD, (float)21477272 / (EFF_PERIOD));
          *special = std::string(buf);
       }
       return(TRUE);
@@ -162,12 +162,12 @@ bool FXTIMER_GetRegister(const std::string &name, uint32 &value, std::string *sp
    else if(name == "TCNTR")
    {
       value = counter;
-      if(special)
+      /*if(special)
       {
          //char buf[256];
          //snprintf(buf, 256, "Pad: %d, ??: %d, Timer: %d, Reset: %d",
          //*special = std::string(buf);
-      }
+      }*/
       return(TRUE);
    }
    return(FALSE);

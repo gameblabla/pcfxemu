@@ -315,7 +315,7 @@ static int cdrom_send_command_win32(const libretro_vfs_implementation_file *stre
 
    if (cmd[0] == 0xB9)
    {
-      double time_taken = (double)(((clock() - t) * 1000) / CLOCKS_PER_SEC);
+      float time_taken = (float)(((clock() - t) * 1000) / CLOCKS_PER_SEC);
       printf("time taken %f ms for DT received length %ld of %" PRId64 " for %02d:%02d:%02d to %02d:%02d:%02d%s req %d cur %d cur_lba %d\n", time_taken, sptd.s.DataTransferLength, len, cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], extra, lba_req, lba_cur, stream->cdrom.cur_lba);
       fflush(stdout);
    }
@@ -1203,7 +1203,7 @@ int cdrom_read(libretro_vfs_implementation_file *stream, cdrom_group_timeouts_t 
    /* MMC Command: READ CD MSF */
    unsigned char cdb[] = {0xB9, 0, 0, 0, 0, 0, 0, 0, 0, 0xF8, 0, 0};
    int rv;
-   double frames = ceil((len + skip) / 2352.0);
+   float frames = ceil((len + skip) / 2352.0);
    unsigned frame_end = cdrom_msf_to_lba(min, sec, frame) + frames;
 
    cdb[3] = min;

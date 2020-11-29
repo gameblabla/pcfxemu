@@ -24,14 +24,14 @@
 // Frequency cache cutoff optimization threshold (<= FREQC7M_COT)
 #define FREQC7M_COT	0x7 //0xA
 
-void PCE_PSG::SetVolume(double new_volume)
+void PCE_PSG::SetVolume(float new_volume)
 {
         for(int vl = 0; vl < 32; vl++)
         {
-         double flub = 1.0 * new_volume * 8 / 6;
+         float flub = 1.0 * new_volume * 8 / 6;
 
          if(vl)
-          flub /= powf(2, (double)1 / 4 * vl);                  // ~1.5dB reduction per increment of vl 
+          flub /= powf(2, (float)1 / 4 * vl);                  // ~1.5dB reduction per increment of vl 
 
 	 if(vl == 0x1F)
 	  flub = 0;
@@ -205,7 +205,7 @@ void PCE_PSG::RecalcNoiseFreqCache(int chnum)
 
 void PCE_PSG::PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uint8 *Buffer)
 {
- assert(ch <= 5);
+ //assert(ch <= 5);
 
  while(Length--)
  {
@@ -218,7 +218,7 @@ void PCE_PSG::PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uin
 
 void PCE_PSG::PokeWave(const unsigned int ch, uint32 Address, uint32 Length, const uint8 *Buffer)
 {
- assert(ch <= 5);
+ //assert(ch <= 5);
 
  while(Length--)
  {

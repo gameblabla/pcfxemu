@@ -53,7 +53,7 @@ int64_t MDFN_GetSettingI(const char *name)
    return 0;
 }
 
-double MDFN_GetSettingF(const char *name)
+float MDFN_GetSettingF(const char *name)
 {
    if (!strcmp("pcfx.resamp_rate_error", name))
       return 0.0000009;

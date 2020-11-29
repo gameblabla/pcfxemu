@@ -133,7 +133,7 @@ static gf8_t gf8_div(gf8_t a, gf8_t b)
 {
   int16_t sum;
 
-  assert(b != 0);
+  //assert(b != 0);
 
   if (a == 0)
     return 0;

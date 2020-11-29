@@ -194,7 +194,7 @@ bool CDAccess_CHD::Load(const std::string &path, bool image_memcache)
       else
         Tracks[x].index[i] = Tracks[x].LBA + (Tracks[x].index[i] - base);
 
-      assert(Tracks[x].index[i] >= 0);
+      //assert(Tracks[x].index[i] >= 0);
     }
   }
 

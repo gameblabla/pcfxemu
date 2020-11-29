@@ -2578,9 +2578,9 @@ static INLINE void RunCDDA(uint32_t system_timestamp, int32_t run_time)
     {
      static int16_t wv = 0x7FFF; //0x5000;
      static unsigned counter = 0;
-     static double phase = 0;
-     static double phase_inc = 0;
-     static const double phase_inc_inc = 0.000003 / 2;
+     static float phase = 0;
+     static float phase_inc = 0;
+     static const float phase_inc_inc = 0.000003 / 2;
 
      cdda.sr[0] = 32767 * sin(phase);
      cdda.sr[1] = 32767 * sin(phase);
@@ -3124,7 +3124,7 @@ void SCSICD_Init(int type, int cdda_time_div, int32_t* left_hrbuf, int32_t* righ
  CDStuffSubchannels = SSCFunc;
 }
 
-void SCSICD_SetCDDAVolume(double left, double right)
+void SCSICD_SetCDDAVolume(float left, float right)
 {
  cdda.CDDAVolume[0] = 65536 * left;
  cdda.CDDAVolume[1] = 65536 * right;

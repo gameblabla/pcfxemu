@@ -43,7 +43,7 @@
      #endif
      uint32 tmpop;
 
-     assert(timestamp_rl <= next_event_ts);
+     //assert(timestamp_rl <= next_event_ts);
 
      if(!IPendingCache)
      {
