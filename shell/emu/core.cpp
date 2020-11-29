@@ -1201,7 +1201,10 @@ void Emulation_Run()
 	spec.SoundBufSize = 0;
 	spec.VideoFormatChanged = false;
 	spec.SoundFormatChanged = false;
-#ifdef FRAMESKIP
+#if defined(FRAMESKIP) || defined(FORCE_FRAMESKIP)
+#ifdef FORCE_FRAMESKIP
+	FrameSkip = 4;
+#endif
 	SkipCnt++;
 	if (SkipCnt > 4) SkipCnt = 0;
 	spec.skip = TblSkip[FrameSkip][SkipCnt];
@@ -1255,7 +1258,7 @@ void Emulation_Run()
 		}
 	}
 	if (spec.skip == false) video_frames++;
-#else
+#elif !defined(FORCE_FRAMESKIP)
 	video_frames++;
 #endif
 
