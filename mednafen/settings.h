@@ -21,7 +21,7 @@ extern int setting_rainbow_chromaip;
 // be a totally tubular error!
 uint64_t MDFN_GetSettingUI(const char *name);
 int64_t MDFN_GetSettingI(const char *name);
-double MDFN_GetSettingF(const char *name);
+float MDFN_GetSettingF(const char *name);
 bool MDFN_GetSettingB(const char *name);
 const char *MDFN_GetSettingS(const char *name);
 

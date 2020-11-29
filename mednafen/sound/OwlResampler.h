@@ -96,7 +96,7 @@ class OwlResampler
 	//
 	// quality is an arbitrary control of quality(0 for lowest quality, 5 for highest quality)
 	//
-	OwlResampler(double input_rate, double output_rate, double rate_error, double debias_corner, int quality) MDFN_COLD;
+	OwlResampler(float input_rate, float output_rate, float rate_error, float debias_corner, int quality) MDFN_COLD;
 	OwlResampler(const OwlResampler &resamp) MDFN_COLD;
 	~OwlResampler() MDFN_COLD;
 
@@ -113,7 +113,7 @@ class OwlResampler
 	private:
 
 	// Copy of the parameters passed to the constructor
-	double InputRate, OutputRate, RateError, DebiasCorner;
+	float InputRate, OutputRate, RateError, DebiasCorner;
 	int Quality;
 
         // Number of phases.

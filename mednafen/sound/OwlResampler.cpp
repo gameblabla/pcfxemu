@@ -158,11 +158,6 @@ void OwlBuffer::Integrate(unsigned count, unsigned lp_shift, unsigned hp_shift, 
   else
    accum = ProcessLoop<0, true, 3, false, false, true>(count, accum, Buf());
  }
-
- if(accum >= 32767 * 256 * 8 || accum <= -32767 * 256 * 8)
- {
-  //printf("Possible delta sample loss; accum=%d\n", accum);
- }
 }
 
 //
@@ -215,24 +210,24 @@ void RavenBuffer::Finish(unsigned count)
 
 
 
-static void kaiser_window( double* io, int count, double beta )
+static void kaiser_window( float* io, int count, float beta )
 {
         int const accuracy = 16; //12;
 
-        double* end = io + count;
+        float* end = io + count;
 
-        double beta2    = beta * beta * (double) -0.25;
-        double to_fract = beta2 / ((double) count * count);
-        double i        = 0;
-        double rescale = 0; // Doesn't need an initializer, to shut up gcc
+        float beta2    = beta * beta * (float) -0.25;
+        float to_fract = beta2 / ((float) count * count);
+        float i        = 0;
+        float rescale = 0; // Doesn't need an initializer, to shut up gcc
 
         for ( ; io < end; ++io, i += 1 )
         {
-                double x = i * i * to_fract - beta2;
-                double u = x;
-                double k = x + 1;
+                float x = i * i * to_fract - beta2;
+                float u = x;
+                float k = x + 1;
 
-                double n = 2;
+                float n = 2;
                 do
                 {
                         u *= x / (n * n);
@@ -248,17 +243,17 @@ static void kaiser_window( double* io, int count, double beta )
         }
 }
 
-static void gen_sinc( double* out, int size, double cutoff, double kaiser )
+static void gen_sinc( float* out, int size, float cutoff, float kaiser )
 {
 	//assert( size % 2 == 0 ); // size must be enev
  
 	int const half_size = size / 2;
-	double* const mid = &out [half_size];
+	float* const mid = &out [half_size];
  
 	// Generate right half of sinc
 	for ( int i = 0; i < half_size; i++ )
 	{
-		double angle = (i * 2 + 1) * (M_PI / 2);
+		float angle = (i * 2 + 1) * (M_PI / 2);
 		mid [i] = sin( angle * cutoff ) / angle;
 	}
  
@@ -269,13 +264,13 @@ static void gen_sinc( double* out, int size, double cutoff, double kaiser )
 		out [i] = mid [half_size - 1 - i];
 }
  
-static void normalize( double* io, int size, double gain = 1.0 )
+static void normalize( float* io, int size, float gain = 1.0 )
 {
-	double sum = 0;
+	float sum = 0;
 	for ( int i = 0; i < size; i++ )
 		sum += io [i];
 
-	double scale = gain / sum;
+	float scale = gain / sum;
 	for ( int i = 0; i < size; i++ )
 		io [i] *= scale;
 }
@@ -642,13 +637,13 @@ static float FilterDenormal(float v)
  return(v);
 }
 
-OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_error, double debias_corner, int quality)
+OwlResampler::OwlResampler(float input_rate, float output_rate, float rate_error, float debias_corner, int quality)
 {
- double *FilterBuf = NULL;
- double cutoff;
- double required_bandwidth;
- double k_beta;
- double k_d;
+ float *FilterBuf = NULL;
+ float cutoff;
+ float required_bandwidth;
+ float k_beta;
+ float k_d;
 
  //assert(sizeof(OwlBuffer::I32_F_Pudding) == 4);
 
@@ -664,8 +659,8 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
  // Get the number of phases required, and adjust ratio.
  {
-  double s_ratio = (double)input_rate / output_rate;
-  double findo = 0;
+  float s_ratio = (float)input_rate / output_rate;
+  float findo = 0;
   uint32 count = 0;
   uint32 findo_i;
 
@@ -699,14 +694,14 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
   //MDFN_printf("Phases: %d, Output rate: %f, %d %d\n", NumPhases, input_rate * ratio, Ratio_Dividend, Ratio_Divisor);
 
-  //MDFN_printf("Desired maximum rate error: %.10f, Actual rate error: %.10f\n", rate_error, fabs((double)input_rate / output_rate * ratio - 1));
+  //MDFN_printf("Desired maximum rate error: %.10f, Actual rate error: %.10f\n", rate_error, fabs((float)input_rate / output_rate * ratio - 1));
  }
 
  static const struct
  {
-  double beta;
-  double d;
-  double obw;
+  float beta;
+  float d;
+  float obw;
  } QualityTable[7] =
  {
   {  5.658, 3.62,  0.65 },
@@ -732,14 +727,14 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 #define OWLRESAMP_FCALC_RATE_CLAMP 48000.0 //192000.0 //96000.0 //48000.0 // 128000.0
 
  // A little SOMETHING to widen the transition band a bit to reduce computational complexity with higher output rates.
- const double something = std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, (48000.0 + std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, output_rate)) / 2 / QualityTable[quality].obw);
+ const float something = std::min<float>(OWLRESAMP_FCALC_RATE_CLAMP, (48000.0 + std::min<float>(OWLRESAMP_FCALC_RATE_CLAMP, output_rate)) / 2 / QualityTable[quality].obw);
 
  //
  // Note: Cutoff calculation is performed again(though slightly differently) down below after the SIMD check.
  //
- cutoff = QualityTable[quality].obw * (std::min<double>(something, std::min<double>(input_rate, output_rate)) / input_rate);
+ cutoff = QualityTable[quality].obw * (std::min<float>(something, std::min<float>(input_rate, output_rate)) / input_rate);
 
- required_bandwidth = (std::min<double>(OWLRESAMP_FCALC_RATE_CLAMP, std::min<double>(input_rate, output_rate)) / input_rate) - cutoff;
+ required_bandwidth = (std::min<float>(OWLRESAMP_FCALC_RATE_CLAMP, std::min<float>(input_rate, output_rate)) / input_rate) - cutoff;
 
  NumCoeffs = ceil(k_d / required_bandwidth);
 
@@ -796,7 +791,7 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
  //
  // Adjust cutoff now that NumCoeffs may have been increased.
  //
- cutoff = std::min<double>(QualityTable[quality].obw * something / input_rate, (std::min<double>(input_rate, output_rate) / input_rate - ((double)k_d / NumCoeffs)));
+ cutoff = std::min<float>(QualityTable[quality].obw * something / input_rate, (std::min<float>(input_rate, output_rate) / input_rate - ((float)k_d / NumCoeffs)));
 
  //MDFN_printf("Adjusted number of coefficients per phase: %u\n", NumCoeffs);
  //MDFN_printf("Adjusted nominal cutoff frequency: %f\n", InputRate * cutoff / 2);
@@ -819,7 +814,7 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
  //MDFN_printf("Impulse response table memory usage: %d bytes\n", (int)((sizeof(int32) * NumCoeffs_Padded + 16) * NumPhases));
 
 
- FilterBuf = (double *)malloc(sizeof(double) * NumCoeffs * NumPhases);
+ FilterBuf = (float *)malloc(sizeof(float) * NumCoeffs * NumPhases);
  gen_sinc(FilterBuf, NumCoeffs * NumPhases, cutoff / NumPhases, k_beta);
  normalize(FilterBuf, NumCoeffs * NumPhases); 
 
@@ -831,7 +826,7 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
  for(unsigned int phase = 0; phase < NumPhases; phase++)
  {
-  double sum_d = 0;
+  float sum_d = 0;
   float sum_f4[4] = { 0, 0, 0, 0 };
 
   const unsigned sp = (NumPhases - 1 - (((uint64)phase * Ratio_Dividend) % NumPhases));
@@ -839,7 +834,7 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
   for(unsigned int i = 0; i < NumCoeffs; i++)
   {
-   double tmpcod = FilterBuf[i * NumPhases + sp] * NumPhases;	// Tasty cod.
+   float tmpcod = FilterBuf[i * NumPhases + sp] * NumPhases;	// Tasty cod.
 
    FIR_Coeffs[tp][i].f = FilterDenormal(tmpcod);
    sum_d += FIR_Coeffs[tp][i].f;
@@ -848,10 +843,10 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
 
 #if 0
   {
-   double sf4t = (sum_f4[0] + sum_f4[2]) + (sum_f4[1] + sum_f4[3]);
-   double sd_div_sf4t = sum_d / sf4t;
+   float sf4t = (sum_f4[0] + sum_f4[2]) + (sum_f4[1] + sum_f4[3]);
+   float sd_div_sf4t = sum_d / sf4t;
 
-   //MDFN_printf("Phase %4u: sum_d=%.10f, sum_f4t=%.10f, sum_d div sum_f4t=%.10f(*65536=%f, dB=%.8f)\n", sp, sum_d, (double)sf4t, sd_div_sf4t, 65536.0 * sd_div_sf4t, fabs(20 * log10(sum_d / sf4t)));
+   //MDFN_printf("Phase %4u: sum_d=%.10f, sum_f4t=%.10f, sum_d div sum_f4t=%.10f(*65536=%f, dB=%.8f)\n", sp, sum_d, (float)sf4t, sd_div_sf4t, 65536.0 * sd_div_sf4t, fabs(20 * log10(sum_d / sf4t)));
   }
 #endif
  }

@@ -99,13 +99,13 @@ typedef int ssize_t;
        * So the equivalent of the implementations from math.h are used as
        * defines here instead, and it seems to work.
        */
-      #define cosf(x) ((float)cos((double)x))
-      #define powf(x, y) ((float)pow((double)x, (double)y))
-      #define sinf(x) ((float)sin((double)x))
-      #define ceilf(x) ((float)ceil((double)x))
-      #define floorf(x) ((float)floor((double)x))
-      #define sqrtf(x) ((float)sqrt((double)x))
-      #define fabsf(x)    ((float)fabs((double)(x)))
+      #define cosf(x) ((float)cos((float)x))
+      #define powf(x, y) ((float)pow((float)x, (float)y))
+      #define sinf(x) ((float)sin((float)x))
+      #define ceilf(x) ((float)ceil((float)x))
+      #define floorf(x) ((float)floor((float)x))
+      #define sqrtf(x) ((float)sqrt((float)x))
+      #define fabsf(x)    ((float)fabs((float)(x)))
    #endif
 
    #ifndef _strtoui64

@@ -303,7 +303,7 @@ void VDC::SetLayerEnableMask(uint64 mask)
 
 void VDC::RunSATDMA(int32 cycles, bool force_completion)
 {
- assert(sat_dma_counter > 0);
+ //assert(sat_dma_counter > 0);
 
  if(force_completion)
   cycles = sat_dma_counter;
@@ -728,7 +728,7 @@ int32 VDC::Run(int32 clocks, uint16 *pixels, bool skip)
 
   HPhaseCounter -= chunk_clocks;
 
-  assert(HPhaseCounter >= 0);
+  //assert(HPhaseCounter >= 0);
 
   while(HPhaseCounter <= 0)
   {
@@ -758,7 +758,7 @@ int32 VDC::Run(int32 clocks, uint16 *pixels, bool skip)
     case HPHASE_HDS_PART3:
 		     HPhaseCounter = (HDS_cache + 1) * 8 - TimeFromHDSStartToBYRLatch() - TimeFromBYRLatchToBXRLatch();
 
-		     assert(HPhaseCounter > 0);
+		     //assert(HPhaseCounter > 0);
 
 		     BG_XOffset = BXR;
 		     break;
@@ -1240,8 +1240,8 @@ void VDC::DoWaitStates(void)
  //if(did_wait)
  // printf("End of wait stating: %d %d\n", VDMA_CycleCounter, sat_dma_counter);
 
- assert(!pending_read);
- assert(!pending_write);
+ //assert(!pending_read);
+ //assert(!pending_write);
 }
 
 uint8 VDC::Read(uint32 A, int32 &next_event, bool peek)
@@ -1731,8 +1731,8 @@ VDC::VDC(bool nospritelimit, uint32 par_VRAM_Size)
  unlimited_sprites = nospritelimit; //MDFN_GetSettingB("pce.nospritelimit");
  userle = ~0;
 
- assert(par_VRAM_Size == round_up_pow2(par_VRAM_Size));
- assert(par_VRAM_Size >= 16 && par_VRAM_Size <= 65536);
+ //assert(par_VRAM_Size == round_up_pow2(par_VRAM_Size));
+ //assert(par_VRAM_Size >= 16 && par_VRAM_Size <= 65536);
 
  VRAM_Size = par_VRAM_Size;
  VRAM_SizeMask = VRAM_Size - 1;

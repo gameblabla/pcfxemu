@@ -97,7 +97,7 @@ void SCSICD_Init(int type, int CDDATimeDiv, int32_t* left_hrbuf, int32_t* right_
 void SCSICD_Close(void);
 
 void SCSICD_SetTransferRate(uint32_t TransferRate);
-void SCSICD_SetCDDAVolume(double left, double right);
+void SCSICD_SetCDDAVolume(float left, float right);
 int SCSICD_StateAction(StateMem *sm, const unsigned load, const bool data_only, const char *sname);
 
 void SCSICD_SetDisc(bool tray_open, CDIF *cdif, bool no_emu_side_effects = false);

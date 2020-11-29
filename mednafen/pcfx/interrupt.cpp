@@ -55,7 +55,7 @@ static void BuildInterruptCache(void)
 
 void PCFXIRQ_Assert(int source, bool assert)
 {
-   assert(source >= 0 && source <= 7);
+   //assert(source >= 0 && source <= 7);
 
    InterruptAsserted &= ~(1 << (7 - source));
 

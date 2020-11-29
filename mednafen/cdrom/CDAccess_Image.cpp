@@ -975,7 +975,7 @@ bool CDAccess_Image::ImageOpen(const std::string& path, bool image_memcache)
          else
             Tracks[x].index[i] = Tracks[x].LBA + (Tracks[x].index[i] - base);
 
-         assert(Tracks[x].index[i] >= 0);
+         //assert(Tracks[x].index[i] >= 0);
       }
    }
 
@@ -1248,7 +1248,10 @@ int32_t CDAccess_Image::MakeSubPQ(int32_t lba, uint8_t *SubPWBuf) const
    }
 
    if(!track_found)
-      throw(MDFN_Error(0, "Could not find track for sector %u!", lba));
+   {
+	   return 0;
+      //throw(MDFN_Error(0, "Could not find track for sector %u!", lba));
+   }
 
    if(lba < Tracks[track].LBA)
       lba_relative = Tracks[track].LBA - 1 - lba;

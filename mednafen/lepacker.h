@@ -51,8 +51,9 @@ class LEPacker : public std::vector<uint8>
 
   if(read_mode)
   {
-   if((read_pos + sizeof(T)) > csize)
-    throw(std::out_of_range("LEPacker::operator^"));
+	  /* Gameblabla - Check this later */
+   /*if((read_pos + sizeof(T)) > csize)
+    throw(std::out_of_range("LEPacker::operator^"));*/
 
    uint8 *ptr = &(*this)[read_pos];
    val = 0;

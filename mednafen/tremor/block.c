@@ -311,7 +311,7 @@ int vorbis_synthesis_blockin(vorbis_dsp_state *v,vorbis_block *vb){
       prevCenter=n1;
     }
     
-    /* v->pcm is now used like a two-stage double buffer.  We don't want
+    /* v->pcm is now used like a two-stage float buffer.  We don't want
        to have to constantly shift *or* adjust memory usage.  Don't
        accept a new block until the old is shifted out */
     

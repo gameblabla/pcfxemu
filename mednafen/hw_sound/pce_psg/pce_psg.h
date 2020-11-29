@@ -114,7 +114,7 @@ class PCE_PSG
         void Power(const int32 timestamp);
         void Write(int32 timestamp, uint8 A, uint8 V);
 
-	void SetVolume(double new_volume);
+	void SetVolume(float new_volume);
 
 	void Update(int32 timestamp);
 	void ResetTS(int32 ts_base = 0);

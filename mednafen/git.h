@@ -207,7 +207,7 @@ typedef struct
 	bool SoundFormatChanged;
 
 	// Sound rate.  Set by driver side.
-	double SoundRate;
+	float SoundRate;
 
 	// Pointer to sound buffer, set by the driver code, that the emulation code should render sound to.
 	// Guaranteed to be at least 500ms in length, but emulation code really shouldn't exceed 40ms or so.  Additionally, if emulation code
@@ -231,13 +231,13 @@ typedef struct
 
 	// Current sound volume(0.000...<=volume<=1.000...).  If, after calling Emulate(), it is still != 1, Mednafen will handle it internally.
 	// Emulation modules can handle volume themselves if they like, for speed reasons.  If they do, afterwards, they should set its value to 1.
-	double SoundVolume;
+	float SoundVolume;
 
 	// Current sound speed multiplier.  Set by the driver code.  If, after calling Emulate(), it is still != 1, Mednafen will handle it internally
 	// by resampling the audio.  This means that emulation modules can handle(and set the value to 1 after handling it) it if they want to get the most
 	// performance possible.  HOWEVER, emulation modules must make sure the value is in a range(with minimum and maximum) that their code can handle
 	// before they try to handle it.
-	double soundmultiplier;
+	float soundmultiplier;
 
 	// True if we want to rewind one frame.  Set by the driver code.
 	bool NeedRewind;
@@ -261,7 +261,7 @@ typedef enum
 
 class CDIF;
 
- #define MDFN_MASTERCLOCK_FIXED(n)	((int64)((double)(n) * (1LL << 32)))
+ #define MDFN_MASTERCLOCK_FIXED(n)	((int64)((float)(n) * (1LL << 32)))
 
 typedef struct
 {
@@ -307,7 +307,7 @@ typedef struct
  VideoSystems VideoSystem;
  GameMediumTypes GameType;
 
- double mouse_sensitivity;
+ float mouse_sensitivity;
 } MDFNGI;
 
 #ifdef __cplusplus
