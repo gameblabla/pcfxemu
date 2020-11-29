@@ -636,7 +636,8 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
 
    if(!(Control & 0x01))
    {
-    puts("Rainbow decode when disabled!!");
+		/* Gameblabla */
+		/*puts("Rainbow decode when disabled!!");*/
     return;
    }
 

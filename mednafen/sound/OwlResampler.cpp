@@ -25,11 +25,7 @@
 #include <limits.h>
 #include <algorithm>
 
-#include <libretro.h>
-
 #include "OwlResampler.h"
-
-extern retro_get_cpu_features_t perf_get_cpu_features_cb;
 
 #ifndef M_PI
 #define M_PI 3.1415926535
@@ -40,7 +36,7 @@ extern retro_get_cpu_features_t perf_get_cpu_features_cb;
 #endif
 
 #ifdef __FAST_MATH__
- #error "OwlResampler.cpp not compatible with unsafe math optimizations!"
+ #warning "OwlResampler.cpp not compatible with unsafe math optimizations!"
 #endif
 
 OwlBuffer::OwlBuffer()
@@ -679,8 +675,6 @@ OwlResampler::OwlResampler(double input_rate, double output_rate, double rate_er
  IntermediateBuffer.resize(OutputRate * 4 / 50);	// *4 for safety padding, / min(50,60), an approximate calculation
 
  cpuext = 0;
- if (perf_get_cpu_features_cb)
-    cpuext = perf_get_cpu_features_cb();
 
  // Get the number of phases required, and adjust ratio.
  {

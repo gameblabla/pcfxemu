@@ -1,13 +1,13 @@
 PRGNAME     = pcfx.elf
-CC          = gcc
-CXX 		= g++
+CC          = /opt/gcw0-toolchain/bin/mipsel-linux-gcc
+CXX 		= /opt/gcw0-toolchain/bin/mipsel-linux-g++
 
 #### Configuration
 
 # Possible values : retrostone, rs97, rs90
 PORT = gcw0
 # Possible values : alsa, oss, portaudio
-SOUND_ENGINE = pulse
+SOUND_ENGINE = sdl
 
 #### End of Configuration
 
@@ -23,9 +23,12 @@ DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -DHAVE_CDROM -D_7ZIP_ST -DWA
 DEFINES		+= -DSIZEOF_DOUBLE=8 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_
 DEFINES		+= -DHAVE_CHD -D_7ZIP_ST -DPACKAGE_VERSION=\"1.3.3\" -DFLAC_API_EXPORTS -DFLAC__HAS_OGG=0 -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H
 
-CFLAGS		= -O2 -g3 -fno-common -Wall -Wextra -Wunused-value $(INCLUDES) $(DEFINES)
+
+CFLAGS		= -Wall -Wextra -Ofast -fdata-sections -ffunction-sections -fsection-anchors -fno-builtin -mplt -mframe-header-opt -mno-fp-exceptions -mno-check-zero-division -fsingle-precision-constant -fno-common -march=mips32r2 -mtune=mips32r2 -flto -fno-PIC -mno-shared
+CFLAGS		+= $(INCLUDES) $(DEFINES)
 CXXFLAGS	= $(CFLAGS) -fno-rtti -fexceptions -std=gnu++14
-LDFLAGS     = -lc -lgcc -lFLAC -lstdc++ -lm -lSDL -lz -pthread
+LDFLAGS     = -lc -lgcc -lstdc++ -lm -lSDL -lz -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
+
 
 ifeq ($(SOUND_ENGINE), alsa)
 LDFLAGS 		+= -lasound
@@ -33,8 +36,13 @@ endif
 ifeq ($(SOUND_ENGINE), portaudio)
 LDFLAGS 		+= -lasound -lportaudio
 endif
-ifeq ($(SOUND_ENGINE), pulse)
-LDFLAGS 		+= -lpulse-simple -lportaudio
+
+ifeq ($(HUGE_PAGES), 1)
+LDFLAGS		+= -Wl,-zcommon-page-size=2097152 -Wl,-zmax-page-size=2097152 -lhugetlbfs
+endif
+
+ifeq ($(PROFILE), YES)
+LDFLAGS 	+= -lgcov
 endif
 
 # Files to be compiled

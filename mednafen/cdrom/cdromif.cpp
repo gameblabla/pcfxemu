@@ -222,7 +222,7 @@ bool CDIF_Queue::Read(CDIF_Message *message, bool blocking)
       if (message->message != CDIF_MSG_FATAL_ERROR)
          return true;
 
-      log_cb(RETRO_LOG_ERROR, "%s", message->str_message.c_str());
+      //log_cb(RETRO_LOG_ERROR, "%s", message->str_message.c_str());
    }
 
    return false;
@@ -264,7 +264,7 @@ int CDIF_MT::ReadThreadStart()
 
    if(disc_toc.first_track < 1 || disc_toc.last_track > 99 || disc_toc.first_track > disc_toc.last_track)
    {
-      log_cb(RETRO_LOG_ERROR, "TOC first(%d)/last(%d) track numbers bad.\n", disc_toc.first_track, disc_toc.last_track);
+      //log_cb(RETRO_LOG_ERROR, "TOC first(%d)/last(%d) track numbers bad.\n", disc_toc.first_track, disc_toc.last_track);
    }
 
    SBWritePos = 0;
@@ -512,7 +512,7 @@ int CDIF::ReadSector(uint8_t* buf, int32_t lba, uint32_t sector_count, bool supp
          if(!suppress_uncorrectable_message)
          {
             MDFN_DispMessage("Uncorrectable data at sector %d", lba);
-            log_cb(RETRO_LOG_ERROR, "Uncorrectable data at sector %d", lba);
+            //log_cb(RETRO_LOG_ERROR, "Uncorrectable data at sector %d", lba);
          }
 
          return(false);

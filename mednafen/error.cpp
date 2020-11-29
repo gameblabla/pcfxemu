@@ -32,7 +32,7 @@ MDFN_Error::MDFN_Error()
 
 MDFN_Error::MDFN_Error(int errno_code_new, const char *format, ...)
 {
-   errno_code = errno_code_new;
+  /*errno_code = errno_code_new;
 
    va_list ap;
    va_start(ap, format);
@@ -40,47 +40,47 @@ MDFN_Error::MDFN_Error(int errno_code_new, const char *format, ...)
    va_end(ap);
 
    if (log_cb)
-      log_cb(RETRO_LOG_ERROR, "%s\n", error_message);
+      log_cb(RETRO_LOG_ERROR, "%s\n", error_message);*/
 }
 
 
 MDFN_Error::MDFN_Error(const ErrnoHolder &enh)
 {
-   errno_code = enh.Errno();
+   /*errno_code = enh.Errno();
 
-   error_message = strdup(enh.StrError());
+   error_message = strdup(enh.StrError());*/
 }
 
 
 MDFN_Error::~MDFN_Error()
 {
-   if(error_message)
+   /*if(error_message)
    {
       free(error_message);
       error_message = NULL;
-   }
+   }*/
 }
 
 MDFN_Error::MDFN_Error(const MDFN_Error &ze_error)
 {
-   if(ze_error.error_message)
+   /*if(ze_error.error_message)
       error_message = strdup(ze_error.error_message);
    else
       error_message = NULL;
 
-   errno_code = ze_error.errno_code;
+   errno_code = ze_error.errno_code;*/
 }
 
 MDFN_Error& MDFN_Error::operator=(const MDFN_Error &ze_error)
 {
-   char *new_error_message = ze_error.error_message ? strdup(ze_error.error_message) : NULL;
+   /*char *new_error_message = ze_error.error_message ? strdup(ze_error.error_message) : NULL;
    int new_errno_code = ze_error.errno_code;
 
    if(error_message)
       free(error_message);
 
    error_message = new_error_message;
-   errno_code = new_errno_code;
+   errno_code = new_errno_code;*/
 
    return(*this);
 }
@@ -88,15 +88,17 @@ MDFN_Error& MDFN_Error::operator=(const MDFN_Error &ze_error)
 
 const char * MDFN_Error::what(void)
 {
-   if(!error_message)
+   /*if(!error_message)
       return("Error allocating memory for the error message!");
 
-   return(error_message);
+   return(error_message);*/
+   return "";
 }
 
 int MDFN_Error::GetErrno(void)
 {
-   return(errno_code);
+   //return(errno_code);
+   return 0;
 }
 
 static const char *srr_wrap(int ret, const char *local_strerror)

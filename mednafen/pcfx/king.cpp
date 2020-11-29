@@ -36,8 +36,10 @@
 #ifdef __MMX__
 #include <mmintrin.h>
 #endif
-
+#include <stdint.h>
 #include <math.h>
+
+#include "video_blit.h"
 
 #include "pcfx.h"
 #include "king.h"
@@ -2202,7 +2204,7 @@ static int16 UVLUT[65536][3];
 static uint8 RGBDeflower[1152]; // 0 is at 384
 static uint32 CbCrLUT[65536];
 
-static void RebuildUVLUT(const MDFN_PixelFormat &format)
+static void RebuildUVLUT(void)
 {
  for(int ur = 0; ur < 256; ur++)
  {
@@ -2223,8 +2225,8 @@ static void RebuildUVLUT(const MDFN_PixelFormat &format)
    UVLUT[vr + ur * 256][1] = g;
    UVLUT[vr + ur * 256][2] = b;
  
-   CbCrLUT[vr + ur * 256] = clamp_to_u8(128 + ((r * -9699 + g * -19071 + b * 28770) >> 16)) << format.Cbshift;
-   CbCrLUT[vr + ur * 256] |= clamp_to_u8(128 + ((r * 28770 + g * -24117 + b * -4653) >> 16)) << format.Crshift;
+   CbCrLUT[vr + ur * 256] = clamp_to_u8(128 + ((r * -9699 + g * -19071 + b * 28770) >> 16)) << CBSHIFT;
+   CbCrLUT[vr + ur * 256] |= clamp_to_u8(128 + ((r * 28770 + g * -24117 + b * -4653) >> 16)) << CRSHIFT;
 
    //printf("%d %d %d, %08x\n", r, g, b, CbCrLUT[vr + ur * 256]);
   }
@@ -2242,18 +2244,14 @@ static void RebuildUVLUT(const MDFN_PixelFormat &format)
 static int rs, gs, bs;
 static uint32 INLINE YUV888_TO_RGB888(uint32 yuv)
 {
- int32 r, g, b;
- uint8 y = yuv >> 16;
+ const uint8 y = yuv >> 16;
+ uint8 r, g, b;
 
- r = y + UVLUT[yuv & 0xFFFF][0];
- g = y + UVLUT[yuv & 0xFFFF][1];
- b = y + UVLUT[yuv & 0xFFFF][2];
+ r = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][0]));
+ g = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][1]));
+ b = clamp_to_u8((int32)(y + UVLUT[yuv & 0xFFFF][2]));
 
- r = clamp_to_u8(r);
- g = clamp_to_u8(g);
- b = clamp_to_u8(b);
-
- return((r << rs) | (g << gs) | (b << bs));
+ return MAKECOLOR(r, g, b, a);
 }
 
 static uint32 INLINE YUV888_TO_PF(const uint32 yuv, const MDFN_PixelFormat &pf, const uint8 a = 0x00)
@@ -2280,7 +2278,6 @@ static uint32 INLINE YUV888_TO_YCbCr888(uint32 yuv)
 // FIXME: 
 //static unsigned int lines_per_frame; //= (fx_vce.picture_mode & 0x1) ? 262 : 263;
 static VDC **vdc_chips;
-static MDFN_Surface *surface;
 static MDFN_Rect *DisplayRect;
 static int32 *LineWidths;
 static int skip;
@@ -2288,7 +2285,6 @@ static int skip;
 void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surface *arg_surface, MDFN_Rect *arg_DisplayRect, MDFN_Rect *arg_LineWidths, int arg_skip)
 {
  ::vdc_chips = arg_vdc_chips;
- ::surface = espec->surface;
  ::DisplayRect = &espec->DisplayRect;
  ::LineWidths = espec->LineWidths;
  ::skip = espec->skip;
@@ -2538,7 +2534,8 @@ static void MixVDC(void)
 
 static void MixLayers(void)
 {
- uint32 *pXBuf = surface->pixels;
+	//uint32 *pXBuf = surface->pixels;
+	uint16_t *pXBuf = internal_pix;
 
     // Now we have to mix everything together... I'm scared, mommy.
     // We have, vdc_linebuffer[0] and bg_linebuffer
@@ -2588,13 +2585,13 @@ static void MixLayers(void)
      coeff_cache_v_back[x] = vce_rendercache.coefficient_mul_table_uv[(vce_rendercache.coefficients[x * 2 + 1] >> 0) & 0xF];
     }
 
-    uint32 *target;
+    uint16 *target;
     uint32 BPC_Cache = (LAYER_NONE << 28); // Backmost pixel color(cache)
 
     if(fx_vce.frame_interlaced)
-     target = pXBuf + surface->pitch32 * ((fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field);
+     target = pXBuf + internal_pitch * ((fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field);
     else
-     target = pXBuf + surface->pitch32 * (fx_vce.raster_counter - 22);
+     target = pXBuf + internal_pitch * (fx_vce.raster_counter - 22);
     
 
     // If at least one layer is enabled with the HuC6261, hindmost color is palette[0]
@@ -2756,26 +2753,23 @@ static void MixLayers(void)
       target[x] = YUV888_TO_xxx(zeout);	\
      }
 
-    if(surface->format.colorspace == MDFN_COLORSPACE_YCbCr)
-    {
-     #define YUV888_TO_xxx YUV888_TO_YCbCr888
-     #include "king_mix_body.inc"
-     #undef YUV888_TO_xxx
-    }
-    else
-    {
-     #define YUV888_TO_xxx YUV888_TO_RGB888
-     #include "king_mix_body.inc"
-     #undef YUV888_TO_xxx
-    }
+
+	#ifdef YUV_YCBCR
+	#define YUV888_TO_xxx YUV888_TO_YCbCr888
+	#else
+	#define YUV888_TO_xxx YUV888_TO_RGB888
+	#endif
+	#include "king_mix_body.inc"
+	#undef YUV888_TO_xxx
+
     DisplayRect->w = fx_vce.dot_clock ? HighDotClockWidth : 256;
     DisplayRect->x = 0;
 
 	// FIXME
-    if(fx_vce.frame_interlaced)
-     LineWidths[(fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field] = DisplayRect->w;
-    else
-     LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
+	if(fx_vce.frame_interlaced)
+		LineWidths[(fx_vce.raster_counter - 22) * 2 + fx_vce.odd_field] = DisplayRect->w;
+	else
+		LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
 }
 
 static INLINE void RunVDCs(const int master_cycles, uint16 *pixels0, uint16 *pixels1)
@@ -2928,12 +2922,12 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
  } // end: while(clocks > 0)
 } // end KING_RunGfx()
 
-void KING_SetPixelFormat(const MDFN_PixelFormat &format) 
+void KING_SetPixelFormat(void) 
 {
- rs = format.Rshift;
- gs = format.Gshift;
- bs = format.Bshift;
- RebuildUVLUT(format);
+ rs = RSHIFT_MEDNAFEN;
+ gs = GSHIFT_MEDNAFEN;
+ bs = BSHIFT_MEDNAFEN;
+ RebuildUVLUT();
 }
 
 void KING_SetLayerEnableMask(uint64 mask)

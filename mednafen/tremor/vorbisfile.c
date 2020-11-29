@@ -228,7 +228,7 @@ static int _lookup_page_serialno(ogg_page *og, uint32_t *serialno_list, int n){
 static int64_t _get_prev_page_serial(OggVorbis_File *vf,
                                          uint32_t *serial_list, int serial_n,
                                          int *serialno, int64_t *granpos){
-  ogg_page og;
+  ogg_page og = {0, 0, 0, 0};
   int64_t begin=vf->offset;
   int64_t end=begin;
   int64_t ret;
@@ -1438,7 +1438,7 @@ int ov_pcm_seek_page(OggVorbis_File *vf,int64_t pos){
     int64_t target=pos-total+begintime;
     int64_t best=begin;
 
-    ogg_page og;
+    ogg_page og = {0, 0, 0, 0};
     while(begin<end){
       int64_t bisect;
 
