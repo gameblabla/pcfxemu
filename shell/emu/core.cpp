@@ -954,13 +954,13 @@ bool Load_Game_Memory(char* path)
 		default:
 			for (unsigned i = 0; i < MAX_PLAYERS; i++)
 			{
-				FXINPUT_SetInput(i, "gamepad", &input_buf[i]);
+				FXINPUT_SetInput(i, 0, &input_buf[i]);
 			}
 		break;
 		case 1:
 			for (unsigned i = 0; i < MAX_PLAYERS; i++)
 			{
-				FXINPUT_SetInput(i, "mouse", &mousedata[i]);
+				FXINPUT_SetInput(i, 1, &mousedata[i]);
 			}
 		break;
 	}

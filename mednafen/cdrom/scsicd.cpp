@@ -161,7 +161,6 @@ void MakeSense(uint8_t * target, uint8_t key, uint8_t asc, uint8_t ascq, uint8_t
  target[14] = fru;		// Field Replaceable Unit code
 }
 
-static void (*SCSILog)(const char *, const char *format, ...);
 static void InitModePages(void);
 
 static scsicd_timestamp_t lastts;
@@ -1216,7 +1215,7 @@ static void DoNEC_GETDIRINFO(const uint8_t *cdb)
      offset += 0x14;
     }
 
-    assert((unsigned int)offset <= sizeof(data_in));
+    //assert((unsigned int)offset <= sizeof(data_in));
     data_in_size = offset;
     MDFN_en16msb(&data_in[0], offset - 2);
    }
@@ -1911,13 +1910,6 @@ static void DoREADBase(uint32_t sa, uint32_t sc)
  {
   CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_HEADER_READ_ERROR);
   return;
- }
-
- if(SCSILog)
- {
-  int Track = toc.FindTrackByLBA(sa);
-  uint32_t Offset = sa - toc.tracks[Track].lba; //Cur_CDIF->GetTrackStartPositionLBA(Track);
-  SCSILog("SCSI", "Read: start=0x%08x(track=%d, offs=0x%08x), cnt=0x%08x", sa, Track, Offset, sc);
  }
 
  SectorAddr = sa;
@@ -2799,9 +2791,6 @@ uint32_t SCSICD_Run(scsicd_timestamp_t system_timestamp)
 {
  int32_t run_time = system_timestamp - lastts;
 
- if(system_timestamp < lastts)
-  assert(system_timestamp >= lastts);
-
  monotonic_timestamp += run_time;
 
  lastts = system_timestamp;
@@ -2866,33 +2855,12 @@ uint32_t SCSICD_Run(scsicd_timestamp_t system_timestamp)
 
       while(cmd_info_ptr->pretty_name && cmd_info_ptr->cmd != cd.command_buffer[0])
        cmd_info_ptr++;
-  
-      if(SCSILog)
-      {
-       char log_buffer[1024];
-       int lb_pos;
-
-       log_buffer[0] = 0;
-       
-       lb_pos = snprintf(log_buffer, 1024, "Command: %02x, %s%s  ", cd.command_buffer[0], cmd_info_ptr->pretty_name ? cmd_info_ptr->pretty_name : "!!BAD COMMAND!!",
-			(cmd_info_ptr->flags & SCF_UNTESTED) ? "(UNTESTED)" : "");
-
-       for(int i = 0; i < RequiredCDBLen[cd.command_buffer[0] >> 4]; i++)
-        lb_pos += snprintf(log_buffer + lb_pos, 1024 - lb_pos, "%02x ", cd.command_buffer[i]);
-
-       SCSILog("SCSI", "%s", log_buffer);
-       //puts(log_buffer);
-      }
-
 
       if(cmd_info_ptr->pretty_name == NULL)	// Command not found!
       {
        CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_COMMAND);
 
        //SCSIDBG("Bad Command: %02x\n", cd.command_buffer[0]);
-
-       if(SCSILog)
-        SCSILog("SCSI", "Bad Command: %02x", cd.command_buffer[0]);
 
        cd.command_buffer_pos = 0;
       }
@@ -3064,14 +3032,7 @@ uint32_t SCSICD_Run(scsicd_timestamp_t system_timestamp)
    next_time = cdda_div_sexytime;
  }
 
- assert(next_time >= 0);
-
  return(next_time);
-}
-
-void SCSICD_SetLog(void (*logfunc)(const char *, const char *, ...))
-{
- SCSILog = logfunc;
 }
 
 void SCSICD_SetTransferRate(uint32_t TransferRate)
@@ -3093,12 +3054,10 @@ void SCSICD_Init(int type, int cdda_time_div, Blip_Buffer* left_hrbuf, Blip_Buff
  Cur_CDIF = NULL;
  TrayOpen = true;
 
- assert(SystemClock < 30000000);	// 30 million, sanity check.
+ //assert(SystemClock < 30000000);	// 30 million, sanity check.
 
  monotonic_timestamp = 0;
  lastts = 0;
-
- SCSILog = NULL;
 
  if(type == SCSICD_PCFX)
   din = new SimpleFIFO<uint8_t>(65536);	//4096);

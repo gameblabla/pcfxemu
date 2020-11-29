@@ -131,46 +131,7 @@ int PCFX_Input_Gamepad::StateAction(StateMem *sm, int load, int data_only, const
  #endif
 }
 #endif
-// GamepadIDII and GamepadIDII_DSR must be EXACTLY the same except for the RUN+SELECT exclusion in the latter.
-const InputDeviceInputInfoStruct PCFX_GamepadIDII[] =
-{
- { "i", "I", 11, IDIT_BUTTON, NULL },
- { "ii", "II", 10, IDIT_BUTTON, NULL },
- { "iii", "III", 9, IDIT_BUTTON, NULL },
- { "iv", "IV", 6, IDIT_BUTTON, NULL },
- { "v", "V", 7, IDIT_BUTTON, NULL },
- { "vi", "VI", 8, IDIT_BUTTON, NULL },
- { "select", "SELECT", 4, IDIT_BUTTON, NULL },
- { "run", "RUN", 5, IDIT_BUTTON, NULL },
- { "up", "UP ↑", 0, IDIT_BUTTON, "down" },
- { "right", "RIGHT →", 3, IDIT_BUTTON, "left" },
- { "down", "DOWN ↓", 1, IDIT_BUTTON, "up" },
- { "left", "LEFT ←", 2, IDIT_BUTTON, "right" },
 
- { "mode1", "MODE 1 (Switch)", 12, IDIT_BUTTON, NULL },
- { NULL, "empty", 0, IDIT_BUTTON },
- { "mode2", "MODE 2 (Switch)", 13, IDIT_BUTTON, NULL },
-};
-
-const InputDeviceInputInfoStruct PCFX_GamepadIDII_DSR[] =
-{
- { "i", "I", 11, IDIT_BUTTON, NULL },
- { "ii", "II", 10, IDIT_BUTTON, NULL },
- { "iii", "III", 9, IDIT_BUTTON, NULL },
- { "iv", "IV", 6, IDIT_BUTTON, NULL },
- { "v", "V", 7, IDIT_BUTTON, NULL },
- { "vi", "VI", 8, IDIT_BUTTON, NULL },
- { "select", "SELECT", 4, IDIT_BUTTON, "run" },
- { "run", "RUN", 5, IDIT_BUTTON, "select" },
- { "up", "UP ↑", 0, IDIT_BUTTON, "down" },
- { "right", "RIGHT →", 3, IDIT_BUTTON, "left" },
- { "down", "DOWN ↓", 1, IDIT_BUTTON, "up" },
- { "left", "LEFT ←", 2, IDIT_BUTTON, "right" },
-
- { "mode1", "MODE 1 (Switch)", 12, IDIT_BUTTON, NULL },
- { NULL, "empty", 0, IDIT_BUTTON },
- { "mode2", "MODE 2 (Switch)", 13, IDIT_BUTTON, NULL },
-};
 
 PCFX_Input_Device *PCFXINPUT_MakeGamepad(int which)
 {
