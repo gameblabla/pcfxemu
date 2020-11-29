@@ -392,10 +392,10 @@ static uint32 get_ac_coeff(const HuffmanQuickLUT *table, int32 *zeroes)
   return(0);
  }
 
- if(!table->lut_bits[rawbits])
+ /*if(!table->lut_bits[rawbits])
  {
   FXDBG("Invalid AC bit sequence: %03x\n", rawbits);
- }
+ }*/
 
  code = table->lut[rawbits];
  SkipBits(table->lut_bits[rawbits]);
@@ -414,10 +414,10 @@ static uint32 get_dc_coeff(const HuffmanQuickLUT *table, int32 *zeroes, int maxb
  {
   uint32 rawbits = GetBits(maxbits, MDFNBITS_PEEK);
 
-  if(!table->lut_bits[rawbits])
+  /*if(!table->lut_bits[rawbits])
   {
    FXDBG("Invalid DC bit sequence: %03x\n", rawbits);
-  }
+  }*/
 
   code = table->lut[rawbits];
   SkipBits(table->lut_bits[rawbits]);
@@ -437,7 +437,7 @@ static uint32 get_dc_coeff(const HuffmanQuickLUT *table, int32 *zeroes, int maxb
   {
    code -= 0x10;
 
-   for(int i = 0; i < 64; i++)
+   for(uint_fast8_t i = 0; i < 64; i++)
    {
     // Y
     uint32 coeff = (QuantTablesBase[0][i] * code) >> 2;
@@ -535,7 +535,7 @@ bool RAINBOW_Init(bool arg_ChromaIP)
 {
  ChromaIP = arg_ChromaIP;
 
- for(int i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
  {
   if(!(DecodeBuffer[i] = (uint8*)malloc(0x2000 * 4)))
    return(0);
@@ -565,7 +565,7 @@ bool RAINBOW_Init(bool arg_ChromaIP)
 
 void RAINBOW_Close(void)
 {
- for(int i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
   if(DecodeBuffer[i])
   {
    free(DecodeBuffer[i]);
@@ -677,7 +677,7 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
 
     block_size -= 2;
     if(block_type == 0xFF && block_size <= 0)
-     for(int i = 0; i < 128; i++,icount--) KING_RB_Fetch();
+     for(uint_fast8_t i = 0; i < 128; i++,icount--) KING_RB_Fetch();
 
     //fprintf(stderr, "Block: %d\n", block_size);
    } while(block_size <= 0 && icount > 0);
@@ -707,8 +707,8 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
    {
     if(block_type == 0xFF)
     {
-     for(int q = 0; q < 2; q++)
-      for(int i = 0; i < 64; i++)
+     for(uint_fast8_t q = 0; q < 2; q++)
+      for(uint_fast8_t i = 0; i < 64; i++)
       {
        uint8 meow = KING_RB_Fetch();
 
@@ -722,7 +722,7 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
 
     int32 dc_y = 0, dc_u = 0, dc_v = 0;
     uint32 *dest_base = (uint32 *)DecodeBuffer[which_buffer];
-    for(int column = 0; column < 16; column++)
+    for(uint_fast8_t column = 0; column < 16; column++)
     {
      uint32 *dest_base_column = &dest_base[column * 16];
      int32 zeroes = 0;
@@ -737,8 +737,8 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
        {
 	dest_base_column = &dest_base[column * 16];
 
-        for(int y = 0; y < 16; y++)
-         for(int x = 0; x < 16; x++)
+        for(uint_fast8_t y = 0; y < 16; y++)
+         for(uint_fast8_t x = 0; x < 16; x++)
           dest_base_column[y * 256 + x] = HappyColor;
        }
        column++;
@@ -792,15 +792,15 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
       j_rev_dct(&dct_u[0x00]);
       j_rev_dct(&dct_v[0x00]);
 
-      for(int y = 0; y < 16; y++)
-       for(int x = 0; x < 16; x++)
+      for(uint_fast8_t y = 0; y < 16; y++)
+       for(uint_fast8_t x = 0; x < 16; x++)
         dest_base_column[y * 256 + x] = clamp_to_u8(dct_y[y * 8 + (x & 0x7) + ((x & 0x8) << 4)] + 0x80) << 16;
 
       if(!ChromaIP)
       {
-       for(int y = 0; y < 8; y++)
+       for(uint_fast8_t y = 0; y < 8; y++)
        {
-        for(int x = 0; x < 8; x++)
+        for(uint_fast8_t x = 0; x < 8; x++)
         {
          uint32 component_uv = (clamp_to_u8(dct_u[y * 8 + x] + 0x80) << 8) | clamp_to_u8(dct_v[y * 8 + x] + 0x80);
          dest_base_column[y * 512 + (256 * 0) + x * 2 + 0] |= component_uv;
@@ -812,9 +812,9 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
       }
       else
       {
-       for(int y = 0; y < 8; y++)
+       for(uint_fast8_t y = 0; y < 8; y++)
        {
-        for(int x = 0; x < 8; x++)
+        for(uint_fast8_t x = 0; x < 8; x++)
         {
          uint32 component_uv = (clamp_to_u8(dct_u[y * 8 + x] + 0x80) << 8) | clamp_to_u8(dct_v[y * 8 + x] + 0x80);
  	 dest_base_column[y * 512 + (256 * 1) + x * 2 + 0] |= component_uv;
@@ -827,12 +827,12 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
     // Do bilinear interpolation on the chroma channels:
     if(!Skip && ChromaIP)
     {
-     for(int y = 0; y < 16; y+= 2)
+     for(uint_fast8_t y = 0; y < 16; y+= 2)
      {
       uint32 *linebase = &dest_base[y * 256];
       uint32 *linebase1 = &dest_base[(y + 1) * 256];
 
-      for(int x = 0; x < 254; x += 2)
+      for(uint_fast8_t x = 0; x < 254; x += 2)
       {
        unsigned int u, v;
 
@@ -846,11 +846,11 @@ void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
 
       if(FirstDecode)
       {
-       for(int x = 0; x < 256; x++) linebase[x] = (linebase[x] & ~ 0xFFFF) | (linebase1[x] & 0xFFFF);
+       for(uint_fast16_t x = 0; x < 256; x++) linebase[x] = (linebase[x] & ~ 0xFFFF) | (linebase1[x] & 0xFFFF);
        FirstDecode = 0;
       }
       else
-       for(int x = 0; x < 256; x++)
+       for(uint_fast16_t x = 0; x < 256; x++)
        {
         unsigned int u, v;
  
@@ -943,7 +943,7 @@ int RAINBOW_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *palette_ptr
    {
     uint8 tmpss = HScroll;
 
-    for(int x = 0; x < 256; x++)
+    for(uint_fast16_t x = 0; x < 256; x++)
     {
      linebuffer[x] = in_ptr[tmpss] | layer_or;
      tmpss++;
@@ -969,7 +969,7 @@ int RAINBOW_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *palette_ptr
    {
     uint8 tmpss = HScroll;
 
-    for(int x = 0; x < 256; x++)
+    for(uint_fast16_t x = 0; x < 256; x++)
     {
      linebuffer[x] = in_ptr[tmpss] ? (palette_ptr[in_ptr[tmpss]] | layer_or) : 0;
      tmpss++;
@@ -979,7 +979,7 @@ int RAINBOW_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *palette_ptr
    {
     uint16 tmpss = HScroll & 0x1FF;
 
-    for(int x = 0; x < 256; x++)
+    for(uint_fast16_t x = 0; x < 256; x++)
     {
      linebuffer[x] = (tmpss < 256 && in_ptr[tmpss]) ? (palette_ptr[in_ptr[tmpss]] | layer_or) : 0;
      tmpss = (tmpss + 1) & 0x1FF;

@@ -330,7 +330,6 @@ bool CDAccess_CCD::CheckSubQSanity(void)
          uint8_t full[96];
          struct
          {
-            uint8_t pbuf[12];
             uint8_t qbuf[12];
          };
       } buf;
