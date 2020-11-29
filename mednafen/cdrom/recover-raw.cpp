@@ -73,114 +73,11 @@ int CheckEDC(const unsigned char *cd_frame, bool xa_mode)
 }
 
 /***
- *** A very simple L-EC error correction.
- ***
- * Perform just one pass over the Q and P vectors to see if everything
- * is okay respectively correct minor errors. This is pretty much the
- * same stuff the drive is supposed to do in the final L-EC stage.
- */
-
-static int simple_lec(unsigned char *frame)
-{ 
-   unsigned char byte_state[2352];
-   unsigned char p_vector[P_VECTOR_SIZE];
-   unsigned char q_vector[Q_VECTOR_SIZE];
-   unsigned char p_state[P_VECTOR_SIZE];
-   int erasures[Q_VECTOR_SIZE], erasure_count;
-   int ignore[2];
-   int p_failures, q_failures;
-   int p_corrected, q_corrected;
-   int p,q;
-
-   /* Setup */
-
-   memset(byte_state, 0, 2352);
-
-   p_failures = q_failures = 0;
-   p_corrected = q_corrected = 0;
-
-   /* Perform Q-Parity error correction */
-
-   for(q=0; q<N_Q_VECTORS; q++)
-   {  int err;
-
-      /* We have no erasure information for Q vectors */
-
-     GetQVector(frame, q_vector, q);
-     err = DecodePQ(rt, q_vector, Q_PADDING, ignore, 0);
-
-     /* See what we've got */
-
-     if(err < 0)  /* Uncorrectable. Mark bytes are erasure. */
-     {  q_failures++;
-        FillQVector(byte_state, 1, q);
-     }
-     else         /* Correctable */ 
-     {  if(err == 1 || err == 2) /* Store back corrected vector */ 
-	{  SetQVector(frame, q_vector, q);
-	   q_corrected++;
-	}
-     }
-   }
-
-   /* Perform P-Parity error correction */
-
-   for(p=0; p<N_P_VECTORS; p++)
-   {  int err,i;
-
-      /* Try error correction without erasure information */
-
-      GetPVector(frame, p_vector, p);
-      err = DecodePQ(rt, p_vector, P_PADDING, ignore, 0);
-
-      /* If unsuccessful, try again using erasures.
-	 Erasure information is uncertain, so try this last. */
-
-      if(err < 0 || err > 2)
-      {  GetPVector(byte_state, p_state, p);
-	 erasure_count = 0;
-
-	 for(i=0; i<P_VECTOR_SIZE; i++)
-	   if(p_state[i])
-	     erasures[erasure_count++] = i;
-
-	 if(erasure_count > 0 && erasure_count <= 2)
-	 {  GetPVector(frame, p_vector, p);
-	    err = DecodePQ(rt, p_vector, P_PADDING, erasures, erasure_count);
-	 }
-      }
-
-      /* See what we've got */
-
-      if(err < 0)  /* Uncorrectable. */
-      {  p_failures++;
-      }
-      else         /* Correctable. */ 
-      {  if(err == 1 || err == 2) /* Store back corrected vector */ 
-	 {  SetPVector(frame, p_vector, p);
-	    p_corrected++;
-	 }
-      }
-   }
-
-   /* Sum up */
-
-   if(q_failures || p_failures || q_corrected || p_corrected)
-   {
-     return 1;
-   }
-
-   return 0;
-}
-
-/***
  *** Validate CD raw sector
  ***/
 
 int ValidateRawSector(unsigned char *frame, bool xaMode)
 {  
- int lec_did_sth = false;
-
   /* Do simple L-EC.
      It seems that drives stop their internal L-EC as soon as the
      EDC is okay, so we may see uncorrected errors in the parity bytes.
@@ -197,7 +94,6 @@ int ValidateRawSector(unsigned char *frame, bool xaMode)
     memset(frame + 12, 0, 4);
    }
 
-   lec_did_sth = simple_lec(frame);
 
    if(xaMode)
     memcpy(frame + 12, header, 4);

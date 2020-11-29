@@ -68,18 +68,14 @@ class PCFX_Input_Gamepad : public PCFX_Input_Device
  virtual void Frame(const void *data)
  {
   uint16 new_buttons = MDFN_de16lsb((uint8 *)data);
-  bool mode_changed = false;
-
   if((old_raw_buttons ^ new_buttons) & (1 << 12) & new_buttons)
   {
    mode1 = !mode1;
-   mode_changed = true;
   }
 
   if((old_raw_buttons ^ new_buttons) & (1 << 14) & new_buttons)
   {
    mode2 = !mode2;
-   mode_changed = true;
   }
 
   /*if(mode_changed)

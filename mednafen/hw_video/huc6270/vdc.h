@@ -310,10 +310,6 @@ class VDC
 	 __GSREG_COUNT
 	};
 
-	// Pass NULL if you don't want more information about the special meaning of the value in the specified
-	// register.  Otherwise, pass a buffer of at least 256 bytes in size.
-	void SetRegister(const unsigned int id, const uint32 value);
-
 	#ifdef WANT_DEBUGGER
         bool DoGfxDecode(uint32 *target, const uint32 *color_table, const uint32 TransparentColor, bool DecodeSprites,
 	        int32 w, int32 h, int32 scroll);

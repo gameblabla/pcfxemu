@@ -69,7 +69,8 @@ Blip_Buffer::blargg_err_t Blip_Buffer::set_sample_rate( long new_rate, int msec 
 {
 	if ( buffer_size_ == silent_buf_size )
 	{
-		return "Internal (tried to resize Silent_Blip_Buffer)";
+		//return "Internal (tried to resize Silent_Blip_Buffer)";
+		return "";
 	}
 	
 	// start with maximum length that resampled time can represent
@@ -90,7 +91,7 @@ Blip_Buffer::blargg_err_t Blip_Buffer::set_sample_rate( long new_rate, int msec 
 	{
 		void* p = realloc( buffer_, (new_size + blip_buffer_extra_) * sizeof *buffer_ );
 		if ( !p )
-			return "Out of memory";
+			return "No mem";
 
 		//if(new_size > buffer_size_)
 		//	memset(buffer_ + buffer_size_, 0, (new_size + blip_buffer_extra_) * sizeof *buffer_
@@ -201,7 +202,7 @@ long Blip_Buffer::read_samples( blip_sample_t* BLIP_RESTRICT out, long max_sampl
 		int const bass = BLIP_READER_BASS( *this );
 		BLIP_READER_BEGIN( reader, *this );
 		
-		if ( !stereo )
+		/*if ( !stereo )
 		{
 			for ( blip_long n = count; n; --n )
 			{
@@ -212,7 +213,7 @@ long Blip_Buffer::read_samples( blip_sample_t* BLIP_RESTRICT out, long max_sampl
 				BLIP_READER_NEXT( reader, bass );
 			}
 		}
-		else
+		else*/
 		{
 			for ( blip_long n = count; n; --n )
 			{
