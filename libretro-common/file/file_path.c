@@ -1051,7 +1051,7 @@ void fill_pathname_expand_special(char *out_path,
    }
 #endif
 
-   retro_assert(strlcpy(out_path, in_path, size) < size);
+   assert(strlcpy(out_path, in_path, size) < size);
 }
 
 void fill_pathname_abbreviate_special(char *out_path,

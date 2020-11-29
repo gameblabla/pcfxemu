@@ -16,7 +16,7 @@ GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 INCLUDES	= -Ilibretro-common/include -Isrc
 INCLUDES	+= -Ishell/headers -Ishell/video/$(PORT) -Ishell/audio -Ishell/scalers -Ishell/input/sdl -Ishell/fonts -Ishell/menu
 INCLUDES	+= -Imednafen -I./mednafen/vb -I./mednafen/sound -I. -Ishell/emu -Imednafen/include -Ishell/input -Imednafen/video -Imednafen/hw_cpu
-INCLUDES	+= -Ilibretro-common/include -Ideps/libchdr/include -Ideps/lzma-19.00/include -Imednafen/hw_sound
+INCLUDES	+= -Ilibretro-common/include -Ideps/libchdr/include -Ideps/lzma-19.00/include -Imednafen/hw_sound -Ideps/flac-1.3.3/src/include -Ideps/flac-1.3.3/include
 
 DEFINES		= -DLSB_FIRST -DINLINE="inline" -DINLINE="inline" -DNDEBUG -DWANT_STEREO_SOUND -DFRAMESKIP
 DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -DHAVE_CDROM -D_7ZIP_ST -DWANT_PCFX_EMU -DENABLE_JOYSTICKCODE
@@ -52,7 +52,8 @@ SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw
 SRCDIR		+= ./libretro-common/cdrom ./libretro-common/compat ./libretro-common/encodings ./libretro-common/file ./libretro-common/lists
 SRCDIR		+= ./libretro-common/memmap ./libretro-common/rthreads ./libretro-common/streams ./libretro-common/string ./libretro-common/time
 SRCDIR		+= ./libretro-common/vfs
-SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src
+SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src./deps/flac-1.3.3/src
+
 
 VPATH		= $(SRCDIR)
 SRC_C		= $(foreach dir, $(SRCDIR), $(wildcard $(dir)/*.c))

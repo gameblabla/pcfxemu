@@ -386,19 +386,13 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 		printf("Can't load BIOS\n");
 		return(0);
    }
-   cpu_mode = (V810_Emu_Mode)MDFN_GetSettingI("pcfx.cpu_emulation");
-   if(cpu_mode == _V810_EMU_MODE_COUNT)
-   {
-      cpu_mode = (EmuFlags & CDGE_FLAG_ACCURATE_V810) ? V810_EMU_MODE_ACCURATE : V810_EMU_MODE_FAST;
-   }
 
    if(EmuFlags & CDGE_FLAG_FXGA)
    {
       //WantHuC6273 = TRUE;
    }
 
-   printf("V810 Emulation Mode: %s\n", (cpu_mode == V810_EMU_MODE_ACCURATE) ? "Accurate" : "Fast");
-   PCFX_V810.Init(cpu_mode, false);
+   PCFX_V810.Init();
 
    uint32 RAM_Map_Addresses[1] = { 0x00000000 };
    uint32 BIOSROM_Map_Addresses[1] = { 0xFFF00000 };
