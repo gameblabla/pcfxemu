@@ -298,7 +298,7 @@ static void Emulate(EmulateSpecStruct *espec)
  KING_ResetTS(new_base_ts);
  FXTIMER_ResetTS(new_base_ts);
  FXINPUT_ResetTS(new_base_ts);
- SoundBox_ResetTS();
+ SoundBox_ResetTS(new_base_ts);
 
  // Call this AFTER all the EndFrame/Flush/ResetTS stuff
  RebaseTS(v810_timestamp, new_base_ts);
@@ -338,7 +338,7 @@ static void PCFX_Reset(void)
  }
 
  KING_Reset(timestamp);	// SCSICD_Power() is called from KING_Reset()
- SoundBox_Reset();
+ SoundBox_Reset(timestamp);
  RAINBOW_Reset();
 #ifdef HAVE_HUC6273
  if(WantHuC6273)
