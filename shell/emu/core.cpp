@@ -852,7 +852,6 @@ uint8_t MDFNI_LoadCD(const char *devicename)
 {
  uint8 LayoutMD5[16];
 
- //printf("Loading %s...\n", devicename);
 
   if(devicename && strlen(devicename) > 4 && !strcasecmp(devicename + strlen(devicename) - 4, ".m3u"))
   {
@@ -862,14 +861,12 @@ uint8_t MDFNI_LoadCD(const char *devicename)
 
    for(unsigned i = 0; i < file_list.size(); i++)
    {
-      CDIF *cdif   = CDIF_Open(file_list[i].c_str(), false /* cdimage_memcache */);
-      CDInterfaces.push_back(cdif);
+      CDInterfaces.push_back(CDIF_Open(file_list[i].c_str(), false /* cdimage_memcache */));
    }
   }
   else
   {
-     CDIF *cdif   = CDIF_Open(devicename, false /* cdimage_memcache */);
-   CDInterfaces.push_back(cdif);
+   CDInterfaces.push_back(CDIF_Open(devicename, false /* cdimage_memcache */));
   }
 
  //
@@ -971,8 +968,11 @@ static void MDFNI_CloseGame(void)
 
    for(unsigned i = 0; i < CDInterfaces.size(); i++)
    {
-      delete CDInterfaces[i];
-      CDInterfaces[i] = NULL;
+		if (CDInterfaces[i] != NULL)
+		{
+			delete CDInterfaces[i];
+			CDInterfaces[i] = NULL;
+		}
    }
    CDInterfaces.clear();
 }

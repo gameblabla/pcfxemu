@@ -29,9 +29,6 @@ void Read_General_Input(void)
 			case SDL_KEYDOWN:
 				switch(event.key.keysym.sym)
 				{
-#ifdef GKD350_BUG_INPUT
-					case SDLK_LSHIFT:
-#endif
 					case SDLK_RCTRL:
 					case SDLK_END:
 						emulator_state = 1;
@@ -94,6 +91,13 @@ uint16_t Read_Pad_Input(void)
 #endif
 	) button |= 512;
 	
+	
+#ifdef GKD350_BUG_INPUT
+	if (keys[SDLK_RETURN] && keys[SDLK_ESCAPE])
+	{
+		emulator_state = 1;
+	}
+#endif
 	
 	// A
 	if (keys[option.config_buttons[4] ] == SDL_PRESSED) button |= 1;
