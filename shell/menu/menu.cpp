@@ -247,7 +247,7 @@ static void Input_Remapping()
 					while( !exit_map )
 					{
 						SDL_FillRect( backbuffer, NULL, 0 );
-						print_string("Please press button for mapping", TextWhite, TextBlue, 37, 108, (uint16_t*)backbuffer->pixels);
+						print_string("Press button to map", TextWhite, TextBlue, 92, 108, (uint16_t*)backbuffer->pixels);
 
 						while (SDL_PollEvent(&Event))
 						{
@@ -269,9 +269,8 @@ static void Input_Remapping()
 
         if (currentselection > 14) currentselection = 14;
 
-		print_string("Press [A] to map to a button", TextWhite, TextBlue, 50, 210, (uint16_t*)backbuffer->pixels);
-		print_string("Press [B] to Exit", TextWhite, TextBlue, 85, 225, (uint16_t*)backbuffer->pixels);
-		
+		print_string("[A] = Map, [B] = Exit", TextWhite, TextBlue, 50, 210, (uint16_t*)backbuffer->pixels);
+
 		Draw_Option(0, currentselection, "UP   : %s\n", 5, 25);
 		Draw_Option(1, currentselection, "DOWN : %s\n", 5, 45);
 		Draw_Option(2, currentselection, "LEFT : %s\n", 5, 65);
