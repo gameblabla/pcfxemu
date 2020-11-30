@@ -149,14 +149,14 @@ typedef struct
 
 void MakeSense(uint8 * target, uint8 key, uint8 asc, uint8 ascq, uint8 fru)
 {
- memset(target, 0, 18);
+	memset(target, 0, 18);
 
- target[0] = 0x70;		// Current errors and sense data is not SCSI compliant
- target[2] = key;
- target[7] = 0x0A;
- target[12] = asc;		// Additional Sense Code
- target[13] = ascq;		// Additional Sense Code Qualifier
- target[14] = fru;		// Field Replaceable Unit code
+	target[0] = 0x70;		// Current errors and sense data is not SCSI compliant
+	target[2] = key;
+	target[7] = 0x0A;
+	target[12] = asc;		// Additional Sense Code
+	target[13] = ascq;		// Additional Sense Code Qualifier
+	target[14] = fru;		// Field Replaceable Unit code
 }
 
 static void InitModePages(void);
@@ -240,7 +240,6 @@ static void VirtualReset(void)
 	memset(cd.data_out, 0, sizeof(cd.data_out));
 	cd.data_out_pos = 0;
 	cd.data_out_size = 0;
-
 
 	FixOPV();
 
@@ -1654,24 +1653,21 @@ static void DoPAMSF(const uint8 *cdb)
 
 static void DoPATI(const uint8 *cdb)
 {
- // "Boundary Gate" uses this command.
- // Problems:
- //  The index fields aren't handled.  The ending index wouldn't be too bad, but the starting index would require a bit of work and code uglyfying(to scan for the index), and may be highly
- //  problematic when Mednafen is used with a physical CD.
- int StartTrack = cdb[4];
- int EndTrack = cdb[7];
- int StartIndex = cdb[5];
- int EndIndex = cdb[8];
+	// "Boundary Gate" uses this command.
+	// Problems:
+	//  The index fields aren't handled.  The ending index wouldn't be too bad, but the starting index would require a bit of work and code uglyfying(to scan for the index), and may be highly
+	//  problematic when Mednafen is used with a physical CD.
+	int StartTrack = cdb[4];
+	int EndTrack = cdb[7];
+	//int StartIndex = cdb[5];
+	//int EndIndex = cdb[8];
 
- if(!StartTrack || StartTrack < toc.first_track || StartTrack > toc.last_track)
- {
-  CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
-  return;
- }
-
- //printf("PATI: %d %d %d  SI: %d, EI: %d\n", StartTrack, EndTrack, Cur_CDIF->GetTrackStartPositionLBA(StartTrack), StartIndex, EndIndex);
-
- DoPABase(toc.tracks[StartTrack].lba, toc.tracks[EndTrack].lba - toc.tracks[StartTrack].lba);
+	if(!StartTrack || StartTrack < toc.first_track || StartTrack > toc.last_track)
+	{
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+		return;
+	}
+	DoPABase(toc.tracks[StartTrack].lba, toc.tracks[EndTrack].lba - toc.tracks[StartTrack].lba);
 }
 
 
