@@ -125,6 +125,8 @@ class PCE_PSG
 
 	void PeekWave(const unsigned int ch, uint32 Address, uint32 Length, uint8 *Buffer);
 	void PokeWave(const unsigned int ch, uint32 Address, uint32 Length, const uint8 *Buffer);
+	
+	void ResetTS(int32 ts_base);
 
         private:
 

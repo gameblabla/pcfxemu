@@ -707,6 +707,16 @@ void PCE_PSG::Update(int32 timestamp)
  }
 }
 
+void PCE_PSG::ResetTS(int32 ts_base)
+{
+ lastts = ts_base;
+
+ for(int chc = 0; chc < 6; chc++)
+  channel[chc].lastts = ts_base;
+}
+
+
+
 void PCE_PSG::EndFrame(int32 timestamp)
 {
  Update(timestamp);

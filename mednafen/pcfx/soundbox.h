@@ -56,7 +56,7 @@ int32 SoundBox_Flush(const uint32, int16 *SoundBuf, const int32 MaxSoundFrames);
 void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp);
 int SoundBox_Init(void);
 
-void SoundBox_Reset(void);
+void SoundBox_Reset(const v810_timestamp_t timestamp);
 
 int SoundBox_StateAction(StateMem *sm, int load, int data_only);
 
@@ -64,7 +64,7 @@ void SoundBox_SetKINGADPCMControl(uint32);
 
 v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp);
 
-void SoundBox_ResetTS(void);
+void SoundBox_ResetTS(const v810_timestamp_t ts_base);
 
 void SoundBox_Kill(void);
 
