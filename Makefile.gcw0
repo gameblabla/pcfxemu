@@ -8,7 +8,7 @@ CXX 		= /opt/gcw0-toolchain/usr/bin/mipsel-linux-g++
 PORT = gcw0
 # Possible values : alsa, oss, portaudio
 SOUND_ENGINE = sdl
-PROFILE = APPLY
+PROFILE = 0
 HUGE_PAGES = 1
 CHD = NO
 
@@ -64,7 +64,7 @@ SRCDIR 		=  ./src ./shell ./shell/emu ./shell/menu
 SRCDIR		+= ./shell/input/sdl/ ./shell/video/$(PORT) ./shell/audio/$(SOUND_ENGINE)
 SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270 ./mednafen/pcfx ./mednafen/pcfx/input ./mednafen/sound ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
 SRCDIR		+= ./libretro-common/cdrom ./libretro-common/compat ./libretro-common/encodings ./libretro-common/file ./libretro-common/lists
-SRCDIR		+= ./libretro-common/memmap ./libretro-common/rthreads ./libretro-common/streams ./libretro-common/string
+SRCDIR		+= ./libretro-common/memmap ./libretro-common/streams ./libretro-common/string
 SRCDIR		+= ./libretro-common/vfs
 ifeq ($(CHD), YES)
 SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/flac-1.3.3/src

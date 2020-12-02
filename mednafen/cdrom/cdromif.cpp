@@ -25,8 +25,10 @@
 #include <algorithm>
 
 #include <boolean.h>
+#ifdef MUTLITHREADING
 #include <rthreads/rthreads.h>
 #include <retro_miscellaneous.h>
+#endif
 
 enum
 {
@@ -71,8 +73,10 @@ class CDIF_Queue
 
    private:
       std::queue<CDIF_Message> ze_queue;
+      #ifdef MUTLITHREADING
       slock_t *ze_mutex;
       scond_t *ze_cond;
+      #endif
 };
 
 
@@ -84,6 +88,7 @@ typedef struct
    uint8_t data[2352 + 96];
 } CDIF_Sector_Buffer;
 
+#ifdef MUTLITHREADING
 // TODO: prohibit copy constructor
 class CDIF_MT : public CDIF
 {
@@ -127,6 +132,7 @@ class CDIF_MT : public CDIF
       int32_t last_read_lba;
 };
 
+#endif
 
 // TODO: prohibit copy constructor
 class CDIF_ST : public CDIF
@@ -182,6 +188,7 @@ CDIF_Message::~CDIF_Message()
 
 }
 
+#ifdef MUTLITHREADING
 CDIF_Queue::CDIF_Queue()
 {
    ze_mutex = slock_new();
@@ -390,6 +397,7 @@ CDIF_MT::~CDIF_MT()
       SBCond = NULL;
    }
 }
+#endif
 
 bool CDIF::ValidateRawSector(uint8_t *buf)
 {
@@ -404,6 +412,7 @@ bool CDIF::ValidateRawSector(uint8_t *buf)
    return(true);
 }
 
+#ifdef MUTLITHREADING
 bool CDIF_MT::ReadRawSector(uint8_t *buf, int32_t lba)
 {
    bool found = false;
@@ -489,6 +498,7 @@ void CDIF_MT::HintReadSector(int32_t lba)
 
    ReadThreadQueue.Write(CDIF_Message(CDIF_MSG_READ_SECTOR, lba));
 }
+#endif
 
 int CDIF::ReadSector(uint8_t* buf, int32_t lba, uint32_t sector_count, bool suppress_uncorrectable_message)
 {
@@ -620,9 +630,10 @@ bool CDIF_ST::ReadRawSectorPWOnly(uint8_t* pwbuf, int32_t lba, bool hint_fullrea
 
 CDIF *CDIF_Open(const std::string& path, bool image_memcache)
 {
-   CDAccess *cda = CDAccess_Open(path, image_memcache);
-
-   if(!image_memcache)
-      return new CDIF_MT(cda);
-   return new CDIF_ST(cda);
+	CDAccess *cda = CDAccess_Open(path, image_memcache);
+	#ifdef MUTLITHREADING
+	if(!image_memcache)
+		return new CDIF_MT(cda);
+	#endif
+	return new CDIF_ST(cda);
 }
