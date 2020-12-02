@@ -174,9 +174,11 @@ uint32_t CDAccess_Image::GetSectorCount(CDRFILE_TRACK_INFO *track)
 {
    if(track->DIFormat == DI_FORMAT_AUDIO)
    {
+	   #if defined(HAVE_MPC) || defined(HAVE_TREMOR)
       if(track->AReader)
          return(((track->AReader->FrameCount() * 4) - track->FileOffset) / 2352);
       else
+      #endif
       {
          const int64_t size = track->fp->size();
 
@@ -229,13 +231,15 @@ bool CDAccess_Image::ParseTOCFileLineInfo(CDRFILE_TRACK_INFO *track, const int t
 
    if(filename.length() >= 4 && !strcasecmp(filename.c_str() + filename.length() - 4, ".wav"))
    {
-      track->AReader = CDAFR_Open(track->fp);
+	   #if defined(HAVE_MPC) || defined(HAVE_TREMOR)
+		track->AReader = CDAFR_Open(track->fp);
 
-      if(!track->AReader)
-      {
-         //log_cb(RETRO_LOG_ERROR, "TODO ERROR\n");
-         return false;
-      }
+		if(!track->AReader)
+		#endif
+		{
+			//log_cb(RETRO_LOG_ERROR, "TODO ERROR\n");
+			return false;
+		}
    }
 
    sector_mult = DI_Size_Table[track->DIFormat];
@@ -699,12 +703,14 @@ bool CDAccess_Image::ImageOpen(const std::string& path, bool image_memcache)
             else if(!strcasecmp(args[1].c_str(), "OGG") || !strcasecmp(args[1].c_str(), "VORBIS") || !strcasecmp(args[1].c_str(), "PCM")
                   || !strcasecmp(args[1].c_str(), "MPC") || !strcasecmp(args[1].c_str(), "MP+"))
             {
-               TmpTrack.AReader = CDAFR_Open(TmpTrack.fp);
-               if(!TmpTrack.AReader)
-               {
-                  //log_cb(RETRO_LOG_ERROR, "Unsupported audio track file format: %s\n", args[0].c_str());
-                  return false;
-               }
+				#if defined(HAVE_MPC) || defined(HAVE_TREMOR)
+				TmpTrack.AReader = CDAFR_Open(TmpTrack.fp);
+				if(!TmpTrack.AReader)
+               #endif
+				{
+					//log_cb(RETRO_LOG_ERROR, "Unsupported audio track file format: %s\n", args[0].c_str());
+					return false;
+				}
             }
             else
             {
@@ -1012,11 +1018,13 @@ void CDAccess_Image::Cleanup(void)
 
       if(this_track->FirstFileInstance)
       {
+		  #if defined(HAVE_MPC) || defined(HAVE_TREMOR)
          if(Tracks[track].AReader)
          {
             delete Tracks[track].AReader;
             Tracks[track].AReader = NULL;
          }
+         #endif
 
          if(this_track->fp)
          {
@@ -1124,6 +1132,7 @@ bool CDAccess_Image::Read_Raw_Sector(uint8_t *buf, int32_t lba)
    }
    else
    {
+	   #if defined(HAVE_MPC) || defined(HAVE_TREMOR)
       if(ct->AReader)
       {
          int16_t AudioBuf[588 * 2];
@@ -1144,6 +1153,7 @@ bool CDAccess_Image::Read_Raw_Sector(uint8_t *buf, int32_t lba)
             MDFN_en16lsb(buf + i * 2, AudioBuf[i]);
       }
       else	// Binary, woo.
+      #endif
       {
          long SeekPos = ct->FileOffset;
          long LBARelPos = lba - ct->LBA;

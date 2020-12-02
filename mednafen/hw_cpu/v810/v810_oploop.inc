@@ -96,7 +96,6 @@
 
 	// Bit string subopcodes
         #define DO_AM_BSTR()							\
-            const uint32 arg1 = (tmpop >> 5) & 0x1F;				\
             const uint32 arg2 = (tmpop & 0x1F);					\
             RB_INCPCBY2();
 
@@ -903,7 +902,7 @@
              ADDCLOCK(1);
 	    }
 
-            if(bstr_subop(timestamp, arg2, arg1))
+            if(bstr_subop(timestamp, arg2))
 	    {
 	     RB_DECPCBY2();
              in_bstr = TRUE;

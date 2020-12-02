@@ -27,22 +27,22 @@
 #include "vdc.h"
 #include "../../video/surface.h"
 
-static inline void VDC_DEBUG(const char *fmt, ...)
+/*static inline void VDC_DEBUG(const char *fmt, ...)
 {
-}
+}*/
 //#define VDC_DEBUG(x, ...)     { }
 //#define VDC_DEBUG(x, ...)       printf(x ": HPhase=%d, HPhaseCounter=%d, RCRCount=%d\n", ## __VA_ARGS__, HPhase, HPhaseCounter, RCRCount);
 //
-static inline void VDC_UNDEFINED(const char *fmt, ...)
+/*static inline void VDC_UNDEFINED(const char *fmt, ...)
 {
-}
+}*/
 
 //#define VDC_UNDEFINED(format, ...)   { }
 //#define VDC_UNDEFINED(format, ...)      printf(format " RCRCount=%d" "\n", ## __VA_ARGS__, RCRCount)
 
-static inline void VDC_WARNING(const char *fmt, ...)
+/*static inline void VDC_WARNING(const char *fmt, ...)
 {
-}
+}*/
 //#define VDC_WARNING(format, ...)      { }
 //#define VDC_WARNING(format, ...)     { printf(format "\n", ## __VA_ARGS__); }
 
@@ -111,7 +111,7 @@ void VDC::RunSATDMA(int32 cycles, bool force_completion)
  {
   if(DCR & 0x01)
   {
-   VDC_DEBUG("Sprite DMA IRQ");
+   //VDC_DEBUG("Sprite DMA IRQ");
    status |= VDCS_DS;
    IRQHook(TRUE);
   }
@@ -141,8 +141,8 @@ void VDC::RunDMA(int32 cycles, bool force_completion)
  {
   if(!DMAReadWrite)
   {
-   if(SOUR >= VRAM_Size)
-    VDC_UNDEFINED("Unmapped VRAM DMA read");
+   /*if(SOUR >= VRAM_Size)
+    VDC_UNDEFINED("Unmapped VRAM DMA read");*/
 
    DMAReadBuffer = VRAM[SOUR];
    //printf("DMA Read: %04x, %04x\n", SOUR, DMAReadBuffer);
@@ -169,7 +169,7 @@ void VDC::RunDMA(int32 cycles, bool force_completion)
     {
      status |= VDCS_DV;
      IRQHook(TRUE);
-     VDC_DEBUG("DMA IRQ");
+     //VDC_DEBUG("DMA IRQ");
     }
     break;
    }
@@ -254,7 +254,7 @@ void VDC::IncRCR(void)
 
  if((int)RCRCount == ((int)RCR - 0x40) && (CR & 0x04))
  {
-  VDC_DEBUG("RCR IRQ");
+  //VDC_DEBUG("RCR IRQ");
   status |= VDCS_RR;
   IRQHook(TRUE);
  }
@@ -264,7 +264,7 @@ void VDC::DoVBIRQTest(void)
 {
  if(CR & 0x08)
  {
-  VDC_DEBUG("VBlank IRQ");
+  //VDC_DEBUG("VBlank IRQ");
   status |= VDCS_VD;
   IRQHook(TRUE);
  }
@@ -465,7 +465,7 @@ int32 VDC::Run(int32 clocks, uint16 *pixels, bool skip)
 
   if(DMAPending && burst_mode)
   {
-   VDC_DEBUG("DMA Started");
+   //VDC_DEBUG("DMA Started");
    DMAPending = false;
    DMARunning = true;
    VDMA_CycleCounter = 0;
@@ -830,7 +830,7 @@ void VDC::FetchSpriteData(void)
     {
      status |= VDCS_OR;
      IRQHook(TRUE);
-     VDC_DEBUG("Overflow IRQ");
+    // VDC_DEBUG("Overflow IRQ");
     }
     if(!unlimited_sprites)
      break;
@@ -947,7 +947,7 @@ void VDC::DrawSprites(uint16 *target, int enabled)
      if(sprite_line_buf[tx] & 0xF)
      {
       status |= VDCS_CR;
-      VDC_DEBUG("Sprite hit IRQ");
+      //VDC_DEBUG("Sprite hit IRQ");
       IRQHook(TRUE);
      }
      sprite_line_buf[tx] = pi | raw_pixel | prio_or;
@@ -1042,7 +1042,7 @@ void VDC::DoWaitStates(void)
  //assert(!pending_write);
 }
 
-uint8 VDC::Read(uint32 A, int32 &next_event, bool peek)
+uint8 VDC::Read(uint32 A, bool peek)
 {
  uint8 ret = 0;
  int msb = A & 1;
@@ -1157,7 +1157,7 @@ void VDC::CheckAndCommitPending(void)
 }
 
 
-void VDC::Write(uint32 A, uint8 V, int32 &next_event)
+void VDC::Write(uint32 A, uint8 V)
 {
  int msb = A & 1;
 

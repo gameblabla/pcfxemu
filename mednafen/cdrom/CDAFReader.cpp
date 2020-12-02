@@ -25,6 +25,8 @@
 // Don't allow exceptions to propagate into the vorbis/musepack/etc. libraries, as it could easily leave the state of the library's decoder "object" in an
 // inconsistent state, which would cause all sorts of unfun when we try to destroy it while handling the exception farther up.
 
+#if defined(HAVE_MPC) || defined(HAVE_TREMOR)
+
 #include <mednafen/mednafen.h>
 #include "CDAFReader.h"
 #include "CDAFReader_Vorbis.h"
@@ -45,9 +47,10 @@ CDAFReader::~CDAFReader()
 CDAFReader* CDAFR_Open(Stream* fp)
 {
 #ifdef HAVE_MPC
-  return CDAFR_MPC_Open(fp);
-#else
-  return CDAFR_Vorbis_Open(fp);
+	return CDAFR_MPC_Open(fp);
+#elif defined(HAVE_TREMOR)
+	return CDAFR_Vorbis_Open(fp);
 #endif
 }
 
+#endif

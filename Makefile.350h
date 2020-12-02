@@ -8,7 +8,7 @@ CXX 		= /opt/gcw0-toolchain-static/usr/bin/mipsel-linux-g++
 PORT = sdl
 # Possible values : alsa, oss, portaudio
 SOUND_ENGINE = sdl
-PROFILE = APPLY
+PROFILE = YES
 CHD = NO
 
 #### End of Configuration
@@ -35,7 +35,7 @@ CFLAGS		+= $(INCLUDES) $(DEFINES) -fno-math-errno -fgcse-las -fgcse-sm -fmerge-a
 # -freorder-blocks-and-partition -freorder-functions
 
 CXXFLAGS	= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -ftree-vectorize -fno-threadsafe-statics -fno-enforce-eh-specs -fstrict-enums
-LDFLAGS     = -lc -lgcc -lstdc++ -ldl -lm -lSDL -lasound -logg -lz -lvorbisidec -Wl,-z,norelro -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
+LDFLAGS     = -lc -lgcc -lstdc++ -ldl -lm -lSDL -lasound -logg -lz -Wl,-z,norelro -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
 
 ifeq ($(PROFILE), YES)
 CFLAGS 		+= -fprofile-generate -fprofile-dir=/usr/local/home/pc_gcda

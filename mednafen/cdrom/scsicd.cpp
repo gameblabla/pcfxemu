@@ -478,7 +478,7 @@ static void CommandCCError(int key, int asc = 0, int ascq = 0)
 	SendStatusAndMessage(STATUS_CHECK_CONDITION, 0x00);
 }
 
-static bool ValidateRawDataSector(uint8 *data, const uint32 lba)
+static bool ValidateRawDataSector(uint8 *data)
 {
 	if(!Cur_CDIF->ValidateRawSector(data))
 	{
@@ -918,10 +918,11 @@ static void DoMODESENSE6(const uint8 *cdb)
 
 static void DoSTARTSTOPUNIT6(const uint8 *cdb)
 {
+	/*
 	bool Immed = cdb[1] & 0x01;
 	bool LoEj = cdb[4] & 0x02;
 	bool Start = cdb[4] & 0x01;
-
+	*/
 	SendStatusAndMessage(STATUS_GOOD, 0x00);
 }
 
@@ -1341,7 +1342,7 @@ static void DoREADHEADER10(const uint8 *cdb)
  }
 
  Cur_CDIF->ReadRawSector(raw_buf, HeaderLBA);	//, HeaderLBA + 1);
- if(!ValidateRawDataSector(raw_buf, HeaderLBA))
+ if(!ValidateRawDataSector(raw_buf))
   return;
 
  m = BCD_to_U8(raw_buf[12 + 0]);
@@ -1784,7 +1785,7 @@ static void DoREADBase(uint32 sa, uint32 sc)
 		return;
 	}
 
-	if(!(toc.tracks[track].control) & 0x4)
+	if(!((toc.tracks[track].control) & 0x4))
 	{
 		CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_NOT_DATA_TRACK);
 		return;
@@ -2378,7 +2379,7 @@ static INLINE void RunCDDA(uint32 system_timestamp, int32 run_time)
 
 
 
-static INLINE void RunCDRead(uint32 system_timestamp, int32 run_time)
+static INLINE void RunCDRead(int32 run_time)
 {
 	if(CDReadTimer > 0)
 	{
@@ -2413,7 +2414,7 @@ static INLINE void RunCDRead(uint32 system_timestamp, int32 run_time)
 					cd.data_transfer_done = false;
 					CommandCCError(SENSEKEY_ILLEGAL_REQUEST);
 				}
-				else if(ValidateRawDataSector(tmp_read_buf, SectorAddr))
+				else if(ValidateRawDataSector(tmp_read_buf))
 				{
 					memcpy(cd.SubPWBuf, tmp_read_buf + 2352, 96);
 
@@ -2456,7 +2457,7 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 
 	lastts = system_timestamp;
 
-	RunCDRead(system_timestamp, run_time);
+	RunCDRead(run_time);
 	RunCDDA(system_timestamp, run_time);
 
 	bool ResetNeeded = false;

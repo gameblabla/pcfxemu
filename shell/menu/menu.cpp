@@ -21,10 +21,10 @@ uint32_t emulator_state = 0;
 
 extern uint8_t exit_vb;
 
-char home_path[256], save_path[256], sram_path[256], conf_path[256];
+char home_path[128], save_path[192], sram_path[192], conf_path[192];
 
 extern SDL_Surface *sdl_screen;
-extern char GameName_emu[512];
+extern char GameName_emu[256];
 
 static uint8_t save_slot = 0;
 /*static const int8_t upscalers_available = 2

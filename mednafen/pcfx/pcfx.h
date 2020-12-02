@@ -30,9 +30,6 @@ static INLINE void MDFN_FastU32MemsetM8(uint32_t *array, uint32_t value_32, unsi
 
 extern V810 PCFX_V810;
 
-uint8 MDFN_FASTCALL mem_peekbyte(const v810_timestamp_t timestamp, const uint32 A);
-uint16 MDFN_FASTCALL mem_peekhword(const v810_timestamp_t timestamp, const uint32 A);
-
 int32 MDFN_FASTCALL pcfx_event_handler(const v810_timestamp_t timestamp);
 
 void ForceEventUpdates(const uint32 timestamp);
