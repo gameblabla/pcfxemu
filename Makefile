@@ -20,7 +20,7 @@ INCLUDES	+= -Imednafen -I./mednafen/vb -I./mednafen/sound -I. -Ishell/emu -Imedn
 INCLUDES	+= -Ilibretro-common/include  -Imednafen/hw_sound
 
 DEFINES		= -DLSB_FIRST -DINLINE="inline" -DINLINE="inline" -DNDEBUG -DWANT_STEREO_SOUND -DFRAMESKIP
-DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -DHAVE_CDROM -D_7ZIP_ST -DWANT_PCFX_EMU -DENABLE_JOYSTICKCODE
+DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -D_7ZIP_ST -DWANT_PCFX_EMU -DENABLE_JOYSTICKCODE
 DEFINES		+= -DSIZEOF_DOUBLE=8 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_
 DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H
 
@@ -47,8 +47,8 @@ endif
 SRCDIR 		=  ./src ./shell ./shell/scalers ./shell/emu ./shell/menu
 SRCDIR		+= ./shell/input/sdl/ ./shell/video/$(PORT) ./shell/audio/$(SOUND_ENGINE)
 SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270 ./mednafen/pcfx ./mednafen/pcfx/input ./mednafen/sound ./mednafen/tremor ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
-SRCDIR		+= ./libretro-common/cdrom ./libretro-common/compat ./libretro-common/encodings ./libretro-common/file ./libretro-common/lists
-SRCDIR		+= ./libretro-common/memmap ./libretro-common/streams ./libretro-common/string ./libretro-common/time
+SRCDIR		+= ./libretro-common/compat ./libretro-common/file
+SRCDIR		+= ./libretro-common/streams ./libretro-common/string ./libretro-common/time
 SRCDIR		+= ./libretro-common/vfs
 ifeq ($(CHD), YES)
 SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/flac-1.3.3/src
