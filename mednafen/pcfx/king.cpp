@@ -1114,7 +1114,7 @@ void KING_Write8(const v810_timestamp_t timestamp, uint32 A, uint8 V)
  KING_Write16(timestamp, A & 0x706, V << ((A & 1) ? 8 : 0));
 }
 
-static INLINE void SCSI_Reg0_Write(const v810_timestamp_t timestamp, uint8 V, bool delay_run = 0)
+static INLINE void SCSI_Reg0_Write(uint8 V, bool delay_run = 0)
 {
  king->Reg00 = V;
  SCSICD_SetDB(V);
@@ -1127,7 +1127,7 @@ static INLINE void SCSI_Reg0_Write(const v810_timestamp_t timestamp, uint8 V, bo
  }
 }
 
-static INLINE void SCSI_Reg2_Write(const v810_timestamp_t timestamp, uint8 V, bool delay_run = 0)
+static INLINE void SCSI_Reg2_Write(uint8 V, bool delay_run = 0)
 {
  KINGDBG("SCSI Mode: %04x\n", V);
 
@@ -1168,7 +1168,7 @@ static INLINE void SCSI_Reg2_Write(const v810_timestamp_t timestamp, uint8 V, bo
  king->Reg02 = V;
 }
 
-static INLINE void SCSI_Reg3_Write(const v810_timestamp_t timestamp, uint8 V, bool delay_run = 0)
+static INLINE void SCSI_Reg3_Write(uint8 V, bool delay_run = 0)
 {
  KINGDBG("Set phase match SCSI bus bits: IO: %d, CD: %d, MSG: %d\n", (int)(bool)(V & 1), (int)(bool)(V & 2), (int)(bool)(V & 4));
  king->Reg03 = V & 0x7;
@@ -1213,7 +1213,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 			   if(!msh) 
 			   {
-			    SCSI_Reg0_Write(timestamp, V);
+			    SCSI_Reg0_Write(V);
 			   }
 			   break;
 
@@ -1227,9 +1227,9 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			    {
 			     if(!(king->Reg01 & 0x80))
 			     {
-			      SCSI_Reg0_Write(timestamp, 0, TRUE);
-			      SCSI_Reg2_Write(timestamp, 0, TRUE);
-			      SCSI_Reg3_Write(timestamp, 0, TRUE);
+			      SCSI_Reg0_Write(0, TRUE);
+			      SCSI_Reg2_Write(0, TRUE);
+			      SCSI_Reg3_Write(0, TRUE);
 			      king->data_cache = 0x00;
 
 			      //king->CDInterrupt = true;
@@ -1257,7 +1257,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 			   if(!msh)
 			   {
-			    SCSI_Reg2_Write(timestamp, V);
+			    SCSI_Reg2_Write(V);
 			   }
 			   break;
 
@@ -1266,7 +1266,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 			   if(!msh)
 			   {
-			    SCSI_Reg3_Write(timestamp, V);
+			    SCSI_Reg3_Write(V);
 			   }
 			   break;
 
@@ -1771,7 +1771,7 @@ static INLINE int32 max(int32 a, int32 b)
  return(b);
 }
 
-static void DrawBG(uint32 *target, int n, bool sub)
+static void DrawBG(uint32 *target, int n)
 {
  // TODO: Verify behavior when size is out of bounds on BG1-3.
  // With BG0 at least, it behaves as if the size is at its minimum, with caveats(TO BE INVESTIGATED).
@@ -2447,7 +2447,7 @@ static void DrawActive(void)
        if(CanDrawBG_Fast(x)) // && (rand() & 1))
 	DrawBG_Fast(bg_linebuffer, x);
        else
-        DrawBG(bg_linebuffer, x, 0);
+        DrawBG(bg_linebuffer, x);
       }
      }
     }

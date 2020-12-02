@@ -46,10 +46,13 @@ endif
 # Files to be compiled
 SRCDIR 		=  ./src ./shell ./shell/scalers ./shell/emu ./shell/menu
 SRCDIR		+= ./shell/input/sdl/ ./shell/video/$(PORT) ./shell/audio/$(SOUND_ENGINE)
-SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270 ./mednafen/pcfx ./mednafen/pcfx/input ./mednafen/sound ./mednafen/tremor ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
+SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270 ./mednafen/pcfx ./mednafen/pcfx/input ./mednafen/sound ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
 SRCDIR		+= ./libretro-common/compat ./libretro-common/file
 SRCDIR		+= ./libretro-common/streams ./libretro-common/string ./libretro-common/time
 SRCDIR		+= ./libretro-common/vfs
+ifeq ($(TREMOR), YES)
+SRCDIR		+= ./mednafen/tremor
+endif
 ifeq ($(CHD), YES)
 SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/flac-1.3.3/src
 endif

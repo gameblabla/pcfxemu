@@ -1,27 +1,5 @@
 #include "../mednafen-endian.h"
 
-uint8 MDFN_FASTCALL mem_peekbyte(const v810_timestamp_t timestamp, const uint32 A)
-{
- if(A <= 0x001FFFFF)
-  return(RAM[A]);
- else if(A <= 0x00FFFFFF)
-  return(0xFF);
- else if(A >= 0xF0000000)
-  return(BIOSROM[A & 0xFFFFF]);
- return(0xFF);
-}
-
-uint16 MDFN_FASTCALL mem_peekhword(const v810_timestamp_t timestamp, const uint32 A) // TODO: Full memory map peeking.
-{
- if(A <= 0x001FFFFF)
-  return(le16toh(*(uint16*)&RAM[A]));
- else if(A <= 0x00FFFFFF)
-  return(0xFFFF);
- else if(A >= 0xF0000000)
-  return(le16toh(*(uint16 *)&BIOSROM[A & 0xFFFFF]));
- return(0xFFFF);
-}
-
 static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)

@@ -112,7 +112,7 @@ void FXINPUT_Init(void)
  RemakeDevices();
 }
 
-void FXINPUT_SettingChanged(const char *name)
+void FXINPUT_SettingChanged()
 {
  SyncSettings();
 }

@@ -13,7 +13,6 @@
 #endif
 
 #include <string/stdstring.h>
-#include <retro_timers.h>
 #include <streams/file_stream.h>
 
 #include "mednafen/mednafen.h"
@@ -50,7 +49,7 @@
 #include "menu.h"
 #include "config.h"
 
-char GameName_emu[512];
+char GameName_emu[256];
 uint8_t exit_vb = 0;
 extern uint32_t emulator_state;
 
@@ -330,7 +329,7 @@ static void PCFX_Reset(void)
 
  memset(RAM, 0x00, 2048 * 1024);
 
- for(int i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
  {
   int32 dummy_ne MDFN_NOWARN_UNUSED;
 
@@ -392,13 +391,13 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    uint32 RAM_Map_Addresses[1] = { 0x00000000 };
    uint32 BIOSROM_Map_Addresses[1] = { 0xFFF00000 };
 
-   RAM = PCFX_V810.SetFastMap(RAM_Map_Addresses, 0x00200000, 1, "RAM");
+   RAM = PCFX_V810.SetFastMap(RAM_Map_Addresses, 0x00200000, 1);
 
    // todo: cleanup on error
    if(!RAM)
       return(0);
 
-   BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1, "BIOS ROM");
+   BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1);
    if(!BIOSROM)
       return(0);
 
@@ -413,7 +412,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    file_close(BIOSFile);
    BIOSFile = NULL;
 
-   for(int i = 0; i < 2; i++)
+   for(uint_fast8_t i = 0; i < 2; i++)
    {
       fx_vdc_chips[i] = new VDC(setting_nospritelimit, 65536);
       fx_vdc_chips[i]->SetWSHook(NULL);
@@ -665,29 +664,6 @@ static void PCFX_CDSelect(void)
 }
 */
 
-static void CloseGame(void)
-{
-   uint_fast8_t i;
-
-   for(i = 0; i < 2; i++)
-   {
-      if(fx_vdc_chips[i])
-      {
-         delete fx_vdc_chips[i];
-         fx_vdc_chips[i] = NULL;
-      }
-   }
-
-   RAINBOW_Close();
-   KING_Close();
-   SoundBox_Kill();
-   PCFX_V810.Kill();
-
-   // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
-   RAM = NULL;
-   BIOSROM = NULL;
-}
-
 /*static void DoSimpleCommand(int cmd)
 {
  switch(cmd)
@@ -730,7 +706,7 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
 
    int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "MAIN", false);
 
-   for(int i = 0; i < 2; i++)
+   for(uint_fast8_t i = 0; i < 2; i++)
       ret &= fx_vdc_chips[i]->StateAction(sm, load, data_only, i ? "VDC1" : "VDC0");
 
    ret &= FXINPUT_StateAction(sm, load, data_only);
@@ -943,7 +919,7 @@ static uint8_t MDFNI_LoadGame(const char *name)
 	return 0;
 }
 
-bool Load_Game_Memory(char* path)
+void Load_Game_Memory(char* path)
 {
 	MDFNI_LoadGame(path);
 	switch(option.type_controller)
@@ -953,33 +929,11 @@ bool Load_Game_Memory(char* path)
 		break;
 		case 1:
 			FXINPUT_SetInput(0, 1, &mousedata[0]);
-
 		break;
 	}
 	input_buf[1] = 0;
 	KING_SetPixelFormat();
 	SoundBox_SetSoundRate(SOUND_OUTPUT_FREQUENCY);
-	return 1;
-}
-
-static void MDFNI_CloseGame(void)
-{
-   CloseGame();
-
-   for(unsigned i = 0; i < CDInterfaces.size(); i++)
-   {
-		if (CDInterfaces[i] != NULL)
-		{
-			delete CDInterfaces[i];
-			CDInterfaces[i] = NULL;
-		}
-   }
-   CDInterfaces.clear();
-}
-
-void Clean_Emu(void)
-{
-   MDFNI_CloseGame();
 }
 
 static void update_input(void)
@@ -1257,13 +1211,33 @@ void SRAM_Save(char* path, uint_fast8_t state)
 	}
 }
 
+static void Clean_Emu(void)
+{
+   uint_fast8_t i;
+
+   for(i = 0; i < 2; i++)
+   {
+      if(fx_vdc_chips[i])
+      {
+         delete fx_vdc_chips[i];
+         fx_vdc_chips[i] = NULL;
+      }
+   }
+
+   RAINBOW_Close();
+   KING_Close();
+   SoundBox_Kill();
+   PCFX_V810.Kill();
+
+   // The allocated memory RAM and BIOSROM is free'd in V810_Kill()
+   RAM = NULL;
+   BIOSROM = NULL;
+}
+
 /* Main entrypoint of the emulator */
 int main(int argc, char* argv[])
 {
-	int isloaded;
-	
 	printf("Starting PCFXEmu\n");
-    
 	if (argc < 2)
 	{
 		printf("Specify a ROM to load in memory\n");
@@ -1275,12 +1249,8 @@ int main(int argc, char* argv[])
 	Init_Configuration();
 	
 	Emu_Init();
-	isloaded = Load_Game_Memory(argv[1]);
-	if (!isloaded)
-	{
-		printf("Could not load ROM in memory\n");
-		return 0;
-	}
+	Load_Game_Memory(argv[1]);
+	
 	Init_Video();
 	Audio_Init();	
 	Load_Configuration();

@@ -160,7 +160,7 @@ class V810
  void SetIOWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t &, uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t &, uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t &, uint32, uint32));
 
  // Length specifies the number of bytes to map in, at each location specified by addresses[] (for mirroring)
- uint8 *SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses, const char *name);
+ uint8 *SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses);
 
  INLINE void ResetTS(v810_timestamp_t new_base_timestamp)
  {
@@ -265,7 +265,7 @@ class V810
  bool in_bstr;
  uint16 in_bstr_to;
 
- bool bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1);
+ bool bstr_subop(v810_timestamp_t &timestamp, int sub_op);
  void fpu_subop(v810_timestamp_t &timestamp, int sub_op, int arg1, int arg2);
 
  void Exception(uint32 handler, uint16 eCode);
@@ -292,7 +292,7 @@ class V810
  void CacheOpMemStore(v810_timestamp_t &timestamp, uint32 A, uint32 V);
  uint32 CacheOpMemLoad(v810_timestamp_t &timestamp, uint32 A);
 
- void CacheClear(v810_timestamp_t &timestamp, uint32 start, uint32 count);
+ void CacheClear(uint32 start, uint32 count);
  void CacheDump(v810_timestamp_t &timestamp, const uint32 SA);
  void CacheRestore(v810_timestamp_t &timestamp, const uint32 SA);
 

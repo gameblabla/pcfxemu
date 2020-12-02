@@ -30,7 +30,7 @@ class PCFX_Input_Device
 
 
 void FXINPUT_Init(void);
-void FXINPUT_SettingChanged(const char *name);
+void FXINPUT_SettingChanged(void);
 
 void FXINPUT_SetInput(int port, uint_fast8_t type, void *ptr);
 

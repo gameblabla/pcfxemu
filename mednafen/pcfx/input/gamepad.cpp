@@ -54,11 +54,6 @@ class PCFX_Input_Gamepad : public PCFX_Input_Device
   return(buttons | (FX_SIG_PAD << 28));
  }
 
- virtual void Write(uint32 data)
- {
-
- }
-
 
  virtual void Power(void)
  {

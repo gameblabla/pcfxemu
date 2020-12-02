@@ -123,11 +123,13 @@ INLINE void V810::RecalcIPendingCache(void)
 // and try to restore cache from an interrupt acknowledge register or dump it to a register
 // controlling interrupt masks...  I wanna be sadistic~
 
-void V810::CacheClear(v810_timestamp_t &timestamp, uint32 start, uint32 count)
+void V810::CacheClear(uint32 start, uint32 count)
 {
- //printf("Cache clear: %08x %08x\n", start, count);
- for(uint32 i = 0; i < count && (i + start) < 128; i++)
-  memset(&Cache[i + start], 0, sizeof(V810_CacheEntry_t));
+	//printf("Cache clear: %08x %08x\n", start, count);
+	for(uint32_t i = 0; i < count && (i + start) < 128; i++)
+	{
+		memset(&Cache[i + start], 0, sizeof(V810_CacheEntry_t));
+	}
 }
 
 INLINE void V810::CacheOpMemStore(v810_timestamp_t &timestamp, uint32 A, uint32 V)
@@ -288,29 +290,28 @@ INLINE uint16 V810::RDOP(v810_timestamp_t &timestamp, uint32 addr, uint32 meow)
 // Reinitialize the defaults in the CPU
 void V810::Reset() 
 {
- memset(&Cache, 0, sizeof(Cache));
+	memset(&Cache, 0, sizeof(Cache));
+	memset(P_REG, 0, sizeof(P_REG));
+	memset(S_REG, 0, sizeof(S_REG));
+	memset(Cache, 0, sizeof(Cache));
 
- memset(P_REG, 0, sizeof(P_REG));
- memset(S_REG, 0, sizeof(S_REG));
- memset(Cache, 0, sizeof(Cache));
+	P_REG[0]      =  0x00000000;
+	SetPC(0xFFFFFFF0);
 
- P_REG[0]      =  0x00000000;
- SetPC(0xFFFFFFF0);
+	S_REG[ECR]    =  0x0000FFF0;
+	S_REG[PSW]    =  0x00008000;
 
- S_REG[ECR]    =  0x0000FFF0;
- S_REG[PSW]    =  0x00008000;
+	S_REG[PIR]    =  0x00008100;
 
-  S_REG[PIR]    =  0x00008100;
+	S_REG[TKCW]   =  0x000000E0;
+	Halted = HALT_NONE;
+	ilevel = -1;
 
- S_REG[TKCW]   =  0x000000E0;
- Halted = HALT_NONE;
- ilevel = -1;
+	lastop = 0;
 
- lastop = 0;
+	in_bstr = FALSE;
 
- in_bstr = FALSE;
-
- RecalcIPendingCache();
+	RecalcIPendingCache();
 }
 
 bool V810::Init()
@@ -320,7 +321,7 @@ bool V810::Init()
 
 	memset(DummyRegion, 0, V810_FAST_MAP_PSIZE);
 
-	for(unsigned int i = V810_FAST_MAP_PSIZE; i < V810_FAST_MAP_PSIZE + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
+	for(uint_fast32_t i = V810_FAST_MAP_PSIZE; i < V810_FAST_MAP_PSIZE + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
 	{
 		DummyRegion[i + 0] = 0;
 		DummyRegion[i + 1] = 0x36 << 2;
@@ -343,94 +344,91 @@ void V810::Kill(void)
 
 void V810::SetInt(int level)
 {
- //assert(level >= -1 && level <= 15);
-
- ilevel = level;
- RecalcIPendingCache();
+	//assert(level >= -1 && level <= 15);
+	ilevel = level;
+	RecalcIPendingCache();
 }
 
-uint8 *V810::SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses, const char *name)
+uint8 *V810::SetFastMap(uint32 addresses[], uint32 length, unsigned int num_addresses)
 {
- uint8 *ret = NULL;
+	uint8 *ret = NULL;
 
- if(!(ret = (uint8 *)malloc(length + V810_FAST_MAP_TRAMPOLINE_SIZE)))
- {
-  return(NULL);
- }
+	if(!(ret = (uint8 *)malloc(length + V810_FAST_MAP_TRAMPOLINE_SIZE)))
+	{
+		return(NULL);
+	}
 
- for(unsigned int i = length; i < length + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
- {
-  ret[i + 0] = 0;
-  ret[i + 1] = 0x36 << 2;
- }
+	for(uint_fast32_t i = length; i < length + V810_FAST_MAP_TRAMPOLINE_SIZE; i += 2)
+	{
+		ret[i + 0] = 0;
+		ret[i + 1] = 0x36 << 2;
+	}
 
- for(unsigned int i = 0; i < num_addresses; i++)
- {  
-  for(uint64 addr = addresses[i]; addr != (uint64)addresses[i] + length; addr += V810_FAST_MAP_PSIZE)
-  {
-   //printf("%08x, %d, %s\n", addr, length, name);
+	for(uint_fast32_t i = 0; i < num_addresses; i++)
+	{  
+		for(uint64 addr = addresses[i]; addr != (uint64)addresses[i] + length; addr += V810_FAST_MAP_PSIZE)
+		{
+			FastMap[addr / V810_FAST_MAP_PSIZE] = ret - addresses[i];
+		}
+	}
 
-   FastMap[addr / V810_FAST_MAP_PSIZE] = ret - addresses[i];
-  }
- }
+	FastMapAllocList = ret;
 
- FastMapAllocList = ret;
-
- return(ret);
+	return(ret);
 }
 
 
 void V810::SetMemReadBus32(uint8 A, bool value)
 {
- MemReadBus32[A] = value;
+	MemReadBus32[A] = value;
 }
 
 void V810::SetMemWriteBus32(uint8 A, bool value)
 {
- MemWriteBus32[A] = value;
+	MemWriteBus32[A] = value;
 }
 
 void V810::SetMemReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t &, uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t &, uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t &, uint32))
 {
- MemRead8 = read8;
- MemRead16 = read16;
- MemRead32 = read32;
+	MemRead8 = read8;
+	MemRead16 = read16;
+	MemRead32 = read32;
 }
 
 void V810::SetMemWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t &, uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t &, uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t &, uint32, uint32))
 {
- MemWrite8 = write8;
- MemWrite16 = write16;
- MemWrite32 = write32;
+	MemWrite8 = write8;
+	MemWrite16 = write16;
+	MemWrite32 = write32;
 }
 
 void V810::SetIOReadHandlers(uint8 MDFN_FASTCALL (*read8)(v810_timestamp_t &, uint32), uint16 MDFN_FASTCALL (*read16)(v810_timestamp_t &, uint32), uint32 MDFN_FASTCALL (*read32)(v810_timestamp_t &, uint32))
 {
- IORead8 = read8;
- IORead16 = read16;
- IORead32 = read32;
+	IORead8 = read8;
+	IORead16 = read16;
+	IORead32 = read32;
 }
 
 void V810::SetIOWriteHandlers(void MDFN_FASTCALL (*write8)(v810_timestamp_t &, uint32, uint8), void MDFN_FASTCALL (*write16)(v810_timestamp_t &, uint32, uint16), void MDFN_FASTCALL (*write32)(v810_timestamp_t &, uint32, uint32))
 {
- IOWrite8 = write8;
- IOWrite16 = write16;
- IOWrite32 = write32;
+	IOWrite8 = write8;
+	IOWrite16 = write16;
+	IOWrite32 = write32;
 }
 
 
 INLINE void V810::SetFlag(uint32 n, bool condition)
 {
- S_REG[PSW] &= ~n;
+	S_REG[PSW] &= ~n;
 
- if(condition)
-  S_REG[PSW] |= n;
+	if(condition)
+		S_REG[PSW] |= n;
 }
 	
 INLINE void V810::SetSZ(uint32 value)
 {
- SetFlag(PSW_Z, !value);
- SetFlag(PSW_S, value & 0x80000000);
+	SetFlag(PSW_Z, !value);
+	SetFlag(PSW_S, value & 0x80000000);
 }
 
 
@@ -444,14 +442,14 @@ INLINE void V810::SetSREG(v810_timestamp_t &timestamp, unsigned int which, uint3
 		//printf("LDSR to reserved system register: 0x%02x : 0x%08x\n", which, value);
 		break;
 
-         case ECR:      // Read-only
+         /*case ECR:      // Read-only
                 break;
 
          case PIR:      // Read-only (obviously)
                 break;
 
          case TKCW:     // Read-only
-                break;
+                break;*/
 
 	 case EIPSW:
 	 case FEPSW:
@@ -483,7 +481,7 @@ INLINE void V810::SetSREG(v810_timestamp_t &timestamp, unsigned int which, uint3
 
               	 case 0x00: break;
 
-              	 case 0x01: CacheClear(timestamp, (value >> 20) & 0xFFF, (value >> 8) & 0xFFF);
+              	 case 0x01: CacheClear((value >> 20) & 0xFFF, (value >> 8) & 0xFFF);
                             break;
 
               	 case 0x10: CacheDump(timestamp, value & ~0xFF);
@@ -754,7 +752,7 @@ INLINE bool V810::Do_BSTR_Search(v810_timestamp_t &timestamp, const int inc_mul,
         return((bool)len);      // Continue the search if any bits are left to search.
 }
 
-bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1)
+bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op)
 {
  if((sub_op >= 0x10) || (!(sub_op & 0x8) && sub_op >= 0x4))
  {

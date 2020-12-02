@@ -232,8 +232,8 @@ class VDC
 	int32 VSync(bool);
 
 
-	void Write(uint32 A, uint8 V, int32 &next_event);
-	uint8 Read(uint32 A, int32 &next_event, bool peek = FALSE);
+	void Write(uint32 A, uint8 V);
+	uint8 Read(uint32 A, bool peek = FALSE);
 
         void Write16(bool A, uint16 V);
         uint16 Read16(bool A, bool peek = FALSE);
