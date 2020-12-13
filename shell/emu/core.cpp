@@ -1140,7 +1140,7 @@ std::string MDFN_MakeFName(MakeFName_Type type, int id1, const char *cd1)
 void SaveState(char* path, uint_fast8_t state)
 {	
 	FILE* savefp;
-	size_t file_size;
+	int32_t file_size = 0;
 	char* buffer = NULL;
 	if (state == 1)
 	{
