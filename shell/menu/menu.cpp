@@ -27,11 +27,13 @@ extern SDL_Surface *sdl_screen;
 extern char GameName_emu[256];
 
 static uint8_t save_slot = 0;
-/*static const int8_t upscalers_available = 2
+#ifdef SCALING_SOFTWARE
+static const int8_t upscalers_available = 1
 #ifdef SCALE2X_UPSCALER
 +1
 #endif
-;*/
+;
+#endif
 
 static void SaveState_Menu(uint_fast8_t load_mode, uint_fast8_t slot)
 {
@@ -333,16 +335,13 @@ void Menu()
 		switch(option.fullscreen)
 		{
 			case 0:
-				print_string("Scaling : Native", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+				snprintf(text, sizeof(text), "Scaling : Native");
 			break;
 			case 1:
-				print_string("Scaling : Stretched", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+				snprintf(text, sizeof(text), "Scaling : Stretched");
 			break;
 			case 2:
-				print_string("Scaling : Bilinear", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
-			break;
-			case 3:
-				print_string("Scaling : EPX/Scale2x", TextRed, 0, 5, 105, (uint16_t*)backbuffer->pixels);
+				snprintf(text, sizeof(text), "Scaling : EPX/Scale2x");
 			break;
 		}
 		Draw_Option(3-SCALING_SOFTWARE_OFFSET, currentselection-SCALING_SOFTWARE_OFFSET, text, 5, 105);
