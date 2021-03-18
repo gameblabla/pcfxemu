@@ -5,7 +5,7 @@ CXX 		= g++
 #### Configuration
 
 # Possible values : retrostone, rs97, rs90
-PORT = gcw0
+PORT = sdl
 # Possible values : alsa, oss, portaudio
 SOUND_ENGINE = sdl
 CHD = YES
@@ -22,11 +22,11 @@ INCLUDES	+= -Ilibretro-common/include  -Imednafen/hw_sound
 DEFINES		= -DLSB_FIRST -DINLINE="inline" -DINLINE="inline" -DNDEBUG -DWANT_STEREO_SOUND -DFRAMESKIP
 DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -D_7ZIP_ST -DWANT_PCFX_EMU -DENABLE_JOYSTICKCODE
 DEFINES		+= -DSIZEOF_DOUBLE=8 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_
-DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H
+DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DSCALING_SOFTWARE
 
 ifeq ($(CHD), YES)
-INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include -Ideps/flac-1.3.3/src/include -Ideps/flac-1.3.3/include
-DEFINES			+= -DHAVE_CHD -D_7ZIP_ST -DFLAC_API_EXPORTS -DFLAC__HAS_OGG=0 
+INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include
+DEFINES			+= -DHAVE_CHD -D_7ZIP_ST
 endif
 
 CFLAGS		= -Ofast -g3 -fno-common -Wall -Wextra -Wunused-value $(INCLUDES) $(DEFINES)
@@ -54,7 +54,7 @@ ifeq ($(TREMOR), YES)
 SRCDIR		+= ./mednafen/tremor
 endif
 ifeq ($(CHD), YES)
-SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/flac-1.3.3/src
+SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src
 endif
 
 VPATH		= $(SRCDIR)
