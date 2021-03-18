@@ -1,14 +1,14 @@
 PRGNAME     = pcfx.elf
-CC          = /opt/gcw0-toolchain-static/usr/bin/mipsel-linux-gcc
-CXX 		= /opt/gcw0-toolchain-static/usr/bin/mipsel-linux-g++
+CC          = /opt/retrostone-toolchain/usr/bin/arm-linux-gcc
+CXX 		= /opt/retrostone-toolchain/usr/bin/arm-linux-g++
 
 #### Configuration
 
 # Possible values : retrostone, rs97, rs90
-PORT = sdl
+PORT = retrostone
 # Possible values : alsa, oss, portaudio
 SOUND_ENGINE = sdl
-PROFILE = YES
+PROFILE = 0
 CHD = NO
 
 #### End of Configuration
@@ -23,22 +23,21 @@ INCLUDES	+= -Ilibretro-common/include  -Imednafen/hw_sound
 DEFINES		= -DLSB_FIRST -DINLINE="inline" -DINLINE="inline" -DNDEBUG -DFORCE_FRAMESKIP
 DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -DENABLE_JOYSTICKCODE
 DEFINES		+= -DSIZEOF_DOUBLE=4 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_
-DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DGCW0 -DGKD350_BUG_INPUT
+DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DRETROSTONE_2
 
 ifeq ($(CHD), YES)
-INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include
+INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include -Ideps/flac-1.3.3/src/include -Ideps/flac-1.3.3/include
 DEFINES			+= -DHAVE_CHD -D_7ZIP_ST
 endif
 
-CFLAGS		= -Wall -Wextra -mno-xgot -Ofast -fdata-sections -ffunction-sections -fsection-anchors -fno-builtin -mframe-header-opt -mno-fp-exceptions -mno-check-zero-division -fsingle-precision-constant -fno-common -march=mips32r2 -mtune=mips32r2 -flto -fno-PIC -mno-abicalls
-CFLAGS		+= $(INCLUDES) $(DEFINES) -fno-math-errno -fgcse-las -fgcse-sm -fmerge-all-constants -fno-stack-protector -fomit-frame-pointer
-# -freorder-blocks-and-partition -freorder-functions
+CFLAGS		= -Wall -Wextra -Ofast -march=armv7-a+neon-vfpv4 -mtune=cortex-a7 -mfpu=neon-vfpv4 -fdata-sections -ffunction-sections -fno-builtin -fno-PIC -flto -fno-PIC -finline-limit=76
+CFLAGS		+= $(INCLUDES) $(DEFINES) -fno-math-errno 
 
 CXXFLAGS	= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -ftree-vectorize -fno-threadsafe-statics -fno-enforce-eh-specs -fstrict-enums
-LDFLAGS     = -lc -lgcc -lstdc++ -ldl -lm -lSDL -lasound -logg -lz -Wl,-z,norelro -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
+LDFLAGS     = -nodefaultlibs -lc -lgcc -lstdc++ -lm -lSDL -lasound -lz -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
 
 ifeq ($(PROFILE), YES)
-CFLAGS 		+= -fprofile-generate -fprofile-dir=/usr/local/home/pc_gcda
+CFLAGS 		+= -fprofile-generate -fprofile-dir=/usr/local/home/pcfxg
 else ifeq ($(PROFILE), APPLY)
 CFLAGS		+= -fprofile-use -fbranch-probabilities
 endif
