@@ -840,13 +840,13 @@ int PCE_PSG::StateAction(StateMem *sm, int load, int data_only)
 
    if(!channel[ch].noisecount && ch >= 4)
    {
-    printf("ch=%d, noisecount == 0\n", ch);
+    //printf("ch=%d, noisecount == 0\n", ch);
     channel[ch].noisecount = 1;
    }
 
    if(channel[ch].counter <= 0)
    {
-    printf("ch=%d, counter <= 0\n", ch);
+    //printf("ch=%d, counter <= 0\n", ch);
     channel[ch].counter = 1;
    }
 

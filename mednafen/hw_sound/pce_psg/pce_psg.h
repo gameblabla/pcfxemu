@@ -169,7 +169,7 @@ class PCE_PSG
 
 	bool SoundEnabled;
 	Blip_Buffer *sbuf[2];
-	Blip_Synth<blip_good_quality, 8192> Synth;
+	Blip_Synth<blip_med_quality, 8192> Synth;
 
         int32 dbtable_volonly[32];
 
