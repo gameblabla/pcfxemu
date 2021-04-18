@@ -276,7 +276,7 @@ v810_timestamp_t FXINPUT_Update(const v810_timestamp_t timestamp)
 {
  int32 run_time = timestamp - lastts;
 
- for(int i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
  {
   if(LatchPending[i] > 0)
   {
@@ -340,7 +340,7 @@ int FXINPUT_StateAction(StateMem *sm, int load, int data_only)
 
  int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "INPUT", false);
 
- for(int i = 0; i < TOTAL_PORTS; i++)
+ for(uint_fast8_t i = 0; i < TOTAL_PORTS; i++)
  {
   char sname[256];
   snprintf(sname, 256, "INPUT%d:%d", i, InputTypes[i]);

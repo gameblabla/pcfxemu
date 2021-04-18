@@ -230,7 +230,7 @@ uint32 V810_FP_Ops::add(uint32 a, uint32 b)
 
  //printf("%d:%08llx %d:%08llx\n", ins[0].exp, ins[0].f, ins[1].exp, ins[1].f);
 
- for(unsigned i = 0; i < 2; i++)
+ for(uint_fast8_t i = 0; i < 2; i++)
  {
   unsigned sd = (max_exp - ins[i].exp);
 

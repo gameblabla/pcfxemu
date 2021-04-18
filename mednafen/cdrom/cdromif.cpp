@@ -269,11 +269,6 @@ int CDIF_MT::ReadThreadStart()
 
    disc_cdaccess->Read_TOC(&disc_toc);
 
-   if(disc_toc.first_track < 1 || disc_toc.last_track > 99 || disc_toc.first_track > disc_toc.last_track)
-   {
-      //log_cb(RETRO_LOG_ERROR, "TOC first(%d)/last(%d) track numbers bad.\n", disc_toc.first_track, disc_toc.last_track);
-   }
-
    SBWritePos = 0;
    ra_lba = 0;
    ra_count = 0;
@@ -561,12 +556,6 @@ CDIF_ST::CDIF_ST(CDAccess *cda) : disc_cdaccess(cda)
    UnrecoverableError = false;
 
    disc_cdaccess->Read_TOC(&disc_toc);
-
-   if(disc_toc.first_track < 1 || disc_toc.last_track > 99 || disc_toc.first_track > disc_toc.last_track)
-   {
-	   
-      //throw(MDFN_Error(0, "TOC first(%d)/last(%d) track numbers bad.", disc_toc.first_track, disc_toc.last_track));
-   }
 }
 
 CDIF_ST::~CDIF_ST()

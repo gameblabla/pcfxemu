@@ -91,8 +91,11 @@ Blip_Buffer::blargg_err_t Blip_Buffer::set_sample_rate( long new_rate, int msec 
 	{
 		void* p = realloc( buffer_, (new_size + blip_buffer_extra_) * sizeof *buffer_ );
 		if ( !p )
-			return "No mem";
-
+		{
+			//return "No mem";
+			return "";
+		}
+		
 		//if(new_size > buffer_size_)
 		//	memset(buffer_ + buffer_size_, 0, (new_size + blip_buffer_extra_) * sizeof *buffer_
 

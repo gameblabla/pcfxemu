@@ -131,7 +131,7 @@ private:
 	#include "config.h"
 #endif
 
-#define BLIP_BUFFER_ACCURACY 32
+#define BLIP_BUFFER_ACCURACY 8
 #define BLIP_PHASE_BITS 8
 
 // Number of bits in resample ratio fraction. Higher values give a more accurate ratio
