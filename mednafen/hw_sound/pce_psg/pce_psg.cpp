@@ -25,9 +25,7 @@
 
 void PCE_PSG::SetVolume(float new_volume)
 {
- OutputVolume = new_volume;
-
- Synth.volume(OutputVolume / 6);
+	Synth.volume(new_volume / 6);
 }
 
 // Note: Changing the 0x1F(not that there should be) would require changing the channel pseudo-off volume check logic later on.
