@@ -61,9 +61,6 @@ class V810_FP_Ops
   bool sign;
  };
 
- bool fp_is_zero(uint32 v);
- bool fp_is_inf_nan_sub(uint32 v);
-
  uint8 clz64(uint64 v);
  void fpim_decode(fpim* df, uint32 v);
  void fpim_round(fpim* df);

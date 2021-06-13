@@ -1527,7 +1527,7 @@ int32 VDC::Reset(void)
 VDC::VDC(bool nospritelimit, uint32 par_VRAM_Size)
 {
  unlimited_sprites = nospritelimit; //MDFN_GetSettingB("pce.nospritelimit");
- userle = ~0;
+ //userle = ~0; //Doing initialization in constructor body
 
  //assert(par_VRAM_Size == round_up_pow2(par_VRAM_Size));
  //assert(par_VRAM_Size >= 16 && par_VRAM_Size <= 65536);

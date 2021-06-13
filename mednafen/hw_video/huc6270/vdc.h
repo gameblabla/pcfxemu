@@ -497,7 +497,7 @@ class VDC
 	uint16 linebuf[1024 + 512];
 	uint32 pixel_desu;
 	int32 pixel_copy_count;
-	uint32 userle; // User layer enable.
+	uint32 userle = ~0; // User layer enable.
 	bool unlimited_sprites;
 
 	int active_sprites;

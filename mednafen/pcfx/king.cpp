@@ -251,7 +251,7 @@ static INLINE void RebuildLayerPrioCache(void)
    vr->LayerPriority[LAYER_BG0 + n] = (((vce_rendercache.priority[1] >> (n * 4)) & 0xF) + 1);
    if(vr->LayerPriority[LAYER_BG0 + n] > 8)
    {
-    printf("KING BG%d Priority Too Large: %d\n", n, vr->LayerPriority[LAYER_BG0 + n] - 1);
+    //printf("KING BG%d Priority Too Large: %d\n", n, vr->LayerPriority[LAYER_BG0 + n] - 1);
     vr->LayerPriority[LAYER_BG0 + n] = 0;
    }
   }
@@ -264,7 +264,7 @@ static INLINE void RebuildLayerPrioCache(void)
   vr->LayerPriority[LAYER_VDC_BG] = ((vce_rendercache.priority[0] & 0xF) + 1);
   if(vr->LayerPriority[LAYER_VDC_BG] > 8)
   {
-   printf("VDC BG Priority Too Large: %d\n", vr->LayerPriority[LAYER_VDC_BG] - 1);
+   //printf("VDC BG Priority Too Large: %d\n", vr->LayerPriority[LAYER_VDC_BG] - 1);
    vr->LayerPriority[LAYER_VDC_BG] = 0;
   }
  }
@@ -276,7 +276,7 @@ static INLINE void RebuildLayerPrioCache(void)
   vr->LayerPriority[LAYER_VDC_SPR] = (((vce_rendercache.priority[0] >> 4) & 0xF) + 1);
   if(vr->LayerPriority[LAYER_VDC_SPR] > 8)
   {
-   printf("VDC SPR Priority Too Large: %d\n", vr->LayerPriority[LAYER_VDC_SPR] - 1);
+   //printf("VDC SPR Priority Too Large: %d\n", vr->LayerPriority[LAYER_VDC_SPR] - 1);
    vr->LayerPriority[LAYER_VDC_SPR] = 0;
   }
  }
@@ -288,7 +288,7 @@ static INLINE void RebuildLayerPrioCache(void)
   vr->LayerPriority[LAYER_RAINBOW] = (((vce_rendercache.priority[0] >> 8) & 0xF) + 1);
   if(vr->LayerPriority[LAYER_RAINBOW] > 8)
   {
-   printf("RAINBOW Priority Too Large: %d\n", vr->LayerPriority[LAYER_RAINBOW] - 1);
+   //printf("RAINBOW Priority Too Large: %d\n", vr->LayerPriority[LAYER_RAINBOW] - 1);
    vr->LayerPriority[LAYER_RAINBOW] = 0;
   }
  }
@@ -2889,20 +2889,22 @@ void KING_SetPixelFormat(void)
 
 void KING_SetLayerEnableMask(uint64 mask)
 {
- uint64 ms = mask;
- // "BG0\0BG1\0BG2\0BG3\0VDC-A BG\0VDC-A SPR\0VDC-B BG\0VDC-B SPR\0RAINBOW\0",
+	uint64 ms = mask;
+	// "BG0\0BG1\0BG2\0BG3\0VDC-A BG\0VDC-A SPR\0VDC-B BG\0VDC-B SPR\0RAINBOW\0",
 
- BGLayerDisable = (~ms) & 0xF;
- ms >>= 4;
+	BGLayerDisable = (~ms) & 0xF;
+	ms >>= 4;
 
- for(uint_fast8_t chip = 0; chip < 2; chip++)
- {
-  fx_vdc_chips[chip]->SetLayerEnableMask(ms & 0x3);
-  ms >>= 2;
- }
+	for(uint_fast8_t chip = 0; chip < 2; chip++)
+	{
+		fx_vdc_chips[chip]->SetLayerEnableMask(ms & 0x3);
+		ms >>= 2;
+	}
 
- RAINBOWLayerDisable = (~ms) & 0x1;
- ms >>= 1;
+	RAINBOWLayerDisable = (~ms) & 0x1;
+	
+	// Assigned to a value that is never used
+	//ms >>= 1;
 }
 
 

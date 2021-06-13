@@ -476,7 +476,7 @@ bool CDAccess_Image::ImageOpen(const std::string& path, bool image_memcache)
             {
                memcpy(&Tracks[active_track], &TmpTrack, sizeof(TmpTrack));
                memset(&TmpTrack, 0, sizeof(TmpTrack));
-               active_track = -1;
+               //active_track = -1; Reassigned to another value after anyway - Gameblabla
             }
 
             for(int32_t i = 2; i < 100; i++)
