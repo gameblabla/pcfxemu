@@ -932,7 +932,6 @@ int RAINBOW_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *palette_ptr
  {
   if(DecodeFormat[DecodeBufferWhichRead] == -1) // None
   {
-   if(linebuffer)
     MDFN_FastU32MemsetM8(linebuffer, 0, 256);
   }
   else if(DecodeFormat[DecodeBufferWhichRead] == 1)	// YUV
@@ -953,7 +952,7 @@ int RAINBOW_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *palette_ptr
    {
     uint16 tmpss = HScroll & 0x1FF;
 
-    for(int x = 0; x < 256; x++)
+    for(uint_fast16_t x = 0; x < 256; x++)
     {
      linebuffer[x] = (tmpss < 256) ? (in_ptr[tmpss] | layer_or) : 0;
      tmpss = (tmpss + 1) & 0x1FF;

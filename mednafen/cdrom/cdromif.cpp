@@ -83,9 +83,9 @@ class CDIF_Queue
 typedef struct
 {
    bool valid;
-   bool error;
+	//bool error;
    int32_t lba;
-   uint8_t data[2352 + 96];
+   //uint8_t data[2352 + 96];
 } CDIF_Sector_Buffer;
 
 #ifdef MUTLITHREADING

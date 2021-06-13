@@ -114,8 +114,9 @@ static void ProcessFIFO(void)
 
    if(InFIFO >= length)
    {
-      int opcode = FIFO[0] >> 12;
-      int option = (FIFO[0] >> 8) & 0x0F;
+	   /* These aren't used */
+      //int opcode = FIFO[0] >> 12;
+      //int option = (FIFO[0] >> 8) & 0x0F;
 
       //printf("Op: %02x, option: %02x\n", opcode, option);
 

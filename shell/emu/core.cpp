@@ -780,7 +780,6 @@ static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsig
 {
    char linebuf[2048];
    std::string dir_path;
-   std::vector<std::string> ret;
    FileWrapper m3u_file(path.c_str(), MODE_READ, "M3U CD Set");
 
    MDFN_GetFilePathComponents(path, &dir_path);
@@ -1140,7 +1139,7 @@ std::string MDFN_MakeFName(MakeFName_Type type, int id1, const char *cd1)
 void SaveState(char* path, uint_fast8_t state)
 {	
 	FILE* savefp;
-	int32_t file_size = 0;
+	int32_t file_size;
 	char* buffer = NULL;
 	if (state == 1)
 	{

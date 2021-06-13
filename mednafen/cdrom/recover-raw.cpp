@@ -92,11 +92,9 @@ int ValidateRawSector(unsigned char *frame, bool xaMode)
    {
     memcpy(header, frame + 12, 4);
     memset(frame + 12, 0, 4);
-   }
-
-
-   if(xaMode)
+    
     memcpy(frame + 12, header, 4);
+   }
   }
 
   /* Test internal sector checksum again */

@@ -18,7 +18,7 @@
 #include "v810_fp_ops.h"
 #include <algorithm>
 
-bool V810_FP_Ops::fp_is_zero(uint32 v)
+static bool fp_is_zero(uint32 v)
 {
  return((v & 0x7FFFFFFF) == 0);
 }
@@ -35,7 +35,7 @@ bool V810_FP_Ops::fp_is_inf(uint32 v)
 }
 #endif
 
-bool V810_FP_Ops::fp_is_inf_nan_sub(uint32 v)
+static bool fp_is_inf_nan_sub(uint32 v)
 {
  if((v & 0x7FFFFFFF) == 0)
   return(false);
@@ -88,7 +88,7 @@ uint8 V810_FP_Ops::clz64(uint64 v)
 
  if(!(v & 0x8000000000000000ULL))
  {
-  v <<= 1;
+  //v <<= 1; //Assigned to value that is never used - Gameblabla
   ret += 1;
  }
 
