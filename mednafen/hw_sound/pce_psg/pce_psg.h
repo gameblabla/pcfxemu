@@ -150,7 +150,6 @@ class PCE_PSG
 	void RecalcFreqCache(int chnum);
 	void RecalcNoiseFreqCache(int chnum);
 	void RunChannel(int chc, int32 timestamp, bool LFO_On);
-	float OutputVolume;
 
         uint8 select;               /* Selected channel (0-5) */
         uint8 globalbalance;        /* Global sound balance */
