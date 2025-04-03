@@ -1,4 +1,11 @@
-[![Build Status](https://travis-ci.org/libretro/beetle-pcfx-libretro.svg?branch=master)](https://travis-ci.org/libretro/beetle-pcfx-libretro)
-[![Build status](https://ci.appveyor.com/api/projects/status/s9d2tymlinoe0ijn/branch/master?svg=true)](https://ci.appveyor.com/project/bparker06/beetle-pcfx-libretro/branch/master)
+# PCFXemu For OpenDingux/GKD350H
 
-# Beetle PC-FX
+This is a fork of the libretro fork of Mednafen to run NEC PC-FX games on handhelds.
+On the GKD350H, the games are very playable. On the RG-350, it's recommended to overclock to 1.2 Ghz (but even then, it's not enough to be playable).
+There's also a version for Funkey-S and it's more playable than RG-350 version but still slower than GKD350H/GKD Mini.
+
+Changes done
+- Switched from OwlResampler to Blip_buffer
+- Made changes to improve performance on sinlge core platforms.
+- Stripped down code that's not needed
+- Added SDL 1.2 backend with basic menu system
