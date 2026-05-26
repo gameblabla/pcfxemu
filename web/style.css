@@ -1,0 +1,73 @@
+:root {
+  color-scheme: dark;
+  --bg: #070a12;
+  --panel: #111827;
+  --panel2: #0d1321;
+  --line: #273449;
+  --text: #e5edf6;
+  --muted: #9aa8ba;
+  --accent: #58d6ff;
+  --accent2: #f6b23c;
+  --danger: #ff6677;
+  --ok: #71e38e;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; }
+button, input { font: inherit; }
+button, .file-button {
+  background: #172033;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+}
+button:hover, .file-button:hover { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.file-button { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; position: relative; overflow: hidden; }
+.file-button input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.file-button.wide { width: 100%; min-height: 48px; margin-top: .5rem; }
+
+.app-shell { max-width: 1220px; margin: 0 auto; padding: 18px; }
+.topbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 18px; }
+h1 { margin: 0; font-size: 1.35rem; letter-spacing: .02em; }
+h2 { margin: 0 0 .75rem; font-size: 1rem; }
+p { margin: .35rem 0; color: var(--muted); }
+.top-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: end; }
+.layout { display: grid; grid-template-columns: minmax(360px, 1fr) 360px; gap: 18px; align-items: start; }
+.screen-card, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: 0 18px 60px rgba(0,0,0,.28); }
+.screen-frame { position: relative; display: grid; place-items: center; background: #000; border-radius: 12px; min-height: 520px; outline: none; overflow: hidden; }
+.screen-frame:focus { box-shadow: 0 0 0 2px var(--accent); }
+canvas { image-rendering: pixelated; width: min(100%, 1032px); max-height: 75vh; object-fit: contain; background: #000; }
+.hud { position: absolute; left: 12px; bottom: 12px; background: rgba(0,0,0,.62); border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 6px 8px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.drop-row { display: flex; align-items: center; gap: 10px; padding-top: 12px; }
+.panel { display: grid; gap: 16px; }
+.panel section { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.control-map { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.map-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: #111a2b; }
+.map-row button { padding: .35rem .55rem; min-width: 90px; }
+.map-row.pending { border-color: var(--accent2); box-shadow: 0 0 0 1px var(--accent2) inset; }
+.hint, .muted { color: var(--muted); }
+.runtime-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.modal { position: fixed; inset: 0; display: none; place-items: center; padding: 18px; background: rgba(0,0,0,.72); backdrop-filter: blur(4px); z-index: 20; }
+.modal.open { display: grid; }
+.modal-card { width: min(560px, 100%); background: #101827; border: 1px solid var(--line); border-radius: 18px; padding: 20px; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+.system-choice { display: flex; gap: 18px; margin: 14px 0; }
+.modal-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+summary { color: var(--accent); cursor: pointer; margin-top: 14px; }
+code { color: #d8eaff; }
+
+.status-ok { color: var(--ok); }
+.status-warn { color: var(--accent2); }
+.status-bad { color: var(--danger); }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .topbar { align-items: stretch; flex-direction: column; }
+  .top-actions { justify-content: start; }
+  .screen-frame { min-height: 320px; }
+}

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC-FX WebAssembly Backend</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>PC-FX / PC-FXGA WebAssembly</h1>
+        <p>clang wasm32 backend, canvas frontend, no Emscripten</p>
+      </div>
+      <div class="top-actions">
+        <button id="openStartup">BIOS / System</button>
+        <button id="pauseToggle">Pause</button>
+        <button id="saveState">Save State</button>
+        <button id="loadState">Load State</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="screen-card">
+        <div id="screenFrame" class="screen-frame" tabindex="0" aria-label="PC-FX video output canvas">
+          <canvas id="video" width="256" height="240"></canvas>
+          <div id="hud" class="hud">booting wasm...</div>
+        </div>
+        <div class="drop-row">
+          <label class="file-button">
+            Load CD / HuEXE
+            <input id="mediaFile" type="file" accept=".cue,.ccd,.chd,.iso,.bin,.ex,.exe,.zip,application/octet-stream">
+          </label>
+          <span id="mediaName" class="muted">no media selected</span>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <section>
+          <h2>Controls</h2>
+          <div id="controlMap" class="control-map"></div>
+          <p class="hint">Click a mapping, then press a key. Click the canvas to focus keyboard input.</p>
+        </section>
+        <section>
+          <h2>Storage</h2>
+          <p id="storageStatus" class="muted">LocalStorage ready.</p>
+          <button id="clearStorage">Clear Config + Save</button>
+        </section>
+        <section>
+          <h2>Runtime</h2>
+          <dl class="runtime-grid">
+            <dt>System</dt><dd id="runtimeSystem">PC-FX</dd>
+            <dt>Status</dt><dd id="runtimeStatus">loading</dd>
+            <dt>Resolution</dt><dd id="runtimeResolution">-</dd>
+            <dt>Frame</dt><dd id="runtimeFrame">0</dd>
+          </dl>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="startupModal" class="modal open" role="dialog" aria-modal="true" aria-labelledby="startupTitle">
+    <div class="modal-card">
+      <h2 id="startupTitle">Select PC-FX BIOS</h2>
+      <p>The browser build does not bundle BIOS ROMs. Choose a PC-FX console BIOS or a PC-FXGA BIOS from your local machine.</p>
+      <div class="system-choice">
+        <label><input type="radio" name="systemMode" value="pcfx" checked> PC-FX</label>
+        <label><input type="radio" name="systemMode" value="pcfxga"> PC-FXGA</label>
+      </div>
+      <label class="file-button wide">
+        Choose BIOS ROM
+        <input id="biosFile" type="file" accept=".rom,.bin,application/octet-stream">
+      </label>
+      <div id="biosName" class="muted">no BIOS selected</div>
+      <div class="modal-actions">
+        <button id="startButton" disabled>Start</button>
+      </div>
+      <details>
+        <summary>Backend details</summary>
+        <p>This target compiles <code>wasm/pcfx_wasm_core.c</code> with clang <code>--target=wasm32</code>, <code>-nostdlib</code>, <code>--no-entry</code>, and an exported memory. JavaScript handles input, canvas, file pickers, configuration, and LocalStorage-backed save data.</p>
+      </details>
+    </div>
+  </div>
+
+  <script type="module" src="pcfx-wasm.js"></script>
+</body>
+</html>

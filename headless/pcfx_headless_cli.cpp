@@ -25,7 +25,7 @@ static void usage(const char* argv0)
         "Usage: %s [options] game.cue|game.chd|game.ccd|game.toc|playlist.m3u|program.ex\n"
         "\n"
         "Options:\n"
-        "  --bios-dir DIR          Directory containing pcfx.rom (default: .)\n"
+        "  --bios-dir DIR          Directory or BIOS file; accepts pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfxga.rom (default: .)\n"
         "  --save-dir DIR          Directory for save/state side effects (default: bios dir)\n"
         "  --frames N              Run exactly N emulated frames (default: 1)\n"
         "  --commands FILE         Apply controller command list before each matching frame\n"

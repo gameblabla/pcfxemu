@@ -1,0 +1,29 @@
+# Raw clang WebAssembly frontend build.  This intentionally does not use
+# Emscripten or WASI: the browser JavaScript layer is the host runtime.
+
+CLANG ?= clang
+PYTHON ?= python3
+PORT ?= 8008
+WASM_CFLAGS ?= -O3 -g0 --target=wasm32 -ffreestanding -fno-builtin -fvisibility=hidden -Wall -Wextra -Werror
+WASM_LDFLAGS ?= -nostdlib -Wl,--no-entry -Wl,--export-memory -Wl,--initial-memory=134217728 -Wl,--max-memory=268435456 -Wl,--allow-undefined -Wl,--strip-all
+WASM_SRC = wasm/pcfx_wasm_core.c
+WASM_OUT = web/pcfx_wasm_core.wasm
+
+.PHONY: all build serve clean check
+
+all: build
+
+build: $(WASM_OUT)
+
+$(WASM_OUT): $(WASM_SRC)
+	$(CLANG) $(WASM_CFLAGS) $(WASM_LDFLAGS) -o $@ $<
+
+serve: build
+	@echo "Serving PC-FX wasm frontend on http://127.0.0.1:$(PORT)/"
+	cd web && $(PYTHON) -m http.server $(PORT) --bind 127.0.0.1
+
+check: build
+	@ls -lh $(WASM_OUT)
+
+clean:
+	rm -f $(WASM_OUT)

@@ -640,6 +640,8 @@ int32 VDC::Run(int32 clocks, uint16 *pixels, bool skip)
 void VDC::CalcWidthStartEnd(uint32 &display_width, uint32 &start, uint32 &end)
 {
  display_width = (M_vdc_HDW + 1) * 8;
+ if(display_width > 512)
+  display_width = 512;
 
  start = 0;
  end = start + display_width;

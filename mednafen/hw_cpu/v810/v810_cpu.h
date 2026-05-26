@@ -137,6 +137,19 @@ typedef enum
  _V810_EMU_MODE_COUNT
 } V810_Emu_Mode;
 
+/*
+ * The original handheld tree only carried the fast interpreter.  Desktop/UI
+ * builds now use the upstream accurate interpreter, while small handheld ports
+ * keep compiling only the fast interpreter.  Both paths include the same opcode
+ * loop body; the compile-time define only selects the fetch/PC/timing wrapper.
+ */
+#if defined(PCFX_V810_ACCURATE_ONLY) && defined(PCFX_V810_FAST_ONLY)
+#error "Select only one V810 core: PCFX_V810_ACCURATE_ONLY or PCFX_V810_FAST_ONLY"
+#endif
+#if !defined(PCFX_V810_ACCURATE_ONLY) && !defined(PCFX_V810_FAST_ONLY)
+#define PCFX_V810_ACCURATE_ONLY 1
+#endif
+
 class V810
 {
  public:
@@ -146,6 +159,7 @@ class V810
 
  // Pass TRUE for vb_mode if we're emulating a VB-specific enhanced V810 CPU core
  bool Init();
+ const char* GetCoreName(void) const;
  void Kill(void);
 
  void SetInt(int level);
@@ -222,7 +236,11 @@ class V810
   LASTOP_HEAVY_MATH = 5
  };
 
+#if defined(PCFX_V810_ACCURATE_ONLY)
+ void Run_Accurate(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
+#else
  void Run_Fast(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp)) NO_INLINE;
+#endif
  uint8 MDFN_FASTCALL (*MemRead8)(v810_timestamp_t &timestamp, uint32 A);
  uint16 MDFN_FASTCALL (*MemRead16)(v810_timestamp_t &timestamp, uint32 A);
  uint32 MDFN_FASTCALL (*MemRead32)(v810_timestamp_t &timestamp, uint32 A);
@@ -259,13 +277,14 @@ class V810
  uint8 Halted;
 
  bool Running;
+ bool VBMode;
 
  int ilevel;
 
  bool in_bstr;
  uint16 in_bstr_to;
 
- bool bstr_subop(v810_timestamp_t &timestamp, int sub_op);
+ bool bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1);
  void fpu_subop(v810_timestamp_t &timestamp, int sub_op, int arg1, int arg2);
 
  void Exception(uint32 handler, uint16 eCode);

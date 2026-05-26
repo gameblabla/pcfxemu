@@ -23,7 +23,7 @@
 #define PATH_MAX 4096
 #endif
 
-static const int EMU_W = 320;
+static const int EMU_W = 512;
 static const int EMU_H = 240;
 static const double PCFX_FPS = 60000.0 / 1001.0;
 
@@ -69,6 +69,19 @@ static std::string path_join(const std::string& a, const std::string& b)
     if(a.empty()) return b;
     if(a[a.size() - 1] == '/' || a[a.size() - 1] == '\\') return a + b;
     return a + "/" + b;
+}
+
+static bool pcfx_bios_exists_in_dir(const std::string& dir)
+{
+    static const char* names[] = {
+        "pcfx.rom", "pcfxbios.bin", "pcfxv101.bin", "pcfx_bios.bin",
+        "pcfxga.rom", "pcfxga.bin", "PCFX.ROM", "PCFXBIOS.BIN",
+        "PCFXV101.BIN", "PCFXGA.ROM", "PCFXGA.BIN"
+    };
+    if(file_exists(dir)) return true;
+    for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if(file_exists(path_join(dir, names[i]))) return true;
+    return false;
 }
 
 static std::string home_pcfxemu_dir()
@@ -1207,7 +1220,7 @@ static void render_game(App& a)
 
 static void print_usage(const char* argv0)
 {
-    fprintf(stderr, "Usage: %s [--bios-dir DIR] [--save-dir DIR] [--fast-video] [--fullscreen] game.cue|game.chd|homebrew_dir|program.EX\n\nDefaults: pcfx.rom is searched in ., the game folder, then $HOME/.pcfxemu; saves/config default to $HOME/.pcfxemu.\n", argv0);
+    fprintf(stderr, "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--fullscreen] game.cue|game.chd|homebrew_dir|program.EX\n\nBIOS lookup accepts pcfx.rom, pcfxbios.bin, pcfxv101.bin, and pcfxga.rom. Defaults search ., the game folder, then $HOME/.pcfxemu; saves/config default to $HOME/.pcfxemu.\n", argv0);
 }
 
 int main(int argc, char** argv)
@@ -1235,9 +1248,9 @@ int main(int argc, char** argv)
     if(!app.bios_dir_explicit)
     {
         const std::string game_dir = parent_dir_of(app.game_path);
-        if(file_exists(path_join(".", "pcfx.rom"))) app.bios_dir = ".";
-        else if(file_exists(path_join(game_dir, "pcfx.rom"))) app.bios_dir = game_dir;
-        else if(file_exists(path_join(home_dir, "pcfx.rom"))) app.bios_dir = home_dir;
+        if(pcfx_bios_exists_in_dir(".")) app.bios_dir = ".";
+        else if(pcfx_bios_exists_in_dir(game_dir)) app.bios_dir = game_dir;
+        else if(pcfx_bios_exists_in_dir(home_dir)) app.bios_dir = home_dir;
         else app.bios_dir = ".";
     }
 

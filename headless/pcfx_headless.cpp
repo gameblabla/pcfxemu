@@ -23,7 +23,7 @@ extern "C" const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, i
 extern "C" void pcfx_headless_video_get_display_rect(int* x, int* y, int* width, int* height);
 
 extern void Emu_Init(void);
-extern void Load_Game_Memory(char* path);
+extern int Load_Game_Memory(char* path);
 extern void Emulation_Run(void);
 extern void Init_Video(void);
 extern uint32_t Audio_Init(void);
@@ -282,14 +282,10 @@ int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path)
     std::string resolved_path;
     if(!resolve_homebrew_path(cd_path, &resolved_path))
         return set_error(emu, "game path is not a regular file or a directory containing .EX/.EXE: %s", cd_path ? cd_path : "(null)");
-    char bios_path[512];
-    snprintf(bios_path, sizeof(bios_path), "%s/pcfx.rom", home_path);
-    if(!file_exists(bios_path))
-        return set_error(emu, "missing PC-FX BIOS: %s", bios_path);
-
     make_game_name(resolved_path.c_str());
     std::string mutable_path(resolved_path);
-    Load_Game_Memory(&mutable_path[0]);
+    if(!Load_Game_Memory(&mutable_path[0]))
+        return set_error(emu, "failed to load game or BIOS from --bios-dir: %s", home_path);
     emu->loaded = true;
     return 1;
 }
@@ -378,16 +374,22 @@ int pcfx_headless_save_screenshot_ppm(PCFX_Headless* emu, const char* path)
     const uint16_t* pix = pcfx_headless_video_rgb565(&w, &h, &pitch);
     if(!pix)
         return set_error(emu, "no video buffer available");
+    int rx = 0, ry = 0, rw = w, rh = h;
+    pcfx_headless_video_get_display_rect(&rx, &ry, &rw, &rh);
+    if(rx < 0 || ry < 0 || rw <= 0 || rh <= 0 || rx + rw > w || ry + rh > h)
+    {
+        rx = 0; ry = 0; rw = w; rh = h;
+    }
     FILE* fp = fopen(path, "wb");
     if(!fp)
         return set_error(emu, "failed to open screenshot for write: %s", path);
-    fprintf(fp, "P6\n%d %d\n255\n", w, h);
-    for(int yy = 0; yy < h; yy++)
+    fprintf(fp, "P6\n%d %d\n255\n", rw, rh);
+    for(int yy = 0; yy < rh; yy++)
     {
-        for(int xx = 0; xx < w; xx++)
+        for(int xx = 0; xx < rw; xx++)
         {
             uint8_t rgb[3];
-            rgb565_to_rgb(pix[yy * pitch + xx], &rgb[0], &rgb[1], &rgb[2]);
+            rgb565_to_rgb(pix[(ry + yy) * pitch + (rx + xx)], &rgb[0], &rgb[1], &rgb[2]);
             fwrite(rgb, 1, 3, fp);
         }
     }

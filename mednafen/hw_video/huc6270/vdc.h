@@ -330,6 +330,13 @@ class VDC
 	 WSHook = wsh;
 	}
 
+	INLINE uint32 GetCachedDisplayWidth(void) const
+	{
+	 uint32 ret = (HDW_cache + 1) * 8;
+	 if(ret > 512) ret = 512;
+	 return ret;
+	}
+
 	private:
 
 	int TimeFromHDSStartToBYRLatch(void);

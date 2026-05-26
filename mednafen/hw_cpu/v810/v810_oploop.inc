@@ -96,6 +96,7 @@
 
 	// Bit string subopcodes
         #define DO_AM_BSTR()							\
+            const uint32 arg1 = (tmpop >> 5) & 0x1F;				\
             const uint32 arg2 = (tmpop & 0x1F);					\
             RB_INCPCBY2();
 
@@ -222,6 +223,8 @@
 
             ADDCLOCK(3);
             RB_SETPC((P_REG[arg1] & 0xFFFFFFFE));
+	    if(RB_AccurateMode)
+	     BRANCH_ALIGN_CHECK(PC);
 	    RB_ADDBT(old_PC, RB_GETPC(), 0);
 	END_OP();
 
@@ -417,6 +420,8 @@
 		{ 					\
 		 ADDCLOCK(3);				\
 		 RB_PCRELCHANGE(sign_9(arg1) & 0xFFFFFFFE);	\
+		 if(RB_AccurateMode)			\
+		  BRANCH_ALIGN_CHECK(PC);		\
 		 RB_ADDBT(old_PC, RB_GETPC(), 0);			\
 		}					\
 		else					\
@@ -489,6 +494,8 @@
 	BEGIN_OP(JR);
             ADDCLOCK(3);
             RB_PCRELCHANGE(sign_26(arg1) & 0xFFFFFFFE);
+            if(RB_AccurateMode)
+             BRANCH_ALIGN_CHECK(PC);
             RB_ADDBT(old_PC, RB_GETPC(), 0);
 	END_OP();
 
@@ -496,6 +503,8 @@
             ADDCLOCK(3);
 	    P_REG[31] = RB_GETPC() + 4;
             RB_PCRELCHANGE(sign_26(arg1) & 0xFFFFFFFE);
+            if(RB_AccurateMode)
+             BRANCH_ALIGN_CHECK(PC);
             RB_ADDBT(old_PC, RB_GETPC(), 0);
 	END_OP();
 
@@ -902,7 +911,7 @@
              ADDCLOCK(1);
 	    }
 
-            if(bstr_subop(timestamp, arg2))
+            if(bstr_subop(timestamp, arg2, arg1))
 	    {
 	     RB_DECPCBY2();
              in_bstr = TRUE;
@@ -1024,6 +1033,7 @@
 
 	BEGIN_OP(INVALID);
 	    RB_DECPCBY2();
+	    if(!RB_AccurateMode)
 	    {
 	     RB_SETPC(RB_GETPC());
 	     if((uint32)(RB_RDOP(0, 0) >> 9) != opcode)
@@ -1036,6 +1046,12 @@
               Exception(INVALID_OP_HANDLER_ADDR, ECODE_INVALID_OP);
               CHECK_HALTED();
 	     }
+	    }
+	    else
+	    {
+	     ADDCLOCK(1);
+	     Exception(INVALID_OP_HANDLER_ADDR, ECODE_INVALID_OP);
+             CHECK_HALTED();
 	    }
 	END_OP();
 

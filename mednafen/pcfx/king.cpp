@@ -2273,7 +2273,130 @@ static uint32 INLINE YUV888_TO_YCbCr888(uint32 yuv)
 
 // FIXME: 
 //static unsigned int lines_per_frame; //= (fx_vce.picture_mode & 0x1) ? 262 : 263;
+#ifndef PCFX_HIGH_DOTCLOCK_WIDTH
+#define PCFX_HIGH_DOTCLOCK_WIDTH 0
+#endif
+static uint32 HighDotClockWidth = PCFX_HIGH_DOTCLOCK_WIDTH;
 static VDC **vdc_chips;
+
+static INLINE uint32 ClampOutputWidth(uint32 width)
+{
+ if(width < 1)
+  width = 256;
+ if(width > internal_pitch)
+  width = internal_pitch;
+ if(width > 512)
+  width = 512;
+ return width;
+}
+
+static INLINE uint32 GetHighDotClockVDCWidth(void)
+{
+ uint32 width = 0;
+ if(vdc_chips)
+ {
+  for(uint_fast8_t chip = 0; chip < 2; chip++)
+   if(vdc_chips[chip])
+   {
+    const uint32 chip_width = vdc_chips[chip]->GetCachedDisplayWidth();
+    if(chip_width > width)
+     width = chip_width;
+   }
+ }
+ return ClampOutputWidth(width ? width : 341);
+}
+
+static INLINE uint32 GetHighDotClockOutputWidth(void)
+{
+ if(HighDotClockWidth)
+  return ClampOutputWidth(HighDotClockWidth);
+ return GetHighDotClockVDCWidth();
+}
+
+static INLINE void SharpBilinearMap256ToWidth(uint32 out_x, uint32 out_width, uint32 &src0, uint32 &src1, uint32 &weight)
+{
+ if(out_width <= 256)
+ {
+  src0 = src1 = out_x & 0xFF;
+  weight = 0;
+  return;
+ }
+
+ // Center-aligned 256 -> out_width coordinate transform.  Fixed point is 16.16.
+ // src = ((out_x + 0.5) * 256 / out_width) - 0.5
+ int64 src_fp = (((int64)(out_x * 2 + 1) * 256) << 15) / (int64)out_width - 0x8000;
+
+ if(src_fp <= 0)
+ {
+  src0 = src1 = 0;
+  weight = 0;
+  return;
+ }
+
+ const int64 max_fp = ((int64)255 << 16);
+ if(src_fp >= max_fp)
+ {
+  src0 = src1 = 255;
+  weight = 0;
+  return;
+ }
+
+ src0 = (uint32)(src_fp >> 16);
+ src1 = src0 + 1;
+ uint32 frac = (uint32)(src_fp & 0xFFFF);
+
+ // Sharp bilinear: bilinear only through a narrowed transition region,
+ // equivalent to the common shader form clamp((frac - 0.5) * scale + 0.5).
+ // This avoids nearest-neighbor column dropping without the full-width blur of
+ // ordinary linear scaling.
+ int64 sharp = ((int64)frac - 0x8000) * (int64)out_width / 256 + 0x8000;
+ if(sharp < 0) sharp = 0;
+ if(sharp > 0x10000) sharp = 0x10000;
+ weight = (uint32)sharp;
+}
+
+static INLINE uint32 BlendSameLayerYUV(uint32 a, uint32 b, uint32 weight)
+{
+ const uint32 layer = a & 0xF0000000;
+
+ if(!weight || a == b)
+  return a;
+ if(weight >= 0x10000)
+  return b;
+
+ const int32 ay = (a >> 16) & 0xFF;
+ const int32 au = (a >>  8) & 0xFF;
+ const int32 av = (a >>  0) & 0xFF;
+ const int32 by = (b >> 16) & 0xFF;
+ const int32 bu = (b >>  8) & 0xFF;
+ const int32 bv = (b >>  0) & 0xFF;
+
+ const uint32 y = (uint32)(ay + (((by - ay) * (int32)weight + 0x8000) >> 16));
+ const uint32 u = (uint32)(au + (((bu - au) * (int32)weight + 0x8000) >> 16));
+ const uint32 v = (uint32)(av + (((bv - av) * (int32)weight + 0x8000) >> 16));
+
+ return layer | (y << 16) | (u << 8) | v;
+}
+
+static INLINE uint32 SampleKING256Sharp(const uint32 *src, uint32 out_x, uint32 out_width)
+{
+ uint32 src0, src1, weight;
+ SharpBilinearMap256ToWidth(out_x, out_width, src0, src1, weight);
+
+ const uint32 a = src[src0];
+ const uint32 b = src[src1];
+
+ if(a == b || src0 == src1)
+  return a;
+
+ // Do not blur through transparency or across KING/Rainbow layer boundaries.
+ // Priority and transparency stay crisp; only same-layer color ramps are
+ // horizontally reconstructed.
+ if((a & 0xF0000000) && ((a ^ b) & 0xF0000000) == 0)
+  return BlendSameLayerYUV(a, b, weight);
+
+ return (weight < 0x8000) ? a : b;
+}
 static MDFN_Rect *DisplayRect;
 static int32 *LineWidths;
 static int skip;
@@ -2477,7 +2600,7 @@ static INLINE void VDC_PIXELMIX(bool SPRCOMBO_ON, bool BGCOMBO_ON)
                                 (((uint32)fx_vce.palette_offset[0] >> 8) & 0xFF) << 1 // SPR
                                };
 
-    const uint_fast16_t width = fx_vce.dot_clock ? 342 : 256; // 342, not 341, to prevent garbage pixels in high dot clock mode.
+    const uint_fast16_t width = fx_vce.dot_clock ? GetHighDotClockVDCWidth() : 256;
 
     for(uint_fast16_t x = 0; x < width; x++)
     {
@@ -2517,10 +2640,6 @@ static void MixVDC(void)
     }
 }
 
-
-#if defined(PCFX_HEADLESS) && defined(HAVE_HUC6273)
-extern "C" void pcfx_headless_video_note_full_width_line(void);
-#endif
 
 static void MixLayers(void)
 {
@@ -2616,13 +2735,16 @@ static void MixLayers(void)
 			((RGBDeflower + 384)[CCR_V_front + v + 128] << 0); \
         }
 
-#define	LAYER_MIX_BODY(index_256, index_341) \
+#define	LAYER_MIX_BODY_PIX(bg_pix, rb_pix, index_vdc) \
       { uint32 pixel[4];	\
       uint32 prio[3];	\
       uint32 zeout = BPC_Cache;	\
-      prio[0] = priority_remap[vdc_linebuffer_yuved[index_341] >> 28];  \
-      prio[1] = priority_remap[(bg_linebuffer + 8)[index_256] >> 28];	\
-      prio[2] = priority_remap[rainbow_linebuffer[index_256] >> 28];	\
+      const uint32 _vdc_pix = vdc_linebuffer_yuved[index_vdc]; \
+      const uint32 _bg_pix = (bg_pix); \
+      const uint32 _rb_pix = (rb_pix); \
+      prio[0] = priority_remap[_vdc_pix >> 28];  \
+      prio[1] = priority_remap[_bg_pix >> 28];	\
+      prio[2] = priority_remap[_rb_pix >> 28];	\
       pixel[0] = 0;	\
       pixel[1] = 0;	\
       pixel[2] = 0;	\
@@ -2630,10 +2752,13 @@ static void MixLayers(void)
        uint8 pi0 = VCEPrioMap[prio[0]][prio[1]][prio[2]][0];	\
        uint8 pi1 = VCEPrioMap[prio[0]][prio[1]][prio[2]][1];	\
        uint8 pi2 = VCEPrioMap[prio[0]][prio[1]][prio[2]][2];	\
-       /*assert(pi0 == 3 || !pixel[pi0]);*/ pixel[pi0] = vdc_linebuffer_yuved[index_341]; 	\
-       /*assert(pi1 == 3 || !pixel[pi1]);*/ pixel[pi1] = (bg_linebuffer + 8)[index_256];	\
-       /*assert(pi2 == 3 || !pixel[pi2]);*/ pixel[pi2] = rainbow_linebuffer[index_256];		\
+       /*assert(pi0 == 3 || !pixel[pi0]);*/ pixel[pi0] = _vdc_pix; 	\
+       /*assert(pi1 == 3 || !pixel[pi1]);*/ pixel[pi1] = _bg_pix;	\
+       /*assert(pi2 == 3 || !pixel[pi2]);*/ pixel[pi2] = _rb_pix;		\
       }
+
+#define	LAYER_MIX_BODY(index_256, index_vdc) \
+      LAYER_MIX_BODY_PIX((bg_linebuffer + 8)[index_256], rainbow_linebuffer[index_256], index_vdc)
 
 #define LAYER_MIX_FINAL_NOCELLO	\
        if(pixel[0])	\
@@ -2748,26 +2873,11 @@ static void MixLayers(void)
 	#include "king_mix_body.inc"
 	#undef YUV888_TO_xxx
 
-    DisplayRect->w = 256;
+    DisplayRect->w = fx_vce.dot_clock ? GetHighDotClockOutputWidth() : 256;
     DisplayRect->x = 0;
 
 #ifdef HAVE_HUC6273
-    const int aurora_y = fx_vce.raster_counter - 22;
-#ifdef PCFX_HEADLESS
-    if(HuC6273_LineHasPixels(aurora_y))
-    {
-     // PC-FXGA S-Video captures show Aurora's 256-pixel internal frame scaled
-     // over the full 320-pixel active line, not centered with side gutters.
-     DisplayRect->w = 320;
-     DisplayRect->x = 0;
-     pcfx_headless_video_note_full_width_line();
-     HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
-    }
-    else
-     HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
-#else
-    HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
-#endif
+    HuC6273_RenderLine(target, fx_vce.raster_counter - 22, DisplayRect->w);
 #endif
 
 	// FIXME

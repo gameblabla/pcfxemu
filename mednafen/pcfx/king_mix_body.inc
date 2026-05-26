@@ -1,10 +1,16 @@
     if(fx_vce.dot_clock) // No cellophane in 7.16MHz pixel mode
     {
-      for(unsigned int x = 0; x < 256; x++)
-      {
-       LAYER_MIX_BODY(x, x * 341 / 256);
-       LAYER_MIX_FINAL_NOCELLO;
-      }
+     const unsigned int outw = GetHighDotClockOutputWidth();
+     const unsigned int vdcw = GetHighDotClockVDCWidth();
+     for(unsigned int x = 0; x < outw; x++)
+     {
+      unsigned int vdc_x = (x * vdcw) / outw;
+      if(vdc_x > 511) vdc_x = 511;
+      const uint32 king_bg = (outw == 256) ? (bg_linebuffer + 8)[x] : SampleKING256Sharp(bg_linebuffer + 8, x, outw);
+      const uint32 king_rb = (outw == 256) ? rainbow_linebuffer[x] : SampleKING256Sharp(rainbow_linebuffer, x, outw);
+      LAYER_MIX_BODY_PIX(king_bg, king_rb, vdc_x);
+      LAYER_MIX_FINAL_NOCELLO;
+     }
     }
     else if((vce_rendercache.BLE & 0xC000) == 0xC000) // Front cellophane
     {

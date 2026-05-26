@@ -79,6 +79,8 @@ V810::V810()
  memset(MemReadBus32, 0, sizeof(MemReadBus32));
  memset(MemWriteBus32, 0, sizeof(MemWriteBus32));
 
+ PC = 0;
+ VBMode = false;
  v810_timestamp = 0;
  next_event_ts = 0x7FFFFFFF;
 }
@@ -316,6 +318,7 @@ void V810::Reset()
 
 bool V810::Init()
 {
+	VBMode = false; // PC-FX/PC-FXGA V810, not Virtual Boy enhanced mode.
 	in_bstr = FALSE;
 	in_bstr_to = 0;
 
@@ -331,6 +334,15 @@ bool V810::Init()
 		FastMap[A / V810_FAST_MAP_PSIZE] = DummyRegion - A;
 
 	return(TRUE);
+}
+
+const char* V810::GetCoreName(void) const
+{
+#if defined(PCFX_V810_ACCURATE_ONLY)
+	return "accurate";
+#else
+	return "fast";
+#endif
 }
 
 void V810::Kill(void)
@@ -511,13 +523,19 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 #define RB_SETPC(new_pc_raw) 										\
 			  {										\
 			   const uint32 new_pc = new_pc_raw;	/* So RB_SETPC(RB_GETPC()) won't mess up */	\
+			   if(RB_AccurateMode)						\
+			    PC = new_pc;							\
+			   else									\
 			   {										\
 			    PC_ptr = &FastMap[(new_pc) >> V810_FAST_MAP_SHIFT][(new_pc)];		\
-			    PC_base = PC_ptr - (new_pc);						\
+			    PC_base = PC_ptr - (new_pc);					\
 			   }										\
 			  }
 
 #define RB_PCRELCHANGE(delta) { 				\
+				if(RB_AccurateMode)		\
+				 PC += (delta);			\
+				else				\
 				{				\
 				 uint32 PC_tmp = RB_GETPC();	\
 				 PC_tmp += (delta);		\
@@ -525,14 +543,38 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 				}					\
 			      }
 
-#define RB_INCPCBY2()	{ PC_ptr += 2; }
-#define RB_INCPCBY4()   { PC_ptr += 4; }
+#define RB_INCPCBY2()	{ if(RB_AccurateMode) PC += 2; else PC_ptr += 2; }
+#define RB_INCPCBY4()   { if(RB_AccurateMode) PC += 4; else PC_ptr += 4; }
 
-#define RB_DECPCBY2()   { PC_ptr -= 2; }
-#define RB_DECPCBY4()   { PC_ptr -= 4; }
+#define RB_DECPCBY2()   { if(RB_AccurateMode) PC -= 2; else PC_ptr -= 2; }
+#define RB_DECPCBY4()   { if(RB_AccurateMode) PC -= 4; else PC_ptr -= 4; }
 
+#if defined(PCFX_V810_ACCURATE_ONLY)
+//
+// Define accurate mode defines
+//
+#define RB_GETPC()      PC
+#ifdef _MSC_VER
+#define RB_RDOP(PC_offset, b) RDOP(timestamp, PC + PC_offset, b)
+#else
+#define RB_RDOP(PC_offset, ...) RDOP(timestamp, PC + PC_offset, ## __VA_ARGS__)
+#endif
 
+void V810::Run_Accurate(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
+{
+	const bool RB_AccurateMode = true;
+	#define RB_ADDBT(n,o,p)
+	#define RB_CPUHOOK(n)
 
+	#include "v810_oploop.inc"
+
+	#undef RB_CPUHOOK
+	#undef RB_ADDBT
+}
+
+#undef RB_GETPC
+#undef RB_RDOP
+#else
 //
 // Define fast mode defines
 //
@@ -544,11 +586,9 @@ INLINE uint32 V810::GetSREG(unsigned int which)
 #define RB_RDOP(PC_offset, ...) LoadU16_LE((uint16 *)&PC_ptr[PC_offset])
 #endif
 
-
-v810_timestamp_t V810::Run(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
+void V810::Run_Fast(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
 {
-	Running = true;
-	
+	const bool RB_AccurateMode = false;
 	#define RB_ADDBT(n,o,p)
 	#define RB_CPUHOOK(n)
 
@@ -556,14 +596,22 @@ v810_timestamp_t V810::Run(int32 MDFN_FASTCALL (*event_handler)(const v810_times
 
 	#undef RB_CPUHOOK
 	#undef RB_ADDBT
-	
-	return(v810_timestamp);
 }
 
-// Undefine fast mode defines
-//
 #undef RB_GETPC
 #undef RB_RDOP
+#endif
+
+v810_timestamp_t V810::Run(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp_t timestamp))
+{
+	Running = true;
+#if defined(PCFX_V810_ACCURATE_ONLY)
+	Run_Accurate(event_handler);
+#else
+	Run_Fast(event_handler);
+#endif
+	return(v810_timestamp);
+}
 
 void V810::Exit(void)
 {
@@ -572,13 +620,21 @@ void V810::Exit(void)
 
 uint32 V810::GetPC(void)
 {
+#if defined(PCFX_V810_ACCURATE_ONLY)
+  return(PC);
+#else
   return(PC_ptr - PC_base);
+#endif
 }
 
 void V810::SetPC(uint32 new_pc)
 {
+#if defined(PCFX_V810_ACCURATE_ONLY)
+  PC = new_pc;
+#else
   PC_ptr = &FastMap[new_pc >> V810_FAST_MAP_SHIFT][new_pc];
   PC_base = PC_ptr - new_pc;
+#endif
 }
 
 uint32 V810::GetPR(const unsigned int which)
@@ -752,8 +808,9 @@ INLINE bool V810::Do_BSTR_Search(v810_timestamp_t &timestamp, const int inc_mul,
         return((bool)len);      // Continue the search if any bits are left to search.
 }
 
-bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op)
+bool V810::bstr_subop(v810_timestamp_t &timestamp, int sub_op, int arg1)
 {
+ (void)arg1;
  if((sub_op >= 0x10) || (!(sub_op & 0x8) && sub_op >= 0x4))
  {
   //printf("%08x\tBSR Error: %04x\n", PC,sub_op);

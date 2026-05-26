@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 
-#define HOST_WIDTH_RESOLUTION 320
+#define HOST_WIDTH_RESOLUTION 512
 #define HOST_HEIGHT_RESOLUTION 240
-#define BACKBUFFER_WIDTH_RESOLUTION 320
+#define BACKBUFFER_WIDTH_RESOLUTION 512
 #define BACKBUFFER_HEIGHT_RESOLUTION 240
 
 extern const uint32_t internal_pitch;
@@ -30,7 +30,6 @@ extern "C" {
 #endif
 const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
 void pcfx_headless_video_get_display_rect(int* x, int* y, int* w, int* h);
-void pcfx_headless_video_note_full_width_line(void);
 #ifdef __cplusplus
 }
 #endif
@@ -41,6 +40,7 @@ void pcfx_headless_video_note_full_width_line(void);
 extern "C" {
 #endif
 void pcfx_headless_video_set_full_width(int full_width);
+void pcfx_headless_video_set_display_width(int width);
 #ifdef __cplusplus
 }
 #endif

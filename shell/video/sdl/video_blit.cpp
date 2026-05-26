@@ -86,7 +86,7 @@ void Set_Video_Menu()
 void Set_Video_InGame()
 {
 	Clear_Video();
-	internal_pix = (uint16_t*)sdl_screen->pixels + 32;
+	internal_pix = (uint16_t*)sdl_screen->pixels;
 }
 
 void Video_Close()

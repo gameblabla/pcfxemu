@@ -203,11 +203,13 @@ static void ClearDrawBufferForNextFrame(void)
      FrameBuffer[DrawBuffer][to] = TextureWordToNative(Texture[bank][so], 1.0f);
      FrameValid[DrawBuffer][to] = 1;
     }
-    else
+    else if(PE[6] & 0x0FFF)
     {
      FrameBuffer[DrawBuffer][to] = ColorWordToNative(PE[6]);
      FrameValid[DrawBuffer][to] = 1;
     }
+    else
+     FrameValid[DrawBuffer][to] = 0;
    }
  }
  else

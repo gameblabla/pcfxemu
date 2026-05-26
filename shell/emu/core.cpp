@@ -4,6 +4,8 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <vector>
+#include <string>
 #include <libgen.h>
 #define _BSD_SOURCE
 #include <sys/time.h>
@@ -95,6 +97,28 @@ static uint16 Last_VDC_AR[2];
 
 #ifdef HAVE_HUC6273
 static bool WantHuC6273 = FALSE;
+#endif
+
+enum PCFXBIOSKind
+{
+ PCFX_BIOS_UNKNOWN = 0,
+ PCFX_BIOS_CONSOLE_100,
+ PCFX_BIOS_CONSOLE_101,
+ PCFX_BIOS_FXGA
+};
+
+static PCFXBIOSKind CurrentBIOSKind = PCFX_BIOS_UNKNOWN;
+static char CurrentBIOSPath[512];
+static char CurrentBIOSMD5[33];
+
+static bool LoadingHuEXE = false;
+static bool PendingHuEXEUpload = false;
+static unsigned PendingHuEXEUploadFrames = 0;
+static uint32 PendingHuEXEStartPC = 0;
+static std::vector<uint8> PendingHuEXEImage;
+
+#ifndef PCFXGA_HUEXE_UPLOAD_DELAY_FRAMES
+#define PCFXGA_HUEXE_UPLOAD_DELAY_FRAMES 120
 #endif
 
 //static 
@@ -366,18 +390,122 @@ static void VDCB_IRQHook(bool asserted)
  PCFXIRQ_Assert(PCFXIRQ_SOURCE_VDCB, asserted);
 }
 
+static void PCFX_ClearPendingHuEXEUpload(void)
+{
+ PendingHuEXEUpload = false;
+ PendingHuEXEUploadFrames = 0;
+ PendingHuEXEStartPC = 0;
+ PendingHuEXEImage.clear();
+}
+
+static void PCFX_MD5Hex(const uint8* data, size_t size, char out[33])
+{
+ uint8 digest[16];
+ md5_context ctx;
+ mednafen_md5_starts(&ctx);
+ mednafen_md5_update(&ctx, (uint8*)data, (uint32_t)size);
+ mednafen_md5_finish(&ctx, digest);
+ for(int i = 0; i < 16; i++)
+  sprintf(out + i * 2, "%02x", digest[i]);
+ out[32] = 0;
+}
+
+static PCFXBIOSKind PCFX_ClassifyBIOS(const char* md5hex)
+{
+ if(!md5hex)
+  return PCFX_BIOS_UNKNOWN;
+ if(!strcasecmp(md5hex, "08e36edbea28a017f79f8d4f7ff9b6d7"))
+  return PCFX_BIOS_CONSOLE_100;
+ if(!strcasecmp(md5hex, "e2fb7c7220e3a7838c2dd7e401a7f3d8"))
+  return PCFX_BIOS_CONSOLE_101;
+ if(!strcasecmp(md5hex, "5885bc9a64bf80d4530b9b9b978ff587"))
+  return PCFX_BIOS_FXGA;
+ return PCFX_BIOS_UNKNOWN;
+}
+
+static const char* PCFX_BIOSKindName(PCFXBIOSKind kind)
+{
+ switch(kind)
+ {
+  case PCFX_BIOS_CONSOLE_100: return "PC-FX console BIOS v1.00";
+  case PCFX_BIOS_CONSOLE_101: return "PC-FX console BIOS v1.01";
+  case PCFX_BIOS_FXGA:        return "PC-FXGA BIOS";
+  default:                    return "unknown 1MB PC-FX-compatible BIOS";
+ }
+}
+
+static MDFNFILE* PCFX_TryOpenBIOS(const std::string& path, PCFXBIOSKind* kind_out)
+{
+ MDFNFILE* fp = file_open(path.c_str());
+ if(!fp)
+  return NULL;
+ if(fp->size != 1024 * 1024)
+ {
+  file_close(fp);
+  return NULL;
+ }
+
+ char md5hex[33];
+ PCFX_MD5Hex(fp->data, fp->size, md5hex);
+ const PCFXBIOSKind kind = PCFX_ClassifyBIOS(md5hex);
+
+ snprintf(CurrentBIOSPath, sizeof(CurrentBIOSPath), "%s", path.c_str());
+ snprintf(CurrentBIOSMD5, sizeof(CurrentBIOSMD5), "%s", md5hex);
+ CurrentBIOSKind = kind;
+ if(kind_out)
+  *kind_out = kind;
+ return fp;
+}
+
+static MDFNFILE* PCFX_OpenBIOS(bool prefer_fxga)
+{
+ static const char* console_names[] = {
+  "pcfx.rom", "pcfxbios.bin", "pcfxv101.bin", "pcfx_bios.bin", "PCFX.ROM", "PCFXBIOS.BIN", "PCFXV101.BIN"
+ };
+ static const char* fxga_names[] = {
+  "pcfxga.rom", "pcfxga.bin", "PCFXGA.ROM", "PCFXGA.BIN"
+ };
+
+ CurrentBIOSKind = PCFX_BIOS_UNKNOWN;
+ CurrentBIOSPath[0] = 0;
+ CurrentBIOSMD5[0] = 0;
+
+ const std::string base = retro_base_directory.empty() ? std::string(".") : retro_base_directory;
+ auto try_list = [&](const char* const* names, size_t count) -> MDFNFILE* {
+  for(size_t i = 0; i < count; i++)
+  {
+   std::string path = base + "/" + names[i];
+   if(MDFNFILE* fp = PCFX_TryOpenBIOS(path, NULL))
+    return fp;
+  }
+  return NULL;
+ };
+
+ if(prefer_fxga)
+ {
+  if(MDFNFILE* fp = try_list(fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0])))
+   return fp;
+  if(MDFNFILE* fp = try_list(console_names, sizeof(console_names) / sizeof(console_names[0])))
+   return fp;
+ }
+ else
+ {
+  if(MDFNFILE* fp = try_list(console_names, sizeof(console_names) / sizeof(console_names[0])))
+   return fp;
+  if(MDFNFILE* fp = try_list(fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0])))
+   return fp;
+ }
+
+ if(MDFNFILE* fp = PCFX_TryOpenBIOS(base, NULL))
+  return fp;
+ return NULL;
+}
+
 static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
 {
-	std::string biospath;
-	biospath = retro_base_directory + "/pcfx.rom";
-
-	MDFNFILE *BIOSFile = file_open(biospath.c_str());
-
-	if(!BIOSFile)
-	{
-		//printf("Can't load BIOS\n");
-		return(0);
-	}
+ MDFNFILE *BIOSFile = PCFX_OpenBIOS(LoadingHuEXE);
+ if(!BIOSFile)
+  return(0);
 
    #ifdef HAVE_HUC6273
    if(EmuFlags & CDGE_FLAG_FXGA)
@@ -400,13 +528,6 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    BIOSROM = PCFX_V810.SetFastMap(BIOSROM_Map_Addresses, 0x00100000, 1);
    if(!BIOSROM)
       return(0);
-
-   if(BIOSFile->size != 1024 * 1024)
-   {
-      //MDFN_PrintError("BIOS ROM file is incorrect size.\n");
-      return(0);
-   }
-
    memcpy(BIOSROM, BIOSFile->data, 1024 * 1024);
 
    file_close(BIOSFile);
@@ -927,8 +1048,12 @@ static int LoadHuEXE(const char* name)
  cdifs = NULL;
  CD_TrayOpen = false;
  CD_SelectedDisc = -1;
+ PCFX_ClearPendingHuEXEUpload();
 
- if(!LoadCommon(NULL))
+ LoadingHuEXE = true;
+ const bool common_loaded = LoadCommon(NULL);
+ LoadingHuEXE = false;
+ if(!common_loaded)
   return 0;
 
  MDFNFILE* EXEFile = file_open(name);
@@ -938,16 +1063,32 @@ static int LoadHuEXE(const char* name)
  PCFX_Power();
 
  uint32 start_pc = 0;
+ if(CurrentBIOSKind == PCFX_BIOS_FXGA)
+ {
+  const uint8* exe_data = EXEFile->data;
+  const size_t exe_size = EXEFile->size;
+  if(!HuEXE_LoadSegments(exe_data, exe_size, &start_pc))
+  {
+   file_close(EXEFile);
+   return 0;
+  }
+  memset(RAM, 0x00, 2048 * 1024);
+  PendingHuEXEImage.assign(exe_data, exe_data + exe_size);
+  PendingHuEXEStartPC = start_pc;
+  PendingHuEXEUploadFrames = PCFXGA_HUEXE_UPLOAD_DELAY_FRAMES;
+  PendingHuEXEUpload = true;
+  file_close(EXEFile);
+  ForceEventUpdates(PCFX_V810.v810_timestamp);
+  return 1;
+ }
+
  const bool loaded = HuEXE_LoadSegments(EXEFile->data, EXEFile->size, &start_pc);
  file_close(EXEFile);
  if(!loaded)
   return 0;
 
- // FXDB's "rg" command starts at __start when linked with _STARTUP.O.  It also
- // initializes vectors; for now, keep the BIOS ROM mapped and let GMAKER's VLIB
- // set its own interrupt vectors during init, while bypassing the CD BIOS boot.
  PCFX_V810.SetPC(start_pc & ~1U);
- PCFX_V810.SetPR(3, 0x00000E00); // Sensible fallback for no-startup EX files.
+ PCFX_V810.SetPR(3, 0x00000E00);
  ForceEventUpdates(PCFX_V810.v810_timestamp);
  return 1;
 }
@@ -1031,7 +1172,7 @@ uint8_t MDFNI_LoadCD(const char *devicename)
  }
 
  //MDFNI_SetLayerEnableMask(~0ULL);
- return 0;
+ return 1;
 }
 
 static uint8_t MDFNI_LoadGame(const char *name)
@@ -1050,9 +1191,11 @@ static uint8_t MDFNI_LoadGame(const char *name)
    return 0;
 }
 
-void Load_Game_Memory(char* path)
+int Load_Game_Memory(char* path)
 {
-	MDFNI_LoadGame(path);
+	const int loaded = MDFNI_LoadGame(path);
+	if(!loaded)
+		return 0;
 	switch(option.type_controller)
 	{
 		default:
@@ -1065,6 +1208,7 @@ void Load_Game_Memory(char* path)
 	input_buf[1] = 0;
 	KING_SetPixelFormat();
 	SoundBox_SetSoundRate(SOUND_OUTPUT_FREQUENCY);
+	return 1;
 }
 
 static void update_input(void)
@@ -1114,11 +1258,32 @@ static const uint32_t TblSkip[5][5] = {
 #endif
 
 
+static void PCFX_ServicePendingHuEXEUpload(void)
+{
+ if(!PendingHuEXEUpload)
+  return;
+ if(PendingHuEXEUploadFrames)
+ {
+  PendingHuEXEUploadFrames--;
+  return;
+ }
+
+ uint32 start_pc = PendingHuEXEStartPC;
+ if(!PendingHuEXEImage.empty() && HuEXE_LoadSegments(PendingHuEXEImage.data(), PendingHuEXEImage.size(), &start_pc))
+ {
+  PCFX_V810.SetPC(start_pc & ~1U);
+  PCFX_V810.SetPR(3, 0x00000E00);
+  ForceEventUpdates(PCFX_V810.v810_timestamp);
+ }
+ PCFX_ClearPendingHuEXEUpload();
+}
+
 void Emulation_Run()
 {
 #ifdef PCFX_HEADLESS
    pcfx_headless_video_set_full_width(WantHuC6273 ? 1 : 0);
 #endif
+   PCFX_ServicePendingHuEXEUpload();
 	EmulateSpecStruct spec = {0};
 	static int16_t sound_buf[0x10000];
 	static int32 rects[FB_MAX_HEIGHT];
@@ -1144,6 +1309,9 @@ void Emulation_Run()
 	spec.skip = 0;
 #endif
 	Emulate(&spec);
+#ifdef PCFX_HEADLESS
+   pcfx_headless_video_set_display_width(spec.DisplayRect.w);
+#endif
 
    //int16 *const SoundBuf = spec.SoundBuf + spec.SoundBufSizeALMS * curgame->soundchan;
    int32 SoundBufSize = spec.SoundBufSize - spec.SoundBufSizeALMS;
