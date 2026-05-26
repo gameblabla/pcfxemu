@@ -533,6 +533,143 @@ static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shad
  return ColorWordToNativeShaded(fallback_word, shade);
 }
 
+
+static inline int SignExtendBits(uint16 v, int bits)
+{
+ const int m = 1 << (bits - 1);
+ return (int)((v ^ m) - m);
+}
+
+static inline int SpriteDim(uint8 v)
+{
+ return (int)v + 1;
+}
+
+static uint16 ReadTexBankWord(int bank, uint32 hwaddr)
+{
+ bank &= (TEX_BANKS - 1);
+ return Texture[bank][hwaddr & 0xFFFF];
+}
+
+static void WriteTexBankWord(int bank, uint32 hwaddr, uint16 v)
+{
+ bank &= (TEX_BANKS - 1);
+ const uint32 o = hwaddr & 0xFFFF;
+ Texture[bank][o] = v;
+ TextureValid[bank][o] = 1;
+ if(bank == 0)
+  CommandTextureMem[o] = v;
+}
+
+static uint16 SpritePixelToNative(uint16 pix)
+{
+ // ASL sprite sources are indexed texture-buffer pixels.  Maze2D loads a
+ // small AID sprite sheet and writes its ACD palette to VCE entries 0..15;
+ // treating these pixels as RGB444 makes them disappear into the black maze.
+ // Use the VCE palette directly for sprite pixels.
+ return FXVCE_GetPaletteRGB565(pix & 0x1FF);
+}
+
+static void DrawSpriteEntry(int sct_bank, int sct_no)
+{
+ const uint32 base = ((uint32)(sct_no & 0x7FF) * 16) & 0xFFFF;
+ uint16 sct[16];
+ for(int i = 0; i < 16; i++)
+  sct[i] = ReadTexBankWord(sct_bank, base + i);
+
+ const uint16 head = sct[0];
+ const int fnc = (head >> 13) & 0x7;
+ if(fnc == 0)
+  return;
+
+ // First pass: normal and normal-with-Z sprites.  This is what Maze2D uses
+ // through ASLMakeSimpleSprite()/ASLExecuteSprite().  More complex zoom/rotate
+ // ASL modes still fall through to the conservative rectangle path so they at
+ // least become visible instead of being silently dropped.
+ const int src_bank = head & 0x1F;
+ const bool hflip = (head & 0x0100) != 0;
+ const bool vflip = (head & 0x0200) != 0;
+ const uint16 cntl = sct[1];
+ const bool zcmp = (cntl & 0x2000) != 0;
+ const bool zwen = (cntl & 0x1000) != 0;
+ const int z = (int)sct[6];
+
+ int dx = SignExtendBits(sct[2] & 0x03FF, 10);
+ int dy = SignExtendBits(sct[3] & 0x01FF, 9);
+ const int dw = SpriteDim(sct[4] & 0x00FF);
+ const int dh = SpriteDim((sct[4] >> 8) & 0x00FF);
+ const int sx0 = sct[5] & 0x00FF;
+ const int sy0 = (sct[5] >> 8) & 0x00FF;
+ const int encoded_sw = sct[7] & 0x00FF;
+ const int encoded_sh = (sct[7] >> 8) & 0x00FF;
+ const int sw = sct[7] ? SpriteDim(encoded_sw) : dw;
+ const int sh = sct[7] ? SpriteDim(encoded_sh) : dh;
+
+ int clip_l = SPWindowX[0] & 0x1FF;
+ int clip_t = SPWindowY[0] & 0x1FF;
+ int clip_r = SPWindowX[1] & 0x1FF;
+ int clip_b = SPWindowY[1] & 0x1FF;
+ if(clip_r <= clip_l) { clip_l = 0; clip_r = FB_W - 1; }
+ if(clip_b <= clip_t) { clip_t = 0; clip_b = FB_H - 1; }
+ clip_l = std::max(0, std::min(FB_W - 1, clip_l));
+ clip_r = std::max(0, std::min(FB_W - 1, clip_r));
+ clip_t = std::max(0, std::min(FB_H - 1, clip_t));
+ clip_b = std::max(0, std::min(FB_H - 1, clip_b));
+
+ for(int oy = 0; oy < dh; oy++)
+ {
+  const int py = dy + oy;
+  if(py < clip_t || py > clip_b)
+   continue;
+  int sy = sy0 + ((oy * sh) / dh);
+  if(vflip) sy = sy0 + (sh - 1) - ((oy * sh) / dh);
+  sy &= 0xFF;
+
+  for(int ox = 0; ox < dw; ox++)
+  {
+   const int px = dx + ox;
+   if(px < clip_l || px > clip_r)
+    continue;
+   int sx = sx0 + ((ox * sw) / dw);
+   if(hflip) sx = sx0 + (sw - 1) - ((ox * sw) / dw);
+   sx &= 0xFF;
+
+   const uint32 src_addr0 = (((uint32)sy << 8) | (uint32)sx) & 0xFFFF;
+   const uint32 src_addr1 = (0x8000 + src_addr0) & 0xFFFF;
+   const int sb = src_bank & (TEX_BANKS - 1);
+   const uint16 pix = (TextureValid[sb][src_addr1] ? Texture[sb][src_addr1] : Texture[sb][src_addr0]) & 0x0FFF;
+   // GMAKER AID assets reserve index 0/1 for background/transparent pixels.
+   // Maze2D's player sheet uses 1 around both the large and small player.
+   if(pix == 0 || pix == 1)
+    continue;
+
+   const int o = py * FB_W + px;
+   if(zcmp && FrameValid[DrawBuffer][o] && z <= ZBuffer[o])
+    continue;
+   FrameBuffer[DrawBuffer][o] = SpritePixelToNative(pix);
+   FrameValid[DrawBuffer][o] = 1;
+   if(zwen || fnc == 2)
+    ZBuffer[o] = z;
+   else if(!zcmp)
+    ZBuffer[o] = 0x7FFFFFFF;
+  }
+ }
+}
+
+static void ExecuteSprites(void)
+{
+ const int sct_bank = (SCTAddress >> 3) & 0x1F;
+ const int sct_start = ((SCTAddress & 0x0007) << 8) | ((SpriteControl >> 8) & 0x00FF);
+ int count = ((SCTAddress >> 8) & 0x0007) << 8;
+ count |= SpriteControl & 0x00FF;
+ if(count == 0)
+  count = 2048;
+ if(count > 2048)
+  count = 2048;
+ for(int i = 0; i < count; i++)
+  DrawSpriteEntry(sct_bank, (sct_start + i) & 0x7FF);
+}
+
 static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured)
 {
  const int area = Edge(a.sx, a.sy, b.sx, b.sy, c.sx, c.sy);
@@ -1170,7 +1307,7 @@ static void RunCMT(void)
  uint32 remaining = count;
  while(remaining)
  {
-  uint16 h = CommandTextureMem[pos & 0xFFFF];
+  uint16 h = ReadTexBankWord(CMTBankSelect, pos & 0xFFFF);
   if(h == 0xBEEF)
   {
    pos++;
@@ -1183,7 +1320,7 @@ static void RunCMT(void)
    break;
   uint16 tmp[0x100];
   for(uint8 i = 0; i < len; i++)
-   tmp[i] = CommandTextureMem[(pos + i) & 0xFFFF];
+   tmp[i] = ReadTexBankWord(CMTBankSelect, (pos + i) & 0xFFFF);
   ProcessCommand(tmp, len);
   pos += len;
   remaining -= len;
@@ -1201,7 +1338,11 @@ uint16 HuC6273_Read16(uint32 A)
 {
  A &= 0xFFFFF;
  if(A >= 0x10000 && A <= 0x2FFFF)
-  return CommandTextureMem[((A - 0x10000) >> 1) & 0xFFFF];
+ {
+  const uint32 o = ((A - 0x10000) >> 1) & 0xFFFF;
+  const int bank = CMTBankSelect & (TEX_BANKS - 1);
+  return TextureValid[bank][o] ? Texture[bank][o] : CommandTextureMem[o];
+ }
 
  switch(A & ~1)
  {
@@ -1245,7 +1386,9 @@ void HuC6273_Write16(uint32 A, uint16 V)
  A &= 0xFFFFF;
  if(A >= 0x10000 && A <= 0x2FFFF)
  {
-  CommandTextureMem[((A - 0x10000) >> 1) & 0xFFFF] = V;
+  const uint32 o = ((A - 0x10000) >> 1) & 0xFFFF;
+  WriteTexBankWord(CMTBankSelect, o, V);
+  CommandTextureMem[o] = V;
   return;
  }
 
@@ -1273,7 +1416,7 @@ void HuC6273_Write16(uint32 A, uint16 V)
   case 0x00014: HorizontalTiming = V; break;
   case 0x00016: VerticalTiming = V; break;
   case 0x00018: SCTAddress = V; break;
-  case 0x0001A: SpriteControl = V; Complete(INT_SPDONE); break;
+  case 0x0001A: SpriteControl = V; ExecuteSprites(); Complete(INT_SPDONE); break;
   case 0x0001C: CDResult[0] = V; break;
   case 0x0001E: CDResult[1] = V; break;
   case 0x00020: SPWindowX[0] = V; break;
@@ -1325,8 +1468,11 @@ void HuC6273_Write32(uint32 A, uint32 V)
 
  if(A >= 0x10000 && A <= 0x2FFFF)
  {
-  CommandTextureMem[((A - 0x10000) >> 1) & 0xFFFF] = hi;
-  CommandTextureMem[(((A - 0x10000) >> 1) + 1) & 0xFFFF] = lo;
+  const uint32 o = ((A - 0x10000) >> 1) & 0xFFFF;
+  WriteTexBankWord(CMTBankSelect, o, hi);
+  WriteTexBankWord(CMTBankSelect, o + 1, lo);
+  CommandTextureMem[o] = hi;
+  CommandTextureMem[(o + 1) & 0xFFFF] = lo;
   return;
  }
 
