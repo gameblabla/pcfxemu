@@ -325,7 +325,16 @@ static uint16 ApplyICShade(uint16 pix, float shade)
  const int ishift = 12 - ibits;
  const int imax = (1 << ibits) - 1;
  int intensity = (pix >> ishift) & imax;
- intensity = (int)lrintf((float)intensity * shade);
+
+ // The HuC6273 I/C path appears to have more visible low-end contrast than a
+ // straight multiply when viewed against Same Game FX hardware capture: cyan
+ // and blue cube side faces should drop clearly while front faces stay bright.
+ // Keep values >= 1.0 linear, but bend sub-unity lighting darker.
+ float ic_shade = shade;
+ if(ic_shade < 1.0f)
+  ic_shade = ic_shade * (0.78f + 0.22f * ic_shade);
+
+ intensity = (int)lrintf((float)intensity * ic_shade);
  if(intensity < 0) intensity = 0;
  if(intensity > imax) intensity = imax;
  return (uint16)((pix & ~(((uint16)imax) << ishift)) | (intensity << ishift));
@@ -405,14 +414,14 @@ static float ComputeShade(uint16 nxw, uint16 nyw, uint16 nzw, bool textured)
  shade += diff1 * LightDot(74, 76, 78, tx, ty, tz);
  shade += diff2 * LightDot(80, 82, 84, tx, ty, tz);
 
- // Aurora lighting is applied to the I component, but Same Game's texture
- // data already carries a mid-level intensity.  Using the raw Lambert term as
- // a multiplier makes the cubes much darker than the S-Video capture.  Bias
- // the result toward the original texture intensity while retaining per-face
- // variation from normals and FARL material/light registers.
- shade = 0.55f + 0.65f * shade;
- if(shade < 0.62f) shade = 0.62f;
- if(shade > 1.20f) shade = 1.20f;
+ // Aurora lighting is applied to the I component.  The previous curve kept a
+ // high minimum to avoid crushing the early title geometry, but it left the
+ // Same Game playfield's cyan/blue cube faces nearly flat.  Use a lower floor
+ // and a wider diffuse span so high-intensity I/C palette entries retain
+ // visible side-face falloff like the S-Video hardware reference.
+ shade = 0.34f + 0.86f * shade;
+ if(shade < 0.34f) shade = 0.34f;
+ if(shade > 1.16f) shade = 1.16f;
  return shade;
 }
 
