@@ -59,6 +59,13 @@ static const int TEX_W = 256;
 static const int TEX_H = 256;
 static const int FIFO_CAPACITY = 32;
 
+// FARL/HuC6273 control bits used by the first-pass renderer.
+static const uint16 TE_CTRL_ICM  = 1 << 0;
+static const uint16 TE_CTRL_LTEN = 1 << 5;
+static const uint16 PE_CTRL_C12M = 1 << 10;
+static const uint16 PE_CTRL_TLEN = 1 << 5;
+
+
 static uint16 FIFOControl;
 static uint16 CMTBankSelect;
 static uint16 CMTStartAddress;
@@ -117,16 +124,6 @@ static void MatrixIdentity(int16 m[16])
 {
  memset(m, 0, sizeof(int16) * 16);
  m[0] = m[5] = m[10] = m[15] = 0x0080;
-}
-
-static int16 Mul187(int16 a, int16 b)
-{
- int32 v = (int32)a * (int32)b;
- v += (v >= 0) ? 0x40 : -0x40;
- v >>= 7;
- if(v < -32768) v = -32768;
- if(v >  32767) v =  32767;
- return (int16)v;
 }
 
 static void MatrixMul187(const int16 cmd[16], const int16 src[16], int16 dst[16])
@@ -198,6 +195,7 @@ struct Vtx
  int32 zi;
  uint16 color;
  uint16 u, v;
+ float shade;
 };
 
 static int TEWin(uint8 addr, int def)
@@ -252,6 +250,7 @@ static void ProjectVertex(Vtx& out, uint16 xw, uint16 yw, uint16 zw, uint16 colo
  out.color = color;
  out.u = u;
  out.v = v;
+ out.shade = 1.0f;
 }
 
 static bool ReadXYZ(const uint16* cmd, size_t count, size_t& pos, Vtx& out, uint16 color, uint16 u = 0, uint16 v = 0)
@@ -301,6 +300,139 @@ static uint16 CompressIC(uint16 v, uint16 mask)
 }
 
 
+static int ICIntensityBits(uint16 mask)
+{
+ switch(mask & 0x0FFF)
+ {
+  case 0x0FC7: return 6;
+  case 0x0F8F: return 5;
+  case 0x0F1F: return 4;
+  case 0x0E3F: return 3;
+  default:     return 0;
+ }
+}
+
+static uint16 ApplyICShade(uint16 pix, float shade)
+{
+ if(shade < 0.0f) shade = 0.0f;
+ if(shade > 2.0f) shade = 2.0f;
+
+ const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
+ const int ibits = ICIntensityBits(mask);
+ if(!ibits)
+  return pix & 0x0FFF;
+
+ const int ishift = 12 - ibits;
+ const int imax = (1 << ibits) - 1;
+ int intensity = (pix >> ishift) & imax;
+ intensity = (int)lrintf((float)intensity * shade);
+ if(intensity < 0) intensity = 0;
+ if(intensity > imax) intensity = imax;
+ return (uint16)((pix & ~(((uint16)imax) << ishift)) | (intensity << ishift));
+}
+
+static uint16 RGB444ToNativeShaded(uint16 c, float shade)
+{
+ if(shade < 0.0f) shade = 0.0f;
+ if(shade > 2.0f) shade = 2.0f;
+ int r = (int)lrintf(((c >> 8) & 0xF) * shade);
+ int g = (int)lrintf(((c >> 4) & 0xF) * shade);
+ int b = (int)lrintf(((c >> 0) & 0xF) * shade);
+ if(r > 15) r = 15;
+ if(g > 15) g = 15;
+ if(b > 15) b = 15;
+ return RGB444ToNative((uint16)((r << 8) | (g << 4) | b));
+}
+
+static uint16 ColorWordToNativeShaded(uint16 pix, float shade)
+{
+ if((TE[255] & TE_CTRL_ICM) && !(PE[3] & PE_CTRL_C12M))
+ {
+  const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
+  return FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask));
+ }
+ return RGB444ToNativeShaded(pix, shade);
+}
+
+static float Fix115ToFloat(uint16 v)
+{
+ return (float)S16(v) / 32768.0f;
+}
+
+static void Normalize3(float& x, float& y, float& z)
+{
+ const float l = sqrtf(x * x + y * y + z * z);
+ if(l > 1.0e-9f)
+ {
+  x /= l; y /= l; z /= l;
+ }
+}
+
+static float LightDot(uint8 ax, uint8 ay, uint8 az, float nx, float ny, float nz)
+{
+ float lx = Fix115ToFloat(TE[ax]);
+ float ly = Fix115ToFloat(TE[ay]);
+ float lz = Fix115ToFloat(TE[az]);
+ Normalize3(lx, ly, lz);
+ const float d = nx * lx + ny * ly + nz * lz;
+ return d > 0.0f ? d : 0.0f;
+}
+
+static float ComputeShade(uint16 nxw, uint16 nyw, uint16 nzw, bool textured)
+{
+ if(!(TE[255] & TE_CTRL_LTEN) && !(textured && (PE[3] & PE_CTRL_TLEN)))
+  return 1.0f;
+
+ float nx = Fix115ToFloat(nxw);
+ float ny = Fix115ToFloat(nyw);
+ float nz = Fix115ToFloat(nzw);
+
+ // Transform primitive normals by the TE normal matrix.  The normal matrix
+ // registers are 1.8.7, while primitive normals are 1.0.15.
+ const float m00 = (float)S16(TE[56]) / 128.0f, m01 = (float)S16(TE[58]) / 128.0f, m02 = (float)S16(TE[60]) / 128.0f;
+ const float m10 = (float)S16(TE[62]) / 128.0f, m11 = (float)S16(TE[64]) / 128.0f, m12 = (float)S16(TE[66]) / 128.0f;
+ const float m20 = (float)S16(TE[68]) / 128.0f, m21 = (float)S16(TE[70]) / 128.0f, m22 = (float)S16(TE[72]) / 128.0f;
+
+ float tx = m00 * nx + m01 * ny + m02 * nz;
+ float ty = m10 * nx + m11 * ny + m12 * nz;
+ float tz = m20 * nx + m21 * ny + m22 * nz;
+ Normalize3(tx, ty, tz);
+
+ const float ambient = (float)S16(TE[55]) / 32768.0f;
+ const float diff1   = (float)S16(TE[57]) / 32768.0f;
+ const float diff2   = (float)S16(TE[59]) / 32768.0f;
+ float shade = ambient;
+ shade += diff1 * LightDot(74, 76, 78, tx, ty, tz);
+ shade += diff2 * LightDot(80, 82, 84, tx, ty, tz);
+
+ // Aurora lighting is applied to the I component, but Same Game's texture
+ // data already carries a mid-level intensity.  Using the raw Lambert term as
+ // a multiplier makes the cubes much darker than the S-Video capture.  Bias
+ // the result toward the original texture intensity while retaining per-face
+ // variation from normals and FARL material/light registers.
+ shade = 0.55f + 0.65f * shade;
+ if(shade < 0.62f) shade = 0.62f;
+ if(shade > 1.20f) shade = 1.20f;
+ return shade;
+}
+
+static bool ReadNormalShade(const uint16* cmd, size_t count, size_t& pos, float& shade, bool textured)
+{
+ if(pos + 3 > count)
+  return false;
+ shade = ComputeShade(cmd[pos], cmd[pos + 1], cmd[pos + 2], textured);
+ pos += 3;
+ return true;
+}
+
+static uint16 InterpWord(uint16 a, uint16 b, uint16 c, float fa, float fb, float fc)
+{
+ int v = (int)lrintf((float)(a & 0x0FFF) * fa + (float)(b & 0x0FFF) * fb + (float)(c & 0x0FFF) * fc);
+ if(v < 0) v = 0;
+ if(v > 0x0FFF) v = 0x0FFF;
+ return (uint16)v;
+}
+
 static uint16 ColorWordToNative(uint16 pix)
 {
  // Aurora primitive colours and texture pixels are normally FARL I/C words
@@ -317,21 +449,20 @@ static uint16 ColorWordToNative(uint16 pix)
  return RGB444ToNative(pix);
 }
 
-static uint16 TextureWordToNative(uint16 pix, uint16 fallback)
+static uint16 TextureWordToNative(uint16 pix, float shade)
 {
  // In normal FARL use, texture pixels are 9-bit I/C values embedded in a
- // 12-bit word according to PE IC-mask.  The PC-FX VCE palette is then loaded
- // by the title with the matching I/C->YUV table.  Since this renderer is
- // overlaid after KING/VCE mixing, convert through the live VCE palette here.
- if(!(PE[3] & (1 << 10)))
+ // 12-bit word according to PE IC-mask.  Lighting modulates the I component
+ // before the I/C value is compressed to a VCE palette index.
+ if(!(PE[3] & PE_CTRL_C12M))
  {
   const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
-  return FXVCE_GetPaletteRGB565(CompressIC(pix, mask));
+  return FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask));
  }
- return RGB444ToNative(pix);
+ return RGB444ToNativeShaded(pix, shade);
 }
 
-static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback)
+static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shade)
 {
  const int tx = (int)((u + TE[86]) & (TEX_W - 1));
  const int ty = (int)((v + TE[88]) & (TEX_H - 1));
@@ -339,16 +470,16 @@ static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback)
  const int bank = PE[0] & (TEX_BANKS - 1);
 
  if(TextureValid[bank][o])
-  return TextureWordToNative(Texture[bank][o], fallback);
+  return TextureWordToNative(Texture[bank][o], shade);
 
  // Some early FARL samples switch the texture select register during setup in
  // ways that are still not fully understood.  Falling back to bank 0 avoids
  // turning unknown-bank texture maps into solid white while preserving correct
  // output when the selected bank has data.
  if(bank && TextureValid[0][o])
-  return TextureWordToNative(Texture[0][o], fallback);
+  return TextureWordToNative(Texture[0][o], shade);
 
- return fallback;
+ return ColorWordToNativeShaded(fallback_word, shade);
 }
 
 static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured)
@@ -364,7 +495,12 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
  if(minx > maxx || miny > maxy)
   return;
 
- uint16 native_color = ColorWordToNative(a.color ? a.color : (TE[90] ? TE[90] : 0x0FFF));
+ const uint16 default_word = TE[90] ? TE[90] : 0x0FFF;
+ const uint16 ca = a.color ? a.color : default_word;
+ const uint16 cb = b.color ? b.color : default_word;
+ const uint16 cc = c.color ? c.color : default_word;
+ const float inv_area = 1.0f / (float)area;
+
  for(int y = miny; y <= maxy; y++)
   for(int x = minx; x <= maxx; x++)
   {
@@ -374,21 +510,27 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
    if((area > 0 && (w0 < 0 || w1 < 0 || w2 < 0)) || (area < 0 && (w0 > 0 || w1 > 0 || w2 > 0)))
     continue;
 
+   const float fa = w0 * inv_area;
+   const float fb = w1 * inv_area;
+   const float fc = w2 * inv_area;
+
    const int o = y * FB_W + x;
-   const int32 zi = (a.zi + b.zi + c.zi) / 3;
+   const int32 zi = (int32)lrintf(a.zi * fa + b.zi * fb + c.zi * fc);
    if(FrameValid[DrawBuffer][o] && zi <= ZBuffer[o])
     continue;
-   uint16 color = native_color;
+
+   const float shade = a.shade * fa + b.shade * fb + c.shade * fc;
+   const uint16 base_word = InterpWord(ca, cb, cc, fa, fb, fc);
+   uint16 color;
    if(textured)
    {
-    const float inv_area = 1.0f / (float)area;
-    const float fa = w0 * inv_area;
-    const float fb = w1 * inv_area;
-    const float fc = w2 * inv_area;
     uint16 uu = (uint16)lrintf(a.u * fa + b.u * fb + c.u * fc);
     uint16 vv = (uint16)lrintf(a.v * fa + b.v * fb + c.v * fc);
-    color = SampleTexture(uu, vv, native_color);
+    color = SampleTexture(uu, vv, base_word, shade);
    }
+   else
+    color = ColorWordToNativeShaded(base_word, shade);
+
    FrameBuffer[DrawBuffer][o] = color;
    FrameValid[DrawBuffer][o] = 1;
    ZBuffer[o] = zi;
@@ -546,7 +688,9 @@ static void DoPutImage(uint8 option, const uint16* body, size_t n)
 static void DoTriangleList(uint8 option, const uint16* body, size_t n)
 {
  size_t p = 0;
- if(option == 0)
+ const uint16 dc = TE[90] ? TE[90] : 0x0FFF;
+
+ if(option == 0) // Vertex color, no normal.
  {
   while(p + 12 <= n)
   {
@@ -555,16 +699,21 @@ static void DoTriangleList(uint8 option, const uint16* body, size_t n)
    DrawTriangle(v[0],v[1],v[2],false);
   }
  }
- else if(option == 1)
+ else if(option == 1) // Vertex color + vertex normal.
  {
   while(p + 21 <= n)
   {
    Vtx v[3];
-   for(int i=0;i<3;i++) { uint16 c = body[p++]; ReadXYZ(body,n,p,v[i],c); p += std::min<size_t>(3, n - p); }
+   for(int i=0;i<3;i++)
+   {
+    uint16 c = body[p++];
+    ReadXYZ(body,n,p,v[i],c);
+    ReadNormalShade(body,n,p,v[i].shade,false);
+   }
    DrawTriangle(v[0],v[1],v[2],false);
   }
  }
- else if(option == 2)
+ else if(option == 2) // Facet color + facet normal.
  {
   while(p + 13 <= n)
   {
@@ -573,27 +722,40 @@ static void DoTriangleList(uint8 option, const uint16* body, size_t n)
    ReadXYZ(body,n,p,v[1],0);
    uint16 c = body[p++];
    ReadXYZ(body,n,p,v[2],c);
-   v[0].color = v[1].color = v[2].color = c;
-   p += std::min<size_t>(3, n - p);
+   float sh = 1.0f;
+   ReadNormalShade(body,n,p,sh,false);
+   for(int i = 0; i < 3; i++) { v[i].color = c; v[i].shade = sh; }
    DrawTriangle(v[0],v[1],v[2],false);
   }
  }
- else if(option == 4 || option == 5)
+ else if(option == 4) // Texture, no normal.
  {
-  const bool has_norm = (option == 5);
-  while(p + (has_norm ? 24 : 15) <= n)
+  while(p + 15 <= n)
   {
    Vtx v[3];
    for(int i=0;i<3;i++)
    {
     uint16 u = body[p++], vv = body[p++];
-    ReadXYZ(body,n,p,v[i],TE[90] ? TE[90] : 0x0FFF,u,vv);
-    if(has_norm) p += std::min<size_t>(3, n - p);
+    ReadXYZ(body,n,p,v[i],dc,u,vv);
    }
    DrawTriangle(v[0],v[1],v[2],true);
   }
  }
- else if(option == 6)
+ else if(option == 5) // Texture + vertex normal.
+ {
+  while(p + 24 <= n)
+  {
+   Vtx v[3];
+   for(int i=0;i<3;i++)
+   {
+    uint16 u = body[p++], vv = body[p++];
+    ReadXYZ(body,n,p,v[i],dc,u,vv);
+    ReadNormalShade(body,n,p,v[i].shade,true);
+   }
+   DrawTriangle(v[0],v[1],v[2],true);
+  }
+ }
+ else if(option == 6) // Texture + facet normal.
  {
   while(p + 18 <= n)
   {
@@ -601,29 +763,45 @@ static void DoTriangleList(uint8 option, const uint16* body, size_t n)
    for(int i=0;i<3;i++)
    {
     uint16 u = body[p++], vv = body[p++];
-    ReadXYZ(body,n,p,v[i],TE[90] ? TE[90] : 0x0FFF,u,vv);
+    ReadXYZ(body,n,p,v[i],dc,u,vv);
    }
-   p += std::min<size_t>(3, n - p);
+   float sh = 1.0f;
+   ReadNormalShade(body,n,p,sh,true);
+   for(int i = 0; i < 3; i++) v[i].shade = sh;
    DrawTriangle(v[0],v[1],v[2],true);
   }
  }
- else if(option == 8 || option == 9)
+ else if(option == 8) // Default color, no normal.
  {
-  const bool has_norm = (option == 9);
-  while(p + (has_norm ? 18 : 9) <= n)
+  while(p + 9 <= n)
   {
    Vtx v[3];
-   for(int i=0;i<3;i++) { ReadXYZ(body,n,p,v[i],TE[90] ? TE[90] : 0x0FFF); if(has_norm) p += std::min<size_t>(3, n - p); }
+   for(int i=0;i<3;i++) ReadXYZ(body,n,p,v[i],dc);
    DrawTriangle(v[0],v[1],v[2],false);
   }
  }
- else if(option == 0xA)
+ else if(option == 9) // Default color + vertex normal.
+ {
+  while(p + 18 <= n)
+  {
+   Vtx v[3];
+   for(int i=0;i<3;i++)
+   {
+    ReadXYZ(body,n,p,v[i],dc);
+    ReadNormalShade(body,n,p,v[i].shade,false);
+   }
+   DrawTriangle(v[0],v[1],v[2],false);
+  }
+ }
+ else if(option == 0xA) // Default color + facet normal.
  {
   while(p + 12 <= n)
   {
    Vtx v[3];
-   for(int i=0;i<3;i++) ReadXYZ(body,n,p,v[i],TE[90] ? TE[90] : 0x0FFF);
-   p += std::min<size_t>(3, n - p);
+   for(int i=0;i<3;i++) ReadXYZ(body,n,p,v[i],dc);
+   float sh = 1.0f;
+   ReadNormalShade(body,n,p,sh,false);
+   for(int i = 0; i < 3; i++) v[i].shade = sh;
    DrawTriangle(v[0],v[1],v[2],false);
   }
  }
@@ -634,22 +812,36 @@ static void DoTriangleStrip(uint8 option, const uint16* body, size_t n)
 {
  std::vector<Vtx> verts;
  size_t p = 0;
+ const uint16 dc = TE[90] ? TE[90] : 0x0FFF;
 
- if(option == 6)
+ if(option == 6 || option == 0xA) // Facet-normal strip.
  {
-  // Texture map + facet normal: first three vertices are followed by the
-  // triangle normal, then each additional vertex is followed by the next
-  // facet normal.  Vertex format is u,v,x,y,z.
-  while(p + 5 <= n)
+  const bool textured = (option == 6);
+  while(p < n)
   {
    Vtx v;
-   uint16 u = body[p++], vv = body[p++];
-   ReadXYZ(body, n, p, v, TE[90] ? TE[90] : 0x0FFF, u, vv);
+   if(textured)
+   {
+    if(p + 5 > n) break;
+    uint16 u = body[p++], vv = body[p++];
+    ReadXYZ(body, n, p, v, dc, u, vv);
+   }
+   else
+   {
+    if(p + 3 > n) break;
+    ReadXYZ(body, n, p, v, dc);
+   }
    verts.push_back(v);
    if(verts.size() >= 3)
    {
-    DrawTriangle(verts[verts.size() - 3], verts[verts.size() - 2], verts[verts.size() - 1], true);
-    p += std::min<size_t>(3, n - p);
+    float sh = 1.0f;
+    if(!ReadNormalShade(body, n, p, sh, textured))
+     break;
+    Vtx a = verts[verts.size() - 3];
+    Vtx b = verts[verts.size() - 2];
+    Vtx c = verts[verts.size() - 1];
+    a.shade = b.shade = c.shade = sh;
+    DrawTriangle(a, b, c, textured);
    }
   }
   Complete(INT_PESYNC);
@@ -659,25 +851,45 @@ static void DoTriangleStrip(uint8 option, const uint16* body, size_t n)
  while(p < n)
  {
   Vtx v;
-  if(option == 0)
+  if(option == 0) // Vertex color.
   {
    if(p + 4 > n) break;
    uint16 c = body[p++];
    ReadXYZ(body,n,p,v,c);
   }
-  else if(option == 4 || option == 5)
+  else if(option == 1) // Vertex color + vertex normal.
+  {
+   if(p + 7 > n) break;
+   uint16 c = body[p++];
+   ReadXYZ(body,n,p,v,c);
+   ReadNormalShade(body,n,p,v.shade,false);
+  }
+  else if(option == 4) // Texture.
   {
    if(p + 5 > n) break;
    uint16 u = body[p++], vv = body[p++];
-   ReadXYZ(body,n,p,v,TE[90] ? TE[90] : 0x0FFF,u,vv);
-   if(option == 5) p += std::min<size_t>(3, n - p);
+   ReadXYZ(body,n,p,v,dc,u,vv);
   }
-  else
+  else if(option == 5) // Texture + vertex normal.
+  {
+   if(p + 8 > n) break;
+   uint16 u = body[p++], vv = body[p++];
+   ReadXYZ(body,n,p,v,dc,u,vv);
+   ReadNormalShade(body,n,p,v.shade,true);
+  }
+  else if(option == 8) // Default color.
   {
    if(p + 3 > n) break;
-   ReadXYZ(body,n,p,v,TE[90] ? TE[90] : 0x0FFF);
-   if(option == 1 || option == 9) p += std::min<size_t>(3, n - p);
+   ReadXYZ(body,n,p,v,dc);
   }
+  else if(option == 9) // Default color + vertex normal.
+  {
+   if(p + 6 > n) break;
+   ReadXYZ(body,n,p,v,dc);
+   ReadNormalShade(body,n,p,v.shade,false);
+  }
+  else
+   break;
   verts.push_back(v);
  }
  for(size_t i = 2; i < verts.size(); i++)
