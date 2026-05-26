@@ -291,7 +291,7 @@ static void Emulate(EmulateSpecStruct *espec)
  //
  // new_base_ts is guaranteed to be <= v810_timestamp
  //
- v810_timestamp_t new_base_ts;
+ v810_timestamp_t new_base_ts = 0;
  espec->SoundBufSize = SoundBox_Flush(v810_timestamp, espec->SoundBuf, espec->SoundBufMaxSize);
 
  KING_ResetTS(new_base_ts);
@@ -382,7 +382,7 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    #ifdef HAVE_HUC6273
    if(EmuFlags & CDGE_FLAG_FXGA)
    {
-      //WantHuC6273 = TRUE;
+      WantHuC6273 = TRUE;
    }
    #endif
 
@@ -1233,6 +1233,26 @@ static void Clean_Emu(void)
    BIOSROM = NULL;
 }
 
+#ifdef PCFX_HEADLESS
+extern "C" void PCFX_Headless_CoreClose(void)
+{
+   Clean_Emu();
+}
+
+extern "C" uint8_t* PCFX_Headless_CoreRAM(size_t* size)
+{
+   if(size) *size = 2048 * 1024;
+   return RAM;
+}
+
+extern "C" uint8_t* PCFX_Headless_CoreSaveRAM(size_t* size)
+{
+   if(size) *size = sizeof(SaveRAM);
+   return SaveRAM;
+}
+#endif
+
+#ifndef PCFX_HEADLESS
 /* Main entrypoint of the emulator */
 int main(int argc, char* argv[])
 {
@@ -1275,3 +1295,4 @@ int main(int argc, char* argv[])
 
     return 0;
 }
+#endif

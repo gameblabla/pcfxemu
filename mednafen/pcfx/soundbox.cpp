@@ -67,7 +67,11 @@ bool SoundBox_SetSoundRate(uint32 rate)
 
 	for(uint_fast8_t y = 0; y < 2; y++)
 	{
+#ifdef PCFX_HEADLESS
+		FXsbuf[y].set_sample_rate(rate ? rate : 44100, 250);
+#else
 		FXsbuf[y].set_sample_rate(rate ? rate : 44100, 50);
+#endif
 		FXsbuf[y].clock_rate((long)(1789772.727272 * 4));
 		FXsbuf[y].bass_freq(20);
 	}

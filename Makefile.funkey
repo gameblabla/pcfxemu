@@ -10,6 +10,7 @@ PORT = funkey
 SOUND_ENGINE = alsa
 PROFILE = APPLY
 CHD = NO
+FAST_VIDEO ?= YES
 DEBUG = 0
 
 #### End of Configuration
@@ -31,7 +32,12 @@ INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include
 DEFINES			+= -DHAVE_CHD -D_7ZIP_ST
 endif
 
+ifeq ($(FAST_VIDEO), YES)
+DEFINES += -DPCFX_FAST_VIDEO_DEFAULT=1
+endif
+
 ifeq ($(DEBUG), YES)
+
 CFLAGS		= -Wall -Wextra -O0 -g3
 CFLAGS		+= $(INCLUDES) $(DEFINES)
 CXXFLAGS	= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11

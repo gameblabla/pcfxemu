@@ -10,6 +10,7 @@ PORT = retrostone
 SOUND_ENGINE = sdl
 PROFILE = 0
 CHD = NO
+FAST_VIDEO ?= YES
 
 #### End of Configuration
 
@@ -28,6 +29,11 @@ DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STD
 ifeq ($(CHD), YES)
 INCLUDES 		+= -Ideps/libchdr/include -Ideps/lzma-19.00/include -Ideps/flac-1.3.3/src/include -Ideps/flac-1.3.3/include
 DEFINES			+= -DHAVE_CHD -D_7ZIP_ST
+endif
+
+
+ifeq ($(FAST_VIDEO), YES)
+DEFINES += -DPCFX_FAST_VIDEO_DEFAULT=1
 endif
 
 CFLAGS		= -Wall -Wextra -Ofast -march=armv7-a+neon-vfpv4 -mtune=cortex-a7 -mfpu=neon-vfpv4 -fdata-sections -ffunction-sections -fno-builtin -fno-PIC -flto -fno-PIC -finline-limit=76

@@ -49,6 +49,9 @@
 #include "soundbox.h"
 #include "input.h"
 #include "timer.h"
+#ifdef HAVE_HUC6273
+#include "huc6273.h"
+#endif
 #include "../cdrom/scsicd.h"
 #include "../clamp.h"
 #include "../state_helpers.h"
@@ -2250,6 +2253,15 @@ static uint32 INLINE YUV888_TO_RGB888(uint32 yuv)
  return MAKECOLOR(r, g, b, a);
 }
 
+#ifdef HAVE_HUC6273
+uint16 FXVCE_GetPaletteRGB565(uint16 index)
+{
+ const uint32 yuv12 = fx_vce.palette_table[index & 0x1FF];
+ const uint32 yuv888 = (((yuv12 >> 8) & 0xFF) << 16) | ((yuv12 & 0x00F0) << 8) | ((yuv12 & 0x000F) << 4);
+ return (uint16)YUV888_TO_RGB888(yuv888);
+}
+#endif
+
 static uint32 INLINE YUV888_TO_YCbCr888(uint32 yuv)
 {
  uint32 y;
@@ -2734,6 +2746,10 @@ static void MixLayers(void)
 
     DisplayRect->w = 256;
     DisplayRect->x = 0;
+
+#ifdef HAVE_HUC6273
+    HuC6273_RenderLine(target, fx_vce.raster_counter - 22, DisplayRect->w);
+#endif
 
 	// FIXME
 	LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;

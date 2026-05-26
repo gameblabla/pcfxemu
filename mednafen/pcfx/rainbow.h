@@ -14,5 +14,6 @@ int RAINBOW_StateAction(StateMem *sm, int load, int data_only);
 bool RAINBOW_Init(bool arg_ChromaIP);
 void RAINBOW_Close(void);
 void RAINBOW_Reset(void);
+bool RAINBOW_IsFastBackend(void);
 
 #endif

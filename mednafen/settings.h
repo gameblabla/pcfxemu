@@ -13,6 +13,8 @@ extern const uint_fast32_t setting_last_scanline;
 extern const uint_fast32_t setting_nospritelimit;
 extern const uint_fast32_t setting_rainbow_chromaip;
 extern const uint_fast32_t setting_cd_speed;
+extern uint_fast32_t setting_video_fast_fallback;
+void MDFN_SetPCFXFastVideo(uint_fast32_t enabled);
 
 #ifdef __cplusplus
 }

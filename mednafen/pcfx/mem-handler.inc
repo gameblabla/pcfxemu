@@ -211,22 +211,22 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  }
  else if(A >= 0xB0000000 && A <= 0xB3FFFFFF)
  {
-  timestamp += 2;
+  timestamp += 4;
   FXVCE_Write16(0x4, V);
  }
  else if(A >= 0xB4000000 && A <= 0xB7FFFFFF)
  {
-  timestamp += 2;
+  timestamp += 4;
   fx_vdc_chips[0]->Write16(1, V);
  }
  else if(A >= 0xB8000000 && A <= 0xBBFFFFFF)
  {
-  timestamp += 2;
+  timestamp += 4;
   fx_vdc_chips[1]->Write16(1, V);
  }
  else if(A >= 0xBC000000 && A <= 0xBFFFFFFF)
  {
-  timestamp += 2;
+  timestamp += 4;
   KING_Write16(timestamp, 0x604, V);
  }
  else if(A >= 0x80000000 && A <= 0x807FFFFF)
@@ -239,6 +239,17 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
 
 static void MDFN_FASTCALL mem_wword(v810_timestamp_t &timestamp, uint32 A, uint32 V)
 {
+#ifdef HAVE_HUC6273
+ if(A >= 0x80500000 && A <= 0x8052FFFF)
+ {
+  if(WantHuC6273)
+  {
+   timestamp += 4;
+   HuC6273_Write32(A & 0x7FFFFF, V);
+   return;
+  }
+ }
+#endif
  if(A <= 0x001FFFFF)
  {
   RAMLPCHECK;
