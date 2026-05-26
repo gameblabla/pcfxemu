@@ -47,5 +47,8 @@ $(OBJ_CPP): %.o: %.cpp
 $(OBJ_C): %.o: %.c
 	$(CC) $(CFLAGS) -std=gnu99 -c -o $@ $<
 
+.PHONY: clean clean-sdl3
+clean: clean-sdl3
+
 clean-sdl3:
 	rm -f $(PRGNAME) $(OBJS)

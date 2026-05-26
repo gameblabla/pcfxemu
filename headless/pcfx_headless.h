@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 typedef struct PCFX_Headless PCFX_Headless;
+typedef void (*PCFX_HeadlessAudioCallback)(void* userdata, const int16_t* samples, uint32_t frames);
 
 enum
 {
@@ -40,6 +41,7 @@ void pcfx_headless_destroy(PCFX_Headless* emu);
 int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path);
 int pcfx_headless_run_frame(PCFX_Headless* emu);
 int pcfx_headless_run_frames(PCFX_Headless* emu, uint64_t frames);
+void pcfx_headless_set_audio_callback(PCFX_Headless* emu, PCFX_HeadlessAudioCallback callback, void* userdata);
 
 void pcfx_headless_set_pad(PCFX_Headless* emu, unsigned player, uint16_t buttons);
 uint16_t pcfx_headless_get_pad(PCFX_Headless* emu, unsigned player);

@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <dirent.h>
 
 #include <string>
 
@@ -47,6 +48,8 @@ struct PCFX_Headless
     FILE* wav;
     uint64_t wav_data_bytes;
     char error[512];
+    PCFX_HeadlessAudioCallback audio_callback;
+    void* audio_callback_userdata;
 };
 
 static PCFX_Headless* g_active;
@@ -66,6 +69,54 @@ static bool file_exists(const char* path)
 {
     struct stat st;
     return path && !stat(path, &st) && S_ISREG(st.st_mode);
+}
+
+static bool dir_exists(const char* path)
+{
+    struct stat st;
+    return path && !stat(path, &st) && S_ISDIR(st.st_mode);
+}
+
+static bool has_huexe_extension(const char* path)
+{
+    if(!path)
+        return false;
+    const char* dot = strrchr(path, '.');
+    return dot && (!strcasecmp(dot, ".ex") || !strcasecmp(dot, ".exe"));
+}
+
+static bool resolve_homebrew_path(const char* input, std::string* out)
+{
+    if(!input || !out)
+        return false;
+    if(file_exists(input))
+    {
+        *out = input;
+        return true;
+    }
+    if(!dir_exists(input))
+        return false;
+
+    DIR* dp = opendir(input);
+    if(!dp)
+        return false;
+    std::string best;
+    struct dirent* ent = NULL;
+    while((ent = readdir(dp)))
+    {
+        if(ent->d_name[0] == '.')
+            continue;
+        if(!has_huexe_extension(ent->d_name))
+            continue;
+        std::string candidate = std::string(input) + "/" + ent->d_name;
+        if(file_exists(candidate.c_str()) && (best.empty() || candidate < best))
+            best = candidate;
+    }
+    closedir(dp);
+    if(best.empty())
+        return false;
+    *out = best;
+    return true;
 }
 
 static void make_game_name(const char* path)
@@ -172,6 +223,8 @@ extern "C" void pcfx_headless_audio_write(const int16_t* samples, uint32_t frame
     if(!emu || !samples || !frames)
         return;
     emu->audio_frame_count += frames;
+    if(emu->audio_callback)
+        emu->audio_callback(emu->audio_callback_userdata, samples, frames);
     if(emu->wav)
     {
         const size_t bytes = (size_t)frames * 2u * sizeof(int16_t);
@@ -225,18 +278,28 @@ int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path)
         return 0;
     if(emu != g_active)
         return set_error(emu, "this build supports one active emulator instance at a time");
-    if(!file_exists(cd_path))
-        return set_error(emu, "CD image path is not a regular file: %s", cd_path ? cd_path : "(null)");
+    std::string resolved_path;
+    if(!resolve_homebrew_path(cd_path, &resolved_path))
+        return set_error(emu, "game path is not a regular file or a directory containing .EX/.EXE: %s", cd_path ? cd_path : "(null)");
     char bios_path[512];
     snprintf(bios_path, sizeof(bios_path), "%s/pcfx.rom", home_path);
     if(!file_exists(bios_path))
         return set_error(emu, "missing PC-FX BIOS: %s", bios_path);
 
-    make_game_name(cd_path);
-    std::string mutable_path(cd_path);
+    make_game_name(resolved_path.c_str());
+    std::string mutable_path(resolved_path);
     Load_Game_Memory(&mutable_path[0]);
     emu->loaded = true;
     return 1;
+}
+
+
+void pcfx_headless_set_audio_callback(PCFX_Headless* emu, PCFX_HeadlessAudioCallback callback, void* userdata)
+{
+    if(!emu)
+        return;
+    emu->audio_callback = callback;
+    emu->audio_callback_userdata = userdata;
 }
 
 int pcfx_headless_run_frame(PCFX_Headless* emu)

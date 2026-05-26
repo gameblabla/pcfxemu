@@ -1021,14 +1021,12 @@ int main(int argc, char** argv)
     app.start_ticks = now_ms();
     app.next_frame_ms = (double)app.start_ticks;
 
-    if(SDL_GetNumGamepads() > 0)
     {
-        SDL_JoystickID* ids = SDL_GetGamepads(NULL);
-        if(ids)
-        {
+        int gamepad_count = 0;
+        SDL_JoystickID* ids = SDL_GetGamepads(&gamepad_count);
+        if(ids && gamepad_count > 0)
             app.gamepad = SDL_OpenGamepad(ids[0]);
-            SDL_free(ids);
-        }
+        SDL_free(ids);
     }
 
     while(app.running)

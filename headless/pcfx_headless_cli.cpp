@@ -22,7 +22,7 @@ struct Command
 static void usage(const char* argv0)
 {
     fprintf(stderr,
-        "Usage: %s [options] game.cue|game.chd|game.ccd|game.toc|playlist.m3u\n"
+        "Usage: %s [options] game.cue|game.chd|game.ccd|game.toc|playlist.m3u|program.ex\n"
         "\n"
         "Options:\n"
         "  --bios-dir DIR          Directory containing pcfx.rom (default: .)\n"

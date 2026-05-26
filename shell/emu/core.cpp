@@ -442,10 +442,10 @@ static bool LoadCommon(std::vector<CDIF *> *CDInterfaces)
    }
 
    CD_TrayOpen = false;
-   CD_SelectedDisc = 0;
+   CD_SelectedDisc = (CDInterfaces && !CDInterfaces->empty()) ? 0 : -1;
 
    SCSICD_SetDisc(true, NULL, true);
-   SCSICD_SetDisc(false, (*CDInterfaces)[0], true);
+   SCSICD_SetDisc(false, (CDInterfaces && !CDInterfaces->empty()) ? (*CDInterfaces)[0] : NULL, true);
 
    /*BRAMDisabled = 0;
 
@@ -823,6 +823,133 @@ static bool ReadM3U(std::vector<std::string> &file_list, std::string path, unsig
  static std::vector<CDIF *> CDInterfaces;	// FIXME: Cleanup on error out.
 // TODO: LoadCommon()
 
+
+static uint32 HuEXE_ReadBE32(const uint8* p)
+{
+ return ((uint32)p[0] << 24) | ((uint32)p[1] << 16) | ((uint32)p[2] << 8) | (uint32)p[3];
+}
+
+static bool HuEXE_FindPublicSymbol(const uint8* data, size_t size, const char* name, uint32* address)
+{
+ if(!data || size < 0x40 || !name || !address)
+  return false;
+
+ const uint32 sym_off = HuEXE_ReadBE32(data + 0x14);
+ const uint32 sym_size = HuEXE_ReadBE32(data + 0x18);
+ const uint32 str_size = HuEXE_ReadBE32(data + 0x1C);
+ const uint32 str_off = sym_off + sym_size;
+
+ if(sym_off >= size || sym_size > size - sym_off || str_off >= size || str_size > size - str_off)
+  return false;
+
+ uint32 index = 0;
+ uint32 pos = str_off;
+ const uint32 str_end = str_off + str_size;
+ while(pos < str_end)
+ {
+  const char* s = (const char*)&data[pos];
+  uint32 len = 0;
+  while(pos + len < str_end && data[pos + len])
+   len++;
+
+  if(len && !strcmp(s, name) && (uint64)index * 4 + 4 <= sym_size)
+  {
+   const uint32 rec = HuEXE_ReadBE32(data + sym_off + index * 4);
+   *address = rec & 0x00FFFFFF;
+   return true;
+  }
+
+  pos += len + 1;
+  index++;
+ }
+ return false;
+}
+
+static bool HuEXE_LoadSegments(const uint8* data, size_t size, uint32* start_pc)
+{
+ if(!data || size < 0x40 || memcmp(data, "HuEXE001", 8))
+  return false;
+
+ const uint32 segment_count = HuEXE_ReadBE32(data + 0x0C);
+ const uint32 segment_table = 0x40;
+
+ if(segment_count > 256 || segment_table + (uint64)segment_count * 0x30 > size)
+  return false;
+
+ for(uint32 i = 0; i < segment_count; i++)
+ {
+  const uint8* sh = data + segment_table + i * 0x30;
+  const uint32 file_off = HuEXE_ReadBE32(sh + 0x10);
+  const uint32 mem_size = HuEXE_ReadBE32(sh + 0x14);
+  const uint32 load_addr = HuEXE_ReadBE32(sh + 0x24);
+
+  if(!mem_size)
+   continue;
+  if(load_addr >= 0x200000 || mem_size > 0x200000 - load_addr)
+   return false;
+
+  if(file_off && file_off < size)
+  {
+   const uint32 copy_size = (mem_size <= size - file_off) ? mem_size : (uint32)(size - file_off);
+   memcpy(RAM + load_addr, data + file_off, copy_size);
+   if(copy_size < mem_size)
+    memset(RAM + load_addr + copy_size, 0, mem_size - copy_size);
+  }
+  else
+  {
+   memset(RAM + load_addr, 0, mem_size);
+  }
+ }
+
+ uint32 pc = 0;
+ if(HuEXE_FindPublicSymbol(data, size, "__start", &pc) || HuEXE_FindPublicSymbol(data, size, "main", &pc))
+ {
+  if(pc < 0x200000)
+  {
+   *start_pc = pc;
+   return true;
+  }
+ }
+
+ // GMAKER's documented default link address is 0x8000 when -P8000 is used.
+ *start_pc = 0x8000;
+ return true;
+}
+
+static int LoadHuEXE(const char* name)
+{
+ EmuFlags = CDGE_FLAG_FXGA;
+#ifdef HAVE_HUC6273
+ WantHuC6273 = TRUE;
+#endif
+ cdifs = NULL;
+ CD_TrayOpen = false;
+ CD_SelectedDisc = -1;
+
+ if(!LoadCommon(NULL))
+  return 0;
+
+ MDFNFILE* EXEFile = file_open(name);
+ if(!EXEFile)
+  return 0;
+
+ PCFX_Power();
+
+ uint32 start_pc = 0;
+ const bool loaded = HuEXE_LoadSegments(EXEFile->data, EXEFile->size, &start_pc);
+ file_close(EXEFile);
+ if(!loaded)
+  return 0;
+
+ // FXDB's "rg" command starts at __start when linked with _STARTUP.O.  It also
+ // initializes vectors; for now, keep the BIOS ROM mapped and let GMAKER's VLIB
+ // set its own interrupt vectors during init, while bypassing the CD BIOS boot.
+ PCFX_V810.SetPC(start_pc & ~1U);
+ PCFX_V810.SetPR(3, 0x00000E00); // Sensible fallback for no-startup EX files.
+ ForceEventUpdates(PCFX_V810.v810_timestamp);
+ return 1;
+}
+
 uint8_t MDFNI_LoadCD(const char *devicename)
 {
  uint8 LayoutMD5[16];
@@ -907,15 +1034,18 @@ uint8_t MDFNI_LoadCD(const char *devicename)
 
 static uint8_t MDFNI_LoadGame(const char *name)
 {
-	if(strlen(name) > 4 && (!strcasecmp(name + strlen(name) - 4, ".cue") || !strcasecmp(name + strlen(name) - 4, ".ccd") ||
+   const size_t len = strlen(name);
+   if(len > 4 && (!strcasecmp(name + len - 4, ".cue") || !strcasecmp(name + len - 4, ".ccd") ||
 #ifdef HAVE_CHD
-	!strcasecmp(name + strlen(name) - 4, ".chd") ||
+   !strcasecmp(name + len - 4, ".chd") ||
 #endif
-	!strcasecmp(name + strlen(name) - 4, ".toc") || !strcasecmp(name + strlen(name) - 4, ".m3u")))
-	{
-		return (MDFNI_LoadCD(name));
-	}
-	return 0;
+   !strcasecmp(name + len - 4, ".toc") || !strcasecmp(name + len - 4, ".m3u")))
+   {
+      return (MDFNI_LoadCD(name));
+   }
+   if((len > 3 && !strcasecmp(name + len - 3, ".ex")) || (len > 4 && !strcasecmp(name + len - 4, ".exe")))
+      return LoadHuEXE(name);
+   return 0;
 }
 
 void Load_Game_Memory(char* path)
