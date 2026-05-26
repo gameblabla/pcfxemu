@@ -717,6 +717,8 @@ extern "C" int StateAction(StateMem *sm, int load, int data_only)
    ret &= SoundBox_StateAction(sm, load, data_only);
    ret &= SCSICD_StateAction(sm, load, data_only, "CDRM");
    ret &= RAINBOW_StateAction(sm, load, data_only);
+   if(WantHuC6273)
+      ret &= HuC6273_StateAction(sm, load, data_only);
 
    if(load)
    {
@@ -1114,6 +1116,9 @@ static const uint32_t TblSkip[5][5] = {
 
 void Emulation_Run()
 {
+#ifdef PCFX_HEADLESS
+   pcfx_headless_video_set_full_width(WantHuC6273 ? 1 : 0);
+#endif
 	EmulateSpecStruct spec = {0};
 	static int16_t sound_buf[0x10000];
 	static int32 rects[FB_MAX_HEIGHT];

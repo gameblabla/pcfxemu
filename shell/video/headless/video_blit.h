@@ -29,8 +29,18 @@ void Clear_Video(void);
 extern "C" {
 #endif
 const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
+void pcfx_headless_video_get_display_rect(int* x, int* y, int* w, int* h);
+void pcfx_headless_video_note_full_width_line(void);
 #ifdef __cplusplus
 }
 #endif
 
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void pcfx_headless_video_set_full_width(int full_width);
+#ifdef __cplusplus
+}
 #endif

@@ -20,6 +20,7 @@ extern "C" void pcfx_headless_set_paths(const char* bios_dir, const char* save_d
 extern "C" void pcfx_headless_input_set_pad(uint16_t state);
 extern "C" uint16_t pcfx_headless_input_get_pad(void);
 extern "C" const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
+extern "C" void pcfx_headless_video_get_display_rect(int* x, int* y, int* width, int* height);
 
 extern void Emu_Init(void);
 extern void Load_Game_Memory(char* path);
@@ -340,6 +341,12 @@ const uint16_t* pcfx_headless_get_rgb565(const PCFX_Headless* emu, int* width, i
 {
     (void)emu;
     return pcfx_headless_video_rgb565(width, height, pitch_pixels);
+}
+
+void pcfx_headless_get_display_rect(const PCFX_Headless* emu, int* x, int* y, int* width, int* height)
+{
+    (void)emu;
+    pcfx_headless_video_get_display_rect(x, y, width, height);
 }
 
 uint64_t pcfx_headless_frame_count(const PCFX_Headless* emu)

@@ -47,6 +47,7 @@ void pcfx_headless_set_pad(PCFX_Headless* emu, unsigned player, uint16_t buttons
 uint16_t pcfx_headless_get_pad(PCFX_Headless* emu, unsigned player);
 
 const uint16_t* pcfx_headless_get_rgb565(const PCFX_Headless* emu, int* width, int* height, int* pitch_pixels);
+void pcfx_headless_get_display_rect(const PCFX_Headless* emu, int* x, int* y, int* width, int* height);
 uint64_t pcfx_headless_frame_count(const PCFX_Headless* emu);
 uint64_t pcfx_headless_audio_frame_count(const PCFX_Headless* emu);
 const char* pcfx_headless_last_error(const PCFX_Headless* emu);

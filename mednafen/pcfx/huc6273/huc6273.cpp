@@ -8,6 +8,7 @@
 
 #include "pcfx.h"
 #include "huc6273.h"
+#include <mednafen/state_helpers.h>
 #include <algorithm>
 #include <math.h>
 #include <stdio.h>
@@ -61,9 +62,12 @@ static const int FIFO_CAPACITY = 32;
 
 // FARL/HuC6273 control bits used by the first-pass renderer.
 static const uint16 TE_CTRL_ICM  = 1 << 0;
+static const uint16 TE_CTRL_BCE  = 1 << 2;
 static const uint16 TE_CTRL_LTEN = 1 << 5;
+static const uint16 TE_CTRL_RJM  = 1 << 9;
 static const uint16 PE_CTRL_C12M = 1 << 10;
 static const uint16 PE_CTRL_TLEN = 1 << 5;
+static const uint16 PE_CTRL_ZCAT = 1 << 9;
 
 
 static uint16 FIFOControl;
@@ -116,6 +120,8 @@ static int DrawBuffer;
 static std::vector<uint16> PendingFIFO;
 
 extern uint16 FXVCE_GetPaletteRGB565(uint16 index);
+static uint16 TextureWordToNative(uint16 pix, float shade);
+static uint16 ColorWordToNative(uint16 pix);
 
 static inline int16 S16(uint16 v) { return (int16)v; }
 static inline uint16 Clamp16(int v) { return (uint16)(v < 0 ? 0 : (v > 0xFFFF ? 0xFFFF : v)); }
@@ -166,10 +172,47 @@ static float Matrix187(uint8 addr, float def)
  return (float)S16(TE[addr]) / 128.0f;
 }
 
-static void ClearZ(void)
+static void ClearZTo(int32 z)
 {
  for(int i = 0; i < FB_W * FB_H; i++)
-  ZBuffer[i] = -0x7FFFFFFF;
+  ZBuffer[i] = z;
+}
+
+static void ClearZ(void)
+{
+ ClearZTo(-0x7FFFFFFF);
+}
+
+static void ClearDrawBufferForNextFrame(void)
+{
+ const uint16 bcm = (DisplayControl >> 9) & 0x3;
+ if(bcm)
+ {
+  const int bank = PE[9] & (TEX_BANKS - 1);
+  const int xoff = S16(PE[11]) & 0xFF;
+  const int yoff = S16(PE[12]) & 0xFF;
+  for(int y = 0; y < FB_H; y++)
+   for(int x = 0; x < FB_W; x++)
+   {
+    const int to = y * FB_W + x;
+    const int tx = (x + xoff) & (TEX_W - 1);
+    const int ty = (y + yoff) & (TEX_H - 1);
+    const int so = ty * TEX_W + tx;
+    if(TextureValid[bank][so])
+    {
+     FrameBuffer[DrawBuffer][to] = TextureWordToNative(Texture[bank][so], 1.0f);
+     FrameValid[DrawBuffer][to] = 1;
+    }
+    else
+    {
+     FrameBuffer[DrawBuffer][to] = ColorWordToNative(PE[6]);
+     FrameValid[DrawBuffer][to] = 1;
+    }
+   }
+ }
+ else
+  memset(FrameValid[DrawBuffer], 0, sizeof(FrameValid[DrawBuffer]));
+ ClearZ();
 }
 
 static uint16 RGB444ToNative(uint16 c)
@@ -196,6 +239,7 @@ struct Vtx
  uint16 color;
  uint16 u, v;
  float shade;
+ float w;
 };
 
 static int TEWin(uint8 addr, int def)
@@ -221,6 +265,7 @@ static void ProjectVertex(Vtx& out, uint16 xw, uint16 yw, uint16 zw, uint16 colo
  float oy = m10 * vx + m11 * vy + m12 * vz + m13;
  float oz = m20 * vx + m21 * vy + m22 * vz + m23;
  float ow = m30 * vx + m31 * vy + m32 * vz + m33;
+ out.w = ow;
 
  // The Aurora object matrix is a full 4x4 1.8.7 matrix.  FARL's
  // FarlPerseZ4x4M187() writes the bottom row and expects the TE to divide
@@ -262,7 +307,7 @@ static bool ReadXYZ(const uint16* cmd, size_t count, size_t& pos, Vtx& out, uint
  return true;
 }
 
-static void FillRect(int xl, int yt, int xr, int yb, uint16 native_color)
+static void FillRect(int xl, int yt, int xr, int yb, uint16 native_color, int32 z_value)
 {
  if(xl > xr) std::swap(xl, xr);
  if(yt > yb) std::swap(yt, yb);
@@ -276,7 +321,7 @@ static void FillRect(int xl, int yt, int xr, int yb, uint16 native_color)
    const int o = y * FB_W + x;
    FrameBuffer[DrawBuffer][o] = native_color;
    FrameValid[DrawBuffer][o] = 1;
-   ZBuffer[o] = 0x7FFFFFFF;
+   ZBuffer[o] = z_value;
   }
 }
 
@@ -513,7 +558,23 @@ static uint16 TextureWordToNative(uint16 pix, float shade)
  return ApplyNeutralPostPaletteShade(RGB444ToNativeShaded(pix, shade), shade);
 }
 
-static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shade)
+static bool TextureWordIsTransparent(uint16 pix)
+{
+ // PC-FXGA/FARL texture overlays conventionally reserve I/C palette entry 0
+ // as transparent.  N-nyuu's title prompt and copyright strings are textured
+ // quads whose background texels are zero; drawing those zero texels created
+ // the black rectangles visible around the text.  Apply the key only when a
+ // texture is sampled for primitive drawing.  Buffer-clear texture sampling is
+ // intentionally unaffected because N-nyuu uses that path for the yellow title
+ // background.
+ if(PE[3] & PE_CTRL_C12M)
+  return ((pix & 0x0FFF) == 0);
+
+ const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
+ return CompressIC(pix, mask) == 0;
+}
+
+static bool SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shade, uint16& out)
 {
  const int tx = (int)((u + TE[86]) & (TEX_W - 1));
  const int ty = (int)((v + TE[88]) & (TEX_H - 1));
@@ -521,18 +582,38 @@ static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shad
  const int bank = PE[0] & (TEX_BANKS - 1);
 
  if(TextureValid[bank][o])
-  return TextureWordToNative(Texture[bank][o], shade);
+ {
+  const uint16 pix = Texture[bank][o];
+  if(TextureWordIsTransparent(pix))
+   return false;
+  out = TextureWordToNative(pix, shade);
+  return true;
+ }
 
  // Some early FARL samples switch the texture select register during setup in
  // ways that are still not fully understood.  Falling back to bank 0 avoids
  // turning unknown-bank texture maps into solid white while preserving correct
  // output when the selected bank has data.
  if(bank && TextureValid[0][o])
-  return TextureWordToNative(Texture[0][o], shade);
+ {
+  const uint16 pix = Texture[0][o];
+  if(TextureWordIsTransparent(pix))
+   return false;
+  out = TextureWordToNative(pix, shade);
+  return true;
+ }
 
- return ColorWordToNativeShaded(fallback_word, shade);
+ out = ColorWordToNativeShaded(fallback_word, shade);
+ return true;
 }
 
+
+static inline bool BackfaceCulled(int area)
+{
+ if(!(TE[255] & TE_CTRL_BCE))
+  return false;
+ return area < 0;
+}
 
 static inline int SignExtendBits(uint16 v, int bits)
 {
@@ -644,7 +725,7 @@ static void DrawSpriteEntry(int sct_bank, int sct_no)
     continue;
 
    const int o = py * FB_W + px;
-   if(zcmp && FrameValid[DrawBuffer][o] && z <= ZBuffer[o])
+   if(zcmp && !(PE[3] & PE_CTRL_ZCAT) && FrameValid[DrawBuffer][o] && z <= ZBuffer[o])
     continue;
    FrameBuffer[DrawBuffer][o] = SpritePixelToNative(pix);
    FrameValid[DrawBuffer][o] = 1;
@@ -672,8 +753,22 @@ static void ExecuteSprites(void)
 
 static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured)
 {
+ // FARL/N-nyuu enables TE reject mode while emitting large textured strips
+ // that cross the near plane. Without any TE-side clipping/reject behavior,
+ // a near-zero or negative W explodes into tens-of-thousands-of-pixels screen
+ // coordinates and produces long grey/purple spikes during gameplay. This is
+ // a conservative reject-mode approximation until full polygon clipping exists.
+ if(TE[255] & TE_CTRL_RJM)
+ {
+  const int coord_limit = 4096;
+  if(a.w <= 1.0e-5f || b.w <= 1.0e-5f || c.w <= 1.0e-5f ||
+     a.sx < -coord_limit || a.sx > coord_limit || b.sx < -coord_limit || b.sx > coord_limit || c.sx < -coord_limit || c.sx > coord_limit ||
+     a.sy < -coord_limit || a.sy > coord_limit || b.sy < -coord_limit || b.sy > coord_limit || c.sy < -coord_limit || c.sy > coord_limit)
+   return;
+ }
+
  const int area = Edge(a.sx, a.sy, b.sx, b.sy, c.sx, c.sy);
- if(area == 0)
+ if(area == 0 || BackfaceCulled(area))
   return;
 
  int minx = std::max(0, std::min(a.sx, std::min(b.sx, c.sx)));
@@ -704,7 +799,7 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
 
    const int o = y * FB_W + x;
    const int32 zi = (int32)lrintf(a.zi * fa + b.zi * fb + c.zi * fc);
-   if(FrameValid[DrawBuffer][o] && zi <= ZBuffer[o])
+   if(!(PE[3] & PE_CTRL_ZCAT) && FrameValid[DrawBuffer][o] && zi <= ZBuffer[o])
     continue;
 
    const float shade = a.shade * fa + b.shade * fb + c.shade * fc;
@@ -712,9 +807,31 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
    uint16 color;
    if(textured)
    {
-    uint16 uu = (uint16)lrintf(a.u * fa + b.u * fb + c.u * fc);
-    uint16 vv = (uint16)lrintf(a.v * fa + b.v * fb + c.v * fc);
-    color = SampleTexture(uu, vv, base_word, shade);
+    uint16 uu, vv;
+    if(a.w > 1.0e-5f && b.w > 1.0e-5f && c.w > 1.0e-5f)
+    {
+     const float iaw = fa / a.w;
+     const float ibw = fb / b.w;
+     const float icw = fc / c.w;
+     const float denom = iaw + ibw + icw;
+     if(fabsf(denom) > 1.0e-9f)
+     {
+      uu = (uint16)lrintf(((float)a.u * iaw + (float)b.u * ibw + (float)c.u * icw) / denom);
+      vv = (uint16)lrintf(((float)a.v * iaw + (float)b.v * ibw + (float)c.v * icw) / denom);
+     }
+     else
+     {
+      uu = (uint16)lrintf(a.u * fa + b.u * fb + c.u * fc);
+      vv = (uint16)lrintf(a.v * fa + b.v * fb + c.v * fc);
+     }
+    }
+    else
+    {
+     uu = (uint16)lrintf(a.u * fa + b.u * fb + c.u * fc);
+     vv = (uint16)lrintf(a.v * fa + b.v * fb + c.v * fc);
+    }
+    if(!SampleTexture(uu, vv, base_word, shade, color))
+     continue;
    }
    else
     color = ColorWordToNativeShaded(base_word, shade);
@@ -800,8 +917,6 @@ static void DoWritePE(uint8 option, const uint16* body, size_t n)
  if(n)
   PE[option & 0xF] = body[0];
 
- if((option & 0xF) == 4 && n && (body[0] & 1))
-  ClearZ();
 
  if((option & 0xF) == 5 && n)
  {
@@ -813,8 +928,7 @@ static void DoWritePE(uint8 option, const uint16* body, size_t n)
   {
    FrontBuffer = DrawBuffer;
    DrawBuffer ^= 1;
-   memset(FrameValid[DrawBuffer], 0, sizeof(FrameValid[DrawBuffer]));
-   ClearZ();
+   ClearDrawBufferForNextFrame();
   }
   Complete(INT_PESYNC | INT_FSY | INT_VSY | INT_VBL);
  }
@@ -1029,7 +1143,10 @@ static void DoTriangleStrip(uint8 option, const uint16* body, size_t n)
     Vtx b = verts[verts.size() - 2];
     Vtx c = verts[verts.size() - 1];
     a.shade = b.shade = c.shade = sh;
-    DrawTriangle(a, b, c, textured);
+    if((verts.size() - 1) & 1)
+     DrawTriangle(b, a, c, textured);
+    else
+     DrawTriangle(a, b, c, textured);
    }
   }
   Complete(INT_PESYNC);
@@ -1081,7 +1198,12 @@ static void DoTriangleStrip(uint8 option, const uint16* body, size_t n)
   verts.push_back(v);
  }
  for(size_t i = 2; i < verts.size(); i++)
-  DrawTriangle(verts[i-2], verts[i-1], verts[i], option == 4 || option == 5);
+ {
+  if(i & 1)
+   DrawTriangle(verts[i-1], verts[i-2], verts[i], option == 4 || option == 5);
+  else
+   DrawTriangle(verts[i-2], verts[i-1], verts[i], option == 4 || option == 5);
+ }
  Complete(INT_PESYNC);
 }
 
@@ -1116,7 +1238,7 @@ static void DoMisc(uint8 option, const uint16* body, size_t n)
  if(option == 0 && n >= 6)
  {
   // Fill D/Z buffer: xleft, ytop, xright, ybottom, d, z.
-  FillRect(S16(body[0]), S16(body[1]), S16(body[2]), S16(body[3]), ColorWordToNative(body[4]));
+  FillRect(S16(body[0]), S16(body[1]), S16(body[2]), S16(body[3]), ColorWordToNative(body[4]), Fixed115ToInt(body[5]));
   Complete(INT_PESYNC);
   return;
  }
@@ -1531,10 +1653,92 @@ void HuC6273_Reset(void)
  PendingFIFO.clear();
 }
 
+int HuC6273_StateAction(StateMem *sm, int load, int data_only)
+{
+ uint32 PendingFIFOCount = 0;
+ uint16 PendingFIFOData[0x200];
+ memset(PendingFIFOData, 0, sizeof(PendingFIFOData));
+
+ if(!load)
+ {
+  PendingFIFOCount = (uint32)std::min<size_t>(PendingFIFO.size(), 0x200);
+  for(uint32 i = 0; i < PendingFIFOCount; i++)
+   PendingFIFOData[i] = PendingFIFO[i];
+ }
+
+ SFORMAT StateRegs[] =
+ {
+  SFVAR(FIFOControl),
+  SFVAR(CMTBankSelect),
+  SFVAR(CMTStartAddress),
+  SFVAR(CMTByteCount),
+  SFVAR(InterruptMask),
+  SFVAR(InterruptStatus),
+  SFVAR(ReadBack),
+  SFVAR(HorizontalTiming),
+  SFVAR(VerticalTiming),
+  SFVAR(SCTAddress),
+  SFVAR(SpriteControl),
+  SFARRAY16(CDResult, 2),
+  SFARRAY16(SPWindowX, 2),
+  SFARRAY16(SPWindowY, 2),
+  SFVAR(MiscStatus),
+  SFVAR(ErrorStatus),
+  SFVAR(DisplayControl),
+  SFVAR(StatusControl),
+  SFVAR(RasterHit),
+  SFVAR(TECodeControl),
+  SFVAR(TEAddressControl),
+  SFVAR(PixelEngineTest),
+  SFVAR(MemoryTest),
+  SFARRAY16(Results, 16),
+  SFARRAY16(TE, 256),
+  SFARRAY16(PE, 16),
+  SFARRAY16(LUT, 256),
+  SFARRAY16(MatrixSrc4, 16),
+  SFARRAY16(MatrixDst4, 16),
+  SFVAR(ObjectMatrixValid),
+  SFARRAY16(CommandTextureMem, 0x10000),
+  SFARRAY16(&FrameBuffer[0][0], 2 * FB_W * FB_H),
+  SFARRAY(&FrameValid[0][0], 2 * FB_W * FB_H),
+  SFARRAY32(ZBuffer, FB_W * FB_H),
+  SFARRAY16(&Texture[0][0], TEX_BANKS * TEX_W * TEX_H),
+  SFARRAY(&TextureValid[0][0], TEX_BANKS * TEX_W * TEX_H),
+  SFVAR(FrontBuffer),
+  SFVAR(DrawBuffer),
+  SFVAR(PendingFIFOCount),
+  SFARRAY16(PendingFIFOData, 0x200),
+  SFEND
+ };
+
+ int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "HUC3", true);
+ if(load)
+ {
+  if(FrontBuffer < 0 || FrontBuffer > 1) FrontBuffer = 0;
+  if(DrawBuffer < 0 || DrawBuffer > 1) DrawBuffer = FrontBuffer ^ 1;
+  PendingFIFO.clear();
+  if(PendingFIFOCount > 0x200) PendingFIFOCount = 0x200;
+  for(uint32 i = 0; i < PendingFIFOCount; i++)
+   PendingFIFO.push_back(PendingFIFOData[i]);
+ }
+ return ret;
+}
+
 bool HuC6273_Init(void)
 {
  HuC6273_Reset();
  return TRUE;
+}
+
+bool HuC6273_LineHasPixels(int y)
+{
+ if(y < 0 || y >= FB_H)
+  return false;
+ const uint8* valid = FrameValid[FrontBuffer] + y * FB_W;
+ for(int x = 0; x < FB_W; x++)
+  if(valid[x])
+   return true;
+ return false;
 }
 
 void HuC6273_RenderLine(uint16* target, int y, int width)

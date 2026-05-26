@@ -214,18 +214,19 @@ static void append_chunk(std::vector<uint8_t>& png, const char type[4], const st
     put_be32(png, (uint32_t)crc);
 }
 
-static bool write_png_rgb565(const std::string& path, const uint16_t* pix, int w, int h, int pitch)
+static bool write_png_rgb565_region(const std::string& path, const uint16_t* pix, int src_x, int src_y, int w, int h, int pitch)
 {
-    if(!pix || w <= 0 || h <= 0) return false;
+    if(!pix || src_x < 0 || src_y < 0 || w <= 0 || h <= 0 || pitch <= 0) return false;
     std::vector<uint8_t> raw;
     raw.resize((size_t)h * (1 + (size_t)w * 3));
     for(int y = 0; y < h; y++)
     {
         size_t row = (size_t)y * (1 + (size_t)w * 3);
         raw[row] = 0; // no filter
+        const uint16_t* src = pix + (src_y + y) * pitch + src_x;
         for(int x = 0; x < w; x++)
         {
-            uint16_t p = pix[y * pitch + x];
+            uint16_t p = src[x];
             raw[row + 1 + x * 3 + 0] = rgb565_r(p);
             raw[row + 1 + x * 3 + 1] = rgb565_g(p);
             raw[row + 1 + x * 3 + 2] = rgb565_b(p);
@@ -257,6 +258,11 @@ static bool write_png_rgb565(const std::string& path, const uint16_t* pix, int w
     bool ok = fwrite(png.data(), 1, png.size(), fp) == png.size();
     fclose(fp);
     return ok;
+}
+
+static bool write_png_rgb565(const std::string& path, const uint16_t* pix, int w, int h, int pitch)
+{
+    return write_png_rgb565_region(path, pix, 0, 0, w, h, pitch);
 }
 
 static uint32_t read_be32(const uint8_t* p)
@@ -385,6 +391,10 @@ struct App
     uint64_t start_ticks = 0;
     double next_frame_ms = 0.0;
     Preview previews[10];
+    int display_x = 32;
+    int display_y = 0;
+    int display_w = 256;
+    int display_h = EMU_H;
 };
 
 static App* g_app = NULL;
@@ -412,6 +422,47 @@ static MenuLayout compute_menu_layout(int ww, int wh)
     ml.cw = ml.x + ml.w - ml.cx - 28;
     ml.row_h = 46;
     return ml;
+}
+
+static void get_render_size(App& a, int* ww, int* wh)
+{
+    int w = 0, h = 0;
+    if(a.renderer)
+        SDL_GetCurrentRenderOutputSize(a.renderer, &w, &h);
+    if((w <= 0 || h <= 0) && a.window)
+        SDL_GetWindowSizeInPixels(a.window, &w, &h);
+    if(w <= 0 || h <= 0) { w = 960; h = 720; }
+    if(ww) *ww = w;
+    if(wh) *wh = h;
+}
+
+static void update_display_rect(App& a)
+{
+    int x = 32, y = 0, w = 256, h = EMU_H;
+    pcfx_headless_get_display_rect(a.emu, &x, &y, &w, &h);
+    if(x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > EMU_W || y + h > EMU_H)
+    {
+        x = 0; y = 0; w = EMU_W; h = EMU_H;
+    }
+    a.display_x = x;
+    a.display_y = y;
+    a.display_w = w;
+    a.display_h = h;
+}
+
+static void mouse_to_render_coords(App& a, float wx, float wy, float* rx, float* ry)
+{
+    int win_w = 0, win_h = 0;
+    int out_w = 0, out_h = 0;
+    if(a.window) SDL_GetWindowSize(a.window, &win_w, &win_h);
+    get_render_size(a, &out_w, &out_h);
+    if(win_w > 0 && win_h > 0)
+    {
+        wx *= (float)out_w / (float)win_w;
+        wy *= (float)out_h / (float)win_h;
+    }
+    if(rx) *rx = wx;
+    if(ry) *ry = wy;
 }
 
 static void audio_cb(void* userdata, const int16_t* samples, uint32_t frames)
@@ -570,7 +621,8 @@ static void save_state_slot(App& a, int slot)
     }
     int w = 0, h = 0, pitch = 0;
     const uint16_t* pix = pcfx_headless_get_rgb565(a.emu, &w, &h, &pitch);
-    if(!write_png_rgb565(png, pix, w, h, pitch))
+    update_display_rect(a);
+    if(!write_png_rgb565_region(png, pix, a.display_x, a.display_y, a.display_w, a.display_h, pitch))
         set_message("State saved, PNG preview failed");
     else
         set_message("Saved state slot %d", slot);
@@ -600,7 +652,8 @@ static void save_screenshot(App& a)
     std::string p = path_join(a.save_dir, name);
     int w = 0, h = 0, pitch = 0;
     const uint16_t* pix = pcfx_headless_get_rgb565(a.emu, &w, &h, &pitch);
-    if(write_png_rgb565(p, pix, w, h, pitch)) set_message("Screenshot saved: %s", name);
+    update_display_rect(a);
+    if(write_png_rgb565_region(p, pix, a.display_x, a.display_y, a.display_w, a.display_h, pitch)) set_message("Screenshot saved: %s", name);
     else set_message("Screenshot failed");
 }
 
@@ -768,17 +821,25 @@ static bool in_rect(float px, float py, float x, float y, float w, float h)
     return px >= x && py >= y && px < x + w && py < y + h;
 }
 
-static void handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
+static SDL_FRect compute_game_rect(App& a, int ww, int wh);
+
+static bool handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
 {
-    if(!a.menu || b.button != SDL_BUTTON_LEFT)
-        return;
+    if(!a.menu)
+        return false;
+    if(b.button == SDL_BUTTON_RIGHT)
+    {
+        toggle_menu(a);
+        return true;
+    }
+    if(b.button != SDL_BUTTON_LEFT)
+        return false;
 
     int ww = 0, wh = 0;
-    SDL_GetWindowSizeInPixels(a.window, &ww, &wh);
-    if(ww <= 0 || wh <= 0) { ww = 960; wh = 720; }
+    get_render_size(a, &ww, &wh);
     MenuLayout ml = compute_menu_layout(ww, wh);
-    const float mx = b.x;
-    const float my = b.y;
+    float mx = 0.0f, my = 0.0f;
+    mouse_to_render_coords(a, b.x, b.y, &mx, &my);
 
     for(int i = 0; i < 6; i++)
     {
@@ -787,7 +848,7 @@ static void handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
         {
             a.tab = i;
             a.row = 0;
-            return;
+            return true;
         }
     }
 
@@ -801,7 +862,7 @@ static void handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
             {
                 a.row = 3 + i;
                 a.state_slot = i;
-                return;
+                return true;
             }
         }
     }
@@ -814,9 +875,14 @@ static void handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
         {
             a.row = i;
             activate_menu(a);
-            return;
+            return true;
         }
     }
+
+    if(in_rect(mx, my, ml.x, ml.y, ml.w, ml.h))
+        return true;
+
+    return false;
 }
 
 static void handle_menu_motion(App& a, const SDL_MouseMotionEvent& m)
@@ -825,11 +891,10 @@ static void handle_menu_motion(App& a, const SDL_MouseMotionEvent& m)
         return;
 
     int ww = 0, wh = 0;
-    SDL_GetWindowSizeInPixels(a.window, &ww, &wh);
-    if(ww <= 0 || wh <= 0) { ww = 960; wh = 720; }
+    get_render_size(a, &ww, &wh);
     MenuLayout ml = compute_menu_layout(ww, wh);
-    const float mx = m.x;
-    const float my = m.y;
+    float mx = 0.0f, my = 0.0f;
+    mouse_to_render_coords(a, m.x, m.y, &mx, &my);
 
     for(int i = 0; i < 6; i++)
     {
@@ -862,6 +927,49 @@ static void handle_menu_motion(App& a, const SDL_MouseMotionEvent& m)
             return;
         }
     }
+}
+
+static void handle_game_mouse(App& a, const SDL_MouseButtonEvent& b)
+{
+    float mx = 0.0f, my = 0.0f;
+    mouse_to_render_coords(a, b.x, b.y, &mx, &my);
+
+    int ww = 0, wh = 0;
+    get_render_size(a, &ww, &wh);
+    SDL_FRect dst = compute_game_rect(a, ww, wh);
+
+    if(!a.menu)
+    {
+        if(b.button == SDL_BUTTON_LEFT && in_rect(mx, my, dst.x, dst.y, dst.w, dst.h))
+        {
+            toggle_menu(a);
+            return;
+        }
+        if(b.button == SDL_BUTTON_RIGHT && in_rect(mx, my, dst.x, dst.y, dst.w, dst.h))
+        {
+            a.video.fullscreen = !a.video.fullscreen;
+            apply_video_options(a);
+            set_message(a.video.fullscreen ? "Fullscreen" : "Windowed");
+            return;
+        }
+    }
+    else if(b.button == SDL_BUTTON_LEFT && in_rect(mx, my, dst.x, dst.y, dst.w, dst.h))
+    {
+        toggle_menu(a);
+        return;
+    }
+}
+
+static void handle_menu_wheel(App& a, const SDL_MouseWheelEvent& w)
+{
+    if(!a.menu)
+        return;
+
+    if(w.x > 0.0f) next_tab(a, 1);
+    else if(w.x < 0.0f) next_tab(a, -1);
+
+    if(w.y > 0.0f) a.row = (a.row + rows_for_tab(a) - 1) % rows_for_tab(a);
+    else if(w.y < 0.0f) a.row = (a.row + 1) % rows_for_tab(a);
 }
 
 static void handle_event(App& a, const SDL_Event& e)
@@ -884,15 +992,22 @@ static void handle_event(App& a, const SDL_Event& e)
         else handle_hotkey(a, s);
     }
     else if(e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
-        handle_menu_mouse(a, e.button);
+    {
+        if(!handle_menu_mouse(a, e.button))
+            handle_game_mouse(a, e.button);
+    }
     else if(e.type == SDL_EVENT_MOUSE_MOTION)
         handle_menu_motion(a, e.motion);
+    else if(e.type == SDL_EVENT_MOUSE_WHEEL)
+        handle_menu_wheel(a, e.wheel);
 }
 
 static SDL_FRect compute_game_rect(App& a, int ww, int wh)
 {
+    const int src_w = std::max(1, a.display_w);
+    const int src_h = std::max(1, a.display_h);
     float target_aspect = 4.0f / 3.0f;
-    if(a.video.aspect == 1) target_aspect = (float)EMU_W / (float)EMU_H;
+    if(a.video.aspect == 1) target_aspect = (float)src_w / (float)src_h;
     if(a.video.aspect == 2) return SDL_FRect{0, 0, (float)ww, (float)wh};
 
     float dw = (float)ww;
@@ -900,11 +1015,11 @@ static SDL_FRect compute_game_rect(App& a, int ww, int wh)
     if(dh > wh) { dh = (float)wh; dw = dh * target_aspect; }
     if(a.video.integer_scale)
     {
-        int sx = std::max(1, (int)(dw / EMU_W));
-        int sy = std::max(1, (int)(dh / EMU_H));
+        int sx = std::max(1, (int)(dw / src_w));
+        int sy = std::max(1, (int)(dh / src_h));
         int s = std::min(sx, sy);
-        dw = (float)(EMU_W * s);
-        dh = (float)(EMU_H * s);
+        dw = (float)(src_w * s);
+        dh = (float)(src_h * s);
     }
     return SDL_FRect{ ((float)ww - dw) * 0.5f, ((float)wh - dh) * 0.5f, dw, dh };
 }
@@ -1045,7 +1160,7 @@ static void render_prompt(App& a, int ww)
         if(t >= 2300) return;
         alpha = 1.0f - (float)(t - 1500) / 800.0f;
     }
-    const std::string s = "Press F1 / ESC for menu";
+    const std::string s = "F1 / ESC or click video for menu";
     float bw = (float)text_width(s, 2) + 44;
     float x = (ww - bw) * 0.5f;
     float y = 28;
@@ -1067,17 +1182,18 @@ static void render_transient_message(App& a, int ww, int wh)
 static void render_game(App& a)
 {
     int ww = 0, wh = 0;
-    SDL_GetWindowSizeInPixels(a.window, &ww, &wh);
-    if(ww <= 0 || wh <= 0) { ww = 960; wh = 720; }
+    get_render_size(a, &ww, &wh);
 
     int w = 0, h = 0, pitch = 0;
     const uint16_t* pix = pcfx_headless_get_rgb565(a.emu, &w, &h, &pitch);
+    update_display_rect(a);
     if(pix)
         SDL_UpdateTexture(a.game_tex, NULL, pix, pitch * (int)sizeof(uint16_t));
 
     draw_gradient_bg(a.renderer, ww, wh);
+    SDL_FRect src{ (float)a.display_x, (float)a.display_y, (float)a.display_w, (float)a.display_h };
     SDL_FRect dst = compute_game_rect(a, ww, wh);
-    SDL_RenderTexture(a.renderer, a.game_tex, NULL, &dst);
+    SDL_RenderTexture(a.renderer, a.game_tex, &src, &dst);
     if(a.video.scanlines)
     {
         for(int y = 0; y < (int)dst.h; y += 2)

@@ -9,6 +9,8 @@ void HuC6273_Write16(uint32 A, uint16 V);
 void HuC6273_Write32(uint32 A, uint32 V);
 void HuC6273_Write8(uint32 A, uint8 V);
 void HuC6273_Reset(void);
+int HuC6273_StateAction(StateMem *sm, int load, int data_only);
+bool HuC6273_LineHasPixels(int y);
 void HuC6273_RenderLine(uint16 *target, int y, int width);
 
 

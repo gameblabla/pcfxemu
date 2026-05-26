@@ -2518,6 +2518,10 @@ static void MixVDC(void)
 }
 
 
+#if defined(PCFX_HEADLESS) && defined(HAVE_HUC6273)
+extern "C" void pcfx_headless_video_note_full_width_line(void);
+#endif
+
 static void MixLayers(void)
 {
 	//uint32 *pXBuf = surface->pixels;
@@ -2748,7 +2752,22 @@ static void MixLayers(void)
     DisplayRect->x = 0;
 
 #ifdef HAVE_HUC6273
-    HuC6273_RenderLine(target, fx_vce.raster_counter - 22, DisplayRect->w);
+    const int aurora_y = fx_vce.raster_counter - 22;
+#ifdef PCFX_HEADLESS
+    if(HuC6273_LineHasPixels(aurora_y))
+    {
+     // PC-FXGA S-Video captures show Aurora's 256-pixel internal frame scaled
+     // over the full 320-pixel active line, not centered with side gutters.
+     DisplayRect->w = 320;
+     DisplayRect->x = 0;
+     pcfx_headless_video_note_full_width_line();
+     HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
+    }
+    else
+     HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
+#else
+    HuC6273_RenderLine(target, aurora_y, DisplayRect->w);
+#endif
 #endif
 
 	// FIXME
