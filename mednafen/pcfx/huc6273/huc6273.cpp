@@ -217,9 +217,24 @@ static void ProjectVertex(Vtx& out, uint16 xw, uint16 yw, uint16 zw, uint16 colo
  const float m10 = Matrix187(16, 0.0f), m11 = Matrix187(20, 1.0f), m12 = Matrix187(22, 0.0f), m13 = Matrix187(30, 0.0f);
  const float m20 = Matrix187(32, 0.0f), m21 = Matrix187(34, 0.0f), m22 = Matrix187(38, 1.0f), m23 = Matrix187(40, 0.0f);
 
+ const float m30 = Matrix187(48, 0.0f), m31 = Matrix187(50, 0.0f), m32 = Matrix187(52, 0.0f), m33 = Matrix187(54, 1.0f);
+
  float ox = m00 * vx + m01 * vy + m02 * vz + m03;
  float oy = m10 * vx + m11 * vy + m12 * vz + m13;
  float oz = m20 * vx + m21 * vy + m22 * vz + m23;
+ float ow = m30 * vx + m31 * vy + m32 * vz + m33;
+
+ // The Aurora object matrix is a full 4x4 1.8.7 matrix.  FARL's
+ // FarlPerseZ4x4M187() writes the bottom row and expects the TE to divide
+ // post-transform X/Y/Z by W before window scaling.  Without this divide,
+ // Same Game FX's modeled title text is projected off the top edge and the
+ // background perspective is much too shallow.
+ if(fabsf(ow) > 1.0e-5f)
+ {
+  ox /= ow;
+  oy /= ow;
+  oz /= ow;
+ }
 
  // Window scaling registers are used by FARL's setup.  Identity defaults match
  // the documented examples: scale X by +128, scale Y by -128, translate to 128.
@@ -285,6 +300,23 @@ static uint16 CompressIC(uint16 v, uint16 mask)
  return out & 0x1FF;
 }
 
+
+static uint16 ColorWordToNative(uint16 pix)
+{
+ // Aurora primitive colours and texture pixels are normally FARL I/C words
+ // when TE I-C mode is enabled.  The 12 source bits are compressed through
+ // PE's I/C mask to a 9-bit VCE palette index.  Treating these words as
+ // RGB444 was the largest remaining colour error versus the S-Video capture:
+ // title-letter reds/yellows and the blue tunnel are palette entries, not
+ // direct RGB nibbles.
+ if((TE[255] & 0x0001) && !(PE[3] & (1 << 10)))
+ {
+  const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
+  return FXVCE_GetPaletteRGB565(CompressIC(pix, mask));
+ }
+ return RGB444ToNative(pix);
+}
+
 static uint16 TextureWordToNative(uint16 pix, uint16 fallback)
 {
  // In normal FARL use, texture pixels are 9-bit I/C values embedded in a
@@ -332,7 +364,7 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
  if(minx > maxx || miny > maxy)
   return;
 
- uint16 native_color = RGB444ToNative(a.color ? a.color : (TE[90] ? TE[90] : 0x0FFF));
+ uint16 native_color = ColorWordToNative(a.color ? a.color : (TE[90] ? TE[90] : 0x0FFF));
  for(int y = miny; y <= maxy; y++)
   for(int x = minx; x <= maxx; x++)
   {
@@ -365,7 +397,7 @@ static void DrawTriangle(const Vtx& a, const Vtx& b, const Vtx& c, bool textured
 
 static void DrawLine(int x0, int y0, int x1, int y1, uint16 color)
 {
- uint16 native = RGB444ToNative(color ? color : (TE[90] ? TE[90] : 0x0FFF));
+ uint16 native = ColorWordToNative(color ? color : (TE[90] ? TE[90] : 0x0FFF));
  int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
  int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
  int err = dx + dy;
@@ -489,7 +521,7 @@ static void DoPutImage(uint8 option, const uint16* body, size_t n)
     if(x >= 0 && x < FB_W && y >= 0 && y < FB_H)
     {
      int o = y * FB_W + x;
-     FrameBuffer[DrawBuffer][o] = RGB444ToNative(body[p]);
+     FrameBuffer[DrawBuffer][o] = ColorWordToNative(body[p]);
      FrameValid[DrawBuffer][o] = 1;
     }
  }
@@ -504,7 +536,7 @@ static void DoPutImage(uint8 option, const uint16* body, size_t n)
     if(x >= 0 && x < FB_W && y >= 0 && y < FB_H)
     {
      int o = y * FB_W + x;
-     FrameBuffer[DrawBuffer][o] = RGB444ToNative(body[p]);
+     FrameBuffer[DrawBuffer][o] = ColorWordToNative(body[p]);
      FrameValid[DrawBuffer][o] = 1;
     }
  }
@@ -684,7 +716,7 @@ static void DoMisc(uint8 option, const uint16* body, size_t n)
  if(option == 0 && n >= 6)
  {
   // Fill D/Z buffer: xleft, ytop, xright, ybottom, d, z.
-  FillRect(S16(body[0]), S16(body[1]), S16(body[2]), S16(body[3]), RGB444ToNative(body[4]));
+  FillRect(S16(body[0]), S16(body[1]), S16(body[2]), S16(body[3]), ColorWordToNative(body[4]));
   Complete(INT_PESYNC);
   return;
  }
@@ -1098,12 +1130,32 @@ bool HuC6273_Init(void)
 
 void HuC6273_RenderLine(uint16* target, int y, int width)
 {
- if(y < 0 || y >= FB_H || !target)
+ if(y < 0 || y >= FB_H || !target || width <= 0)
   return;
- int w = std::min(width, FB_W);
+
  const uint16* src = FrameBuffer[FrontBuffer] + y * FB_W;
  const uint8* valid = FrameValid[FrontBuffer] + y * FB_W;
- for(int x = 0; x < w; x++)
-  if(valid[x])
-   target[x] = src[x];
+
+ // The PC-FXGA Aurora frame is 256 pixels wide, but the host PC-FX video
+ // compositor/frontends often expose a 320-pixel line.  Earlier revisions
+ // wrote the 256-pixel image at x=0 and left a black gutter on the right.
+ // Real S-Video captures show the FXGA image occupying the whole active line,
+ // so scale the Aurora overlay across the current target width.
+ if(width == FB_W)
+ {
+  for(int x = 0; x < FB_W; x++)
+   if(valid[x])
+    target[x] = src[x];
+ }
+ else
+ {
+  for(int x = 0; x < width; x++)
+  {
+   int sx = (x * FB_W + width / 2) / width;
+   if(sx < 0) sx = 0;
+   if(sx >= FB_W) sx = FB_W - 1;
+   if(valid[sx])
+    target[x] = src[sx];
+  }
+ }
 }
