@@ -340,6 +340,48 @@ static uint16 ApplyICShade(uint16 pix, float shade)
  return (uint16)((pix & ~(((uint16)imax) << ishift)) | (intensity << ishift));
 }
 
+static uint16 ShadeRGB565(uint16 c, float shade)
+{
+ if(shade < 0.0f) shade = 0.0f;
+ if(shade > 1.5f) shade = 1.5f;
+ int r = (c >> 11) & 0x1F;
+ int g = (c >> 5) & 0x3F;
+ int b = c & 0x1F;
+ r = (int)lrintf((float)r * shade);
+ g = (int)lrintf((float)g * shade);
+ b = (int)lrintf((float)b * shade);
+ if(r > 31) r = 31;
+ if(g > 63) g = 63;
+ if(b > 31) b = 31;
+ return (uint16)((r << 11) | (g << 5) | b);
+}
+
+static uint16 ApplyNeutralPostPaletteShade(uint16 native, float shade)
+{
+ // Same Game's cursor/hand model uses a very light neutral material.  Applying
+ // light only before palette compression leaves those pixels clustered at white
+ // on the current approximation, losing the grey Gouraud/facet falloff visible
+ // in the S-Video hardware capture.  Keep saturated cube colors on the normal
+ // I/C path, but compress light neutral material after palette lookup too.
+ int r8 = (((native >> 11) & 0x1F) * 255 + 15) / 31;
+ int g8 = (((native >> 5) & 0x3F) * 255 + 31) / 63;
+ int b8 = ((native & 0x1F) * 255 + 15) / 31;
+ int mx = std::max(r8, std::max(g8, b8));
+ int mn = std::min(r8, std::min(g8, b8));
+ int luma = (77 * r8 + 150 * g8 + 29 * b8) >> 8;
+ int sat = mx - mn;
+ if(luma < 150 || sat > 58)
+  return native;
+ float s = shade;
+ if(s > 1.12f) s = 1.12f;
+ if(s < 0.25f) s = 0.25f;
+ // Slightly darker than a straight multiply at the high end so white hand
+ // facets do not collapse to a flat paper-white mass.
+ s = 0.10f + 0.80f * s;
+ if(s > 1.0f) s = 1.0f;
+ return ShadeRGB565(native, s);
+}
+
 static uint16 RGB444ToNativeShaded(uint16 c, float shade)
 {
  if(shade < 0.0f) shade = 0.0f;
@@ -358,9 +400,9 @@ static uint16 ColorWordToNativeShaded(uint16 pix, float shade)
  if((TE[255] & TE_CTRL_ICM) && !(PE[3] & PE_CTRL_C12M))
  {
   const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
-  return FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask));
+  return ApplyNeutralPostPaletteShade(FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask)), shade);
  }
- return RGB444ToNativeShaded(pix, shade);
+ return ApplyNeutralPostPaletteShade(RGB444ToNativeShaded(pix, shade), shade);
 }
 
 static float Fix115ToFloat(uint16 v)
@@ -466,9 +508,9 @@ static uint16 TextureWordToNative(uint16 pix, float shade)
  if(!(PE[3] & PE_CTRL_C12M))
  {
   const uint16 mask = PE[7] ? (PE[7] & 0x0FFF) : 0x0FC7;
-  return FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask));
+  return ApplyNeutralPostPaletteShade(FXVCE_GetPaletteRGB565(CompressIC(ApplyICShade(pix, shade), mask)), shade);
  }
- return RGB444ToNativeShaded(pix, shade);
+ return ApplyNeutralPostPaletteShade(RGB444ToNativeShaded(pix, shade), shade);
 }
 
 static uint16 SampleTexture(uint16 u, uint16 v, uint16 fallback_word, float shade)

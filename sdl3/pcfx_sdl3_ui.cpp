@@ -71,6 +71,21 @@ static std::string path_join(const std::string& a, const std::string& b)
     return a + "/" + b;
 }
 
+static std::string home_pcfxemu_dir()
+{
+    const char* home = getenv("HOME");
+    if(!home || !*home) return ".pcfxemu";
+    return path_join(home, ".pcfxemu");
+}
+
+static std::string parent_dir_of(const std::string& p)
+{
+    size_t s = p.find_last_of("/\\");
+    if(s == std::string::npos) return ".";
+    if(s == 0) return "/";
+    return p.substr(0, s);
+}
+
 static std::string basename_noext(const std::string& p)
 {
     size_t s = p.find_last_of("/\\");
@@ -352,9 +367,11 @@ struct App
     std::string game_path;
     std::string game_id;
     std::string bios_dir = ".";
-    std::string save_dir = "saves";
+    std::string save_dir;
     std::string state_dir;
     std::string cfg_path;
+    bool bios_dir_explicit = false;
+    bool save_dir_explicit = false;
     VideoOptions video;
     std::vector<Binding> pad;
     HotkeyBinding hotkeys[HK_COUNT];
@@ -371,6 +388,31 @@ struct App
 };
 
 static App* g_app = NULL;
+
+struct MenuLayout
+{
+    float x, y, w, h;
+    float side_x, side_y, side_w;
+    float cx, cy, cw;
+    float row_h;
+};
+
+static MenuLayout compute_menu_layout(int ww, int wh)
+{
+    MenuLayout ml;
+    ml.x = std::max(24.0f, ww * 0.055f);
+    ml.y = std::max(22.0f, wh * 0.055f);
+    ml.w = ww - 2 * ml.x;
+    ml.h = wh - 2 * ml.y;
+    ml.side_x = ml.x + 22;
+    ml.side_y = ml.y + 86;
+    ml.side_w = 200;
+    ml.cx = ml.side_x + ml.side_w + 34;
+    ml.cy = ml.side_y;
+    ml.cw = ml.x + ml.w - ml.cx - 28;
+    ml.row_h = 46;
+    return ml;
+}
 
 static void audio_cb(void* userdata, const int16_t* samples, uint32_t frames)
 {
@@ -667,6 +709,12 @@ static void activate_menu(App& a)
     }
 }
 
+static void next_tab(App& a, int dir)
+{
+    a.tab = (a.tab + dir + 6) % 6;
+    a.row = 0;
+}
+
 static void handle_menu_key(App& a, SDL_Scancode s)
 {
     if(a.remap_pad >= 0)
@@ -693,20 +741,127 @@ static void handle_menu_key(App& a, SDL_Scancode s)
     }
 
     if(is_hotkey(a, s, HK_MENU)) { toggle_menu(a); return; }
+
+    if(s == SDL_SCANCODE_TAB || s == SDL_SCANCODE_PAGEDOWN) { next_tab(a, 1); return; }
+    if(s == SDL_SCANCODE_PAGEUP) { next_tab(a, -1); return; }
+    if(s == SDL_SCANCODE_HOME) { a.row = 0; return; }
+    if(s == SDL_SCANCODE_END) { a.row = rows_for_tab(a) - 1; return; }
+
     if(s == SDL_SCANCODE_LEFT)
     {
-        if(a.row == 0 && a.tab != 0) { a.tab--; a.row = 0; }
-        else adjust_menu(a, -1);
+        if(a.tab == 1 || (a.tab == 3 && a.row == 0)) adjust_menu(a, -1);
+        else next_tab(a, -1);
     }
     else if(s == SDL_SCANCODE_RIGHT)
     {
-        if(a.row == 0 && a.tab < 5) { a.tab++; a.row = 0; }
-        else adjust_menu(a, 1);
+        if(a.tab == 1 || (a.tab == 3 && a.row == 0)) adjust_menu(a, 1);
+        else next_tab(a, 1);
     }
     else if(s == SDL_SCANCODE_UP) a.row = (a.row + rows_for_tab(a) - 1) % rows_for_tab(a);
     else if(s == SDL_SCANCODE_DOWN) a.row = (a.row + 1) % rows_for_tab(a);
     else if(s == SDL_SCANCODE_RETURN || s == SDL_SCANCODE_SPACE) activate_menu(a);
     else if(s == SDL_SCANCODE_F11) { a.video.fullscreen = !a.video.fullscreen; apply_video_options(a); }
+}
+
+static bool in_rect(float px, float py, float x, float y, float w, float h)
+{
+    return px >= x && py >= y && px < x + w && py < y + h;
+}
+
+static void handle_menu_mouse(App& a, const SDL_MouseButtonEvent& b)
+{
+    if(!a.menu || b.button != SDL_BUTTON_LEFT)
+        return;
+
+    int ww = 0, wh = 0;
+    SDL_GetWindowSizeInPixels(a.window, &ww, &wh);
+    if(ww <= 0 || wh <= 0) { ww = 960; wh = 720; }
+    MenuLayout ml = compute_menu_layout(ww, wh);
+    const float mx = b.x;
+    const float my = b.y;
+
+    for(int i = 0; i < 6; i++)
+    {
+        const float ty = ml.side_y + i * 52;
+        if(in_rect(mx, my, ml.side_x, ty, ml.side_w, 42))
+        {
+            a.tab = i;
+            a.row = 0;
+            return;
+        }
+    }
+
+    if(a.tab == 3)
+    {
+        for(int i = 0; i < 9; i++)
+        {
+            const float sx = ml.cx + (i % 3) * 172;
+            const float sy = ml.cy + 150 + (i / 3) * 118;
+            if(in_rect(mx, my, sx - 6, sy - 6, 154, 110))
+            {
+                a.row = 3 + i;
+                a.state_slot = i;
+                return;
+            }
+        }
+    }
+
+    int max_rows = rows_for_tab(a);
+    for(int i = 0; i < max_rows; i++)
+    {
+        const float ry = ml.cy + i * ml.row_h;
+        if(in_rect(mx, my, ml.cx - 10, ry - 7, ml.cw + 20, ml.row_h - 6))
+        {
+            a.row = i;
+            activate_menu(a);
+            return;
+        }
+    }
+}
+
+static void handle_menu_motion(App& a, const SDL_MouseMotionEvent& m)
+{
+    if(!a.menu)
+        return;
+
+    int ww = 0, wh = 0;
+    SDL_GetWindowSizeInPixels(a.window, &ww, &wh);
+    if(ww <= 0 || wh <= 0) { ww = 960; wh = 720; }
+    MenuLayout ml = compute_menu_layout(ww, wh);
+    const float mx = m.x;
+    const float my = m.y;
+
+    for(int i = 0; i < 6; i++)
+    {
+        const float ty = ml.side_y + i * 52;
+        if(in_rect(mx, my, ml.side_x, ty, ml.side_w, 42))
+            return;
+    }
+
+    if(a.tab == 3)
+    {
+        for(int i = 0; i < 9; i++)
+        {
+            const float sx = ml.cx + (i % 3) * 172;
+            const float sy = ml.cy + 150 + (i / 3) * 118;
+            if(in_rect(mx, my, sx - 6, sy - 6, 154, 110))
+            {
+                a.row = 3 + i;
+                return;
+            }
+        }
+    }
+
+    int max_rows = rows_for_tab(a);
+    for(int i = 0; i < max_rows; i++)
+    {
+        const float ry = ml.cy + i * ml.row_h;
+        if(in_rect(mx, my, ml.cx - 10, ry - 7, ml.cw + 20, ml.row_h - 6))
+        {
+            a.row = i;
+            return;
+        }
+    }
 }
 
 static void handle_event(App& a, const SDL_Event& e)
@@ -728,6 +883,10 @@ static void handle_event(App& a, const SDL_Event& e)
         if(a.menu || a.remap_pad >= 0 || a.remap_hotkey >= 0) handle_menu_key(a, s);
         else handle_hotkey(a, s);
     }
+    else if(e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        handle_menu_mouse(a, e.button);
+    else if(e.type == SDL_EVENT_MOUSE_MOTION)
+        handle_menu_motion(a, e.motion);
 }
 
 static SDL_FRect compute_game_rect(App& a, int ww, int wh)
@@ -762,14 +921,15 @@ static void menu_row(SDL_Renderer* r, App& a, int idx, float x, float y, float w
     const bool sel = a.row == idx;
     if(sel)
     {
-        draw_roundish_rect(r, x - 8, y - 5, w + 16, 32, rgba(32, 112, 190, 210));
-        stroke_rect(r, x - 8, y - 5, w + 16, 32, rgba(105, 210, 255, 230));
+        draw_roundish_rect(r, x - 10, y - 7, w + 20, 40, rgba(32, 112, 190, 218));
+        stroke_rect(r, x - 10, y - 7, w + 20, 40, rgba(105, 210, 255, 235));
     }
-    draw_text_shadow(r, left, x, y, sel ? rgba(255,255,255,255) : rgba(205,222,238,255), 2);
+    draw_text_shadow(r, left, x, y, sel ? rgba(255,255,255,255) : rgba(215,230,245,255), 3);
     if(!right.empty())
     {
-        int tw = text_width(right, 2);
-        draw_text_shadow(r, right, x + w - tw, y, rgba(123, 223, 255,255), 2);
+        int scale = right.size() > 16 ? 2 : 3;
+        int tw = text_width(right, scale);
+        draw_text_shadow(r, right, x + w - tw, y + (scale == 2 ? 4 : 0), rgba(123, 223, 255,255), scale);
     }
 }
 
@@ -789,81 +949,80 @@ static void render_menu(App& a, int ww, int wh)
 {
     SDL_Renderer* r = a.renderer;
     fill_rect(r, 0, 0, (float)ww, (float)wh, rgba(0,0,0,115));
-    float x = std::max(30.0f, ww * 0.08f);
-    float y = std::max(30.0f, wh * 0.08f);
-    float w = ww - 2*x;
-    float h = wh - 2*y;
-    draw_roundish_rect(r, x, y, w, h, rgba(13, 22, 37, 230));
-    stroke_rect(r, x, y, w, h, rgba(88, 205, 255, 180));
-    fill_rect(r, x, y, w, 56, rgba(22, 70, 122, 220));
-    draw_text_shadow(r, "PC-FX / PC-FXGA", x + 24, y + 16, rgba(255,255,255,255), 3);
-    draw_text_shadow(r, "F1 / ESC closes menu", x + w - 290, y + 22, rgba(170,220,255,255), 2);
+    MenuLayout ml = compute_menu_layout(ww, wh);
+    float x = ml.x, y = ml.y, w = ml.w, h = ml.h;
+    float side_x = ml.side_x, side_y = ml.side_y, side_w = ml.side_w;
+    float cx = ml.cx, cy = ml.cy, cw = ml.cw;
+    draw_roundish_rect(r, x, y, w, h, rgba(13, 22, 37, 232));
+    stroke_rect(r, x, y, w, h, rgba(88, 205, 255, 185));
+    fill_rect(r, x, y, w, 64, rgba(22, 70, 122, 225));
+    draw_text_shadow(r, "PC-FX / PC-FXGA", x + 26, y + 18, rgba(255,255,255,255), 3);
+    draw_text_shadow(r, "F1 / ESC closes menu", x + w - 360, y + 24, rgba(170,220,255,255), 3);
 
     const char* tabs[] = { "Game", "Video", "Input", "States", "Hotkeys", "About" };
-    float side_x = x + 18;
-    float side_y = y + 78;
-    float side_w = 160;
     for(int i = 0; i < 6; i++)
     {
-        if(i == a.tab) draw_roundish_rect(r, side_x, side_y + i * 42, side_w, 32, rgba(28, 120, 198, 230));
-        draw_text_shadow(r, tabs[i], side_x + 14, side_y + i * 42 + 8, i == a.tab ? rgba(255,255,255,255) : rgba(168,190,210,255), 2);
+        float ty = side_y + i * 52;
+        if(i == a.tab)
+        {
+            draw_roundish_rect(r, side_x, ty, side_w, 42, rgba(28, 120, 198, 235));
+            stroke_rect(r, side_x, ty, side_w, 42, rgba(105, 210, 255, 205));
+        }
+        draw_text_shadow(r, tabs[i], side_x + 18, ty + 9, i == a.tab ? rgba(255,255,255,255) : rgba(178,200,220,255), 3);
     }
 
-    float cx = side_x + side_w + 32;
-    float cy = side_y;
-    float cw = x + w - cx - 24;
-    draw_roundish_rect(r, cx - 12, cy - 12, cw + 24, h - 96, rgba(6, 10, 18, 160));
+    draw_roundish_rect(r, cx - 14, cy - 14, cw + 28, h - 104, rgba(6, 10, 18, 165));
 
     if(a.tab == 0)
     {
         menu_row(r, a, 0, cx, cy, cw, "Running", a.game_id);
-        menu_row(r, a, 1, cx, cy + 38, cw, "Frame", std::to_string((unsigned long long)pcfx_headless_frame_count(a.emu)));
-        menu_row(r, a, 2, cx, cy + 76, cw, "Active state slot", std::to_string(a.state_slot));
-        menu_row(r, a, 3, cx, cy + 114, cw, "Save state now", "Enter");
-        menu_row(r, a, 4, cx, cy + 152, cw, "Load state now", "Enter");
-        menu_row(r, a, 5, cx, cy + 190, cw, "Screenshot", "F12");
-        menu_row(r, a, 6, cx, cy + 228, cw, "Quit", "Close window");
+        menu_row(r, a, 1, cx, cy + 46, cw, "Frame", std::to_string((unsigned long long)pcfx_headless_frame_count(a.emu)));
+        menu_row(r, a, 2, cx, cy + 92, cw, "Active state slot", std::to_string(a.state_slot));
+        menu_row(r, a, 3, cx, cy + 138, cw, "Save state now", "Enter");
+        menu_row(r, a, 4, cx, cy + 184, cw, "Load state now", "Enter");
+        menu_row(r, a, 5, cx, cy + 230, cw, "Screenshot", "F12");
+        menu_row(r, a, 6, cx, cy + 276, cw, "Quit", "Close window");
     }
     else if(a.tab == 1)
     {
         menu_row(r, a, 0, cx, cy, cw, "Fullscreen", onoff(a.video.fullscreen));
-        menu_row(r, a, 1, cx, cy + 38, cw, "Integer scaling", onoff(a.video.integer_scale));
-        menu_row(r, a, 2, cx, cy + 76, cw, "Aspect ratio", aspect_name(a.video.aspect));
-        menu_row(r, a, 3, cx, cy + 114, cw, "Bilinear filter", onoff(a.video.bilinear));
-        menu_row(r, a, 4, cx, cy + 152, cw, "Subtle scanlines", onoff(a.video.scanlines));
-        menu_row(r, a, 5, cx, cy + 190, cw, "VSync", onoff(a.video.vsync));
+        menu_row(r, a, 1, cx, cy + 46, cw, "Integer scaling", onoff(a.video.integer_scale));
+        menu_row(r, a, 2, cx, cy + 92, cw, "Aspect ratio", aspect_name(a.video.aspect));
+        menu_row(r, a, 3, cx, cy + 138, cw, "Bilinear filter", onoff(a.video.bilinear));
+        menu_row(r, a, 4, cx, cy + 184, cw, "Subtle scanlines", onoff(a.video.scanlines));
+        menu_row(r, a, 5, cx, cy + 230, cw, "VSync", onoff(a.video.vsync));
     }
     else if(a.tab == 2)
     {
         for(size_t i = 0; i < a.pad.size(); i++)
-            menu_row(r, a, (int)i, cx, cy + i * 32, cw, a.pad[i].name, scancode_name(a.pad[i].scancode));
+            menu_row(r, a, (int)i, cx, cy + i * 40, cw, a.pad[i].name, scancode_name(a.pad[i].scancode));
         if(a.remap_pad >= 0)
             draw_centered_text(r, "Press a replacement key", cx, y + h - 50, cw, rgba(255,230,120,255), 2);
     }
     else if(a.tab == 3)
     {
         menu_row(r, a, 0, cx, cy, cw, "Current slot", std::to_string(a.state_slot));
-        menu_row(r, a, 1, cx, cy + 36, cw, "Save current slot", "PNG preview");
-        menu_row(r, a, 2, cx, cy + 72, cw, "Load current slot", "Enter");
+        menu_row(r, a, 1, cx, cy + 46, cw, "Save current slot", "PNG preview");
+        menu_row(r, a, 2, cx, cy + 92, cw, "Load current slot", "Enter");
         float px = cx;
-        float py = cy + 126;
+        float py = cy + 150;
         for(int i = 0; i < 9; i++)
         {
             int slot = i;
             float sx = px + (i % 3) * 150;
-            float sy = py + (i / 3) * 104;
+            float sy = py + (i / 3) * 118;
             int oldrow = a.row;
-            if(a.row == 3 + slot) stroke_rect(r, sx - 4, sy - 4, 132, 92, rgba(255,255,140,255));
-            draw_preview(r, a, slot, sx, sy, 124, 84);
+            if(a.row == 3 + slot) stroke_rect(r, sx - 4, sy - 4, 150, 104, rgba(255,255,140,255));
+            draw_preview(r, a, slot, sx, sy, 142, 96);
             char label[32]; snprintf(label, sizeof(label), "Slot %d", slot);
-            draw_text_shadow(r, label, sx + 18, sy + 90, rgba(220,230,240,255), 1);
+            draw_text_shadow(r, label, sx + 20, sy + 100, rgba(220,230,240,255), 1);
             a.row = oldrow;
         }
     }
     else if(a.tab == 4)
     {
         for(int i = 0; i < HK_COUNT; i++)
-            menu_row(r, a, i, cx, cy + i * 36, cw, a.hotkeys[i].name, scancode_name(a.hotkeys[i].scancode));
+            menu_row(r, a, i, cx, cy + i * 46, cw, a.hotkeys[i].name, scancode_name(a.hotkeys[i].scancode));
         if(a.remap_hotkey >= 0)
             draw_centered_text(r, "Press a replacement hotkey", cx, y + h - 50, cw, rgba(255,230,120,255), 2);
     }
@@ -932,7 +1091,7 @@ static void render_game(App& a)
 
 static void print_usage(const char* argv0)
 {
-    fprintf(stderr, "Usage: %s [--bios-dir DIR] [--save-dir DIR] [--fast-video] [--fullscreen] game.cue|game.chd|homebrew_dir|program.EX\n", argv0);
+    fprintf(stderr, "Usage: %s [--bios-dir DIR] [--save-dir DIR] [--fast-video] [--fullscreen] game.cue|game.chd|homebrew_dir|program.EX\n\nDefaults: pcfx.rom is searched in ., the game folder, then $HOME/.pcfxemu; saves/config default to $HOME/.pcfxemu.\n", argv0);
 }
 
 int main(int argc, char** argv)
@@ -944,14 +1103,28 @@ int main(int argc, char** argv)
     int fast_video = 0;
     for(int i = 1; i < argc; i++)
     {
-        if(!strcmp(argv[i], "--bios-dir") && i + 1 < argc) app.bios_dir = argv[++i];
-        else if(!strcmp(argv[i], "--save-dir") && i + 1 < argc) app.save_dir = argv[++i];
+        if(!strcmp(argv[i], "--bios-dir") && i + 1 < argc) { app.bios_dir = argv[++i]; app.bios_dir_explicit = true; }
+        else if(!strcmp(argv[i], "--save-dir") && i + 1 < argc) { app.save_dir = argv[++i]; app.save_dir_explicit = true; }
         else if(!strcmp(argv[i], "--fast-video")) fast_video = 1;
         else if(!strcmp(argv[i], "--fullscreen")) app.video.fullscreen = true;
         else if(!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) { print_usage(argv[0]); return 0; }
         else app.game_path = argv[i];
     }
     if(app.game_path.empty()) { print_usage(argv[0]); return 1; }
+
+    const std::string home_dir = home_pcfxemu_dir();
+    make_dir(home_dir);
+    if(!app.save_dir_explicit)
+        app.save_dir = home_dir;
+    if(!app.bios_dir_explicit)
+    {
+        const std::string game_dir = parent_dir_of(app.game_path);
+        if(file_exists(path_join(".", "pcfx.rom"))) app.bios_dir = ".";
+        else if(file_exists(path_join(game_dir, "pcfx.rom"))) app.bios_dir = game_dir;
+        else if(file_exists(path_join(home_dir, "pcfx.rom"))) app.bios_dir = home_dir;
+        else app.bios_dir = ".";
+    }
+
     app.game_id = basename_noext(app.game_path);
     make_dir(app.save_dir);
     app.state_dir = path_join(app.save_dir, "states");

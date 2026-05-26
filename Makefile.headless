@@ -44,5 +44,8 @@ $(OBJ_CPP): %.o: %.cpp
 $(OBJ_C): %.o: %.c
 	$(CC) $(CFLAGS) -std=gnu99 -c -o $@ $<
 
+.PHONY: clean clean-headless
+clean: clean-headless
+
 clean-headless:
 	rm -f $(PRGNAME) $(OBJS)
