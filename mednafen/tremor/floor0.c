@@ -48,7 +48,7 @@ typedef struct {
    returns in m.8 format */
 
 static long ADJUST_SQRT2[2]={8192,5792};
-static INLINE int32_t vorbis_invsqlook_i(long a,long e){
+static inline int32_t vorbis_invsqlook_i(long a,long e){
   long i=(a&0x7fff)>>(INVSQ_LOOKUP_I_SHIFT-1); 
   long d=a&INVSQ_LOOKUP_I_MASK;                              /*  0.10 */
   long val=INVSQ_LOOKUP_I[i]-                                /*  1.16 */
@@ -60,7 +60,7 @@ static INLINE int32_t vorbis_invsqlook_i(long a,long e){
 
 /* interpolated lookup based fromdB function, domain -140dB to 0dB only */
 /* a is in n.12 format */
-static INLINE int32_t vorbis_fromdBlook_i(long a){
+static inline int32_t vorbis_fromdBlook_i(long a){
   int i=(-a)>>(12-FROMdB2_SHIFT);
   if(i<0) return 0x7fffffff;
   if(i>=(FROMdB_LOOKUP_SZ<<FROMdB_SHIFT))return 0;
@@ -70,7 +70,7 @@ static INLINE int32_t vorbis_fromdBlook_i(long a){
 
 /* interpolated lookup based cos function, domain 0 to PI only */
 /* a is in 0.16 format, where 0==0, 2^^16-1==PI, return 0.14 */
-static INLINE int32_t vorbis_coslook_i(long a){
+static inline int32_t vorbis_coslook_i(long a){
   int i=a>>COS_LOOKUP_I_SHIFT;
   int d=a&COS_LOOKUP_I_MASK;
   return COS_LOOKUP_I[i]- ((d*(COS_LOOKUP_I[i]-COS_LOOKUP_I[i+1]))>>
@@ -79,7 +79,7 @@ static INLINE int32_t vorbis_coslook_i(long a){
 
 /* interpolated lookup based cos function */
 /* a is in 0.16 format, where 0==0, 2^^16==PI, return .LSP_FRACBITS */
-static INLINE int32_t vorbis_coslook2_i(long a){
+static inline int32_t vorbis_coslook2_i(long a){
   a=a&0x1ffff;
 
   if(a>0x10000)a=0x20000-a;
@@ -102,7 +102,7 @@ static const int barklook[28]={
 };
 
 /* used in init only; interpolate the long way */
-static INLINE int32_t toBARK(int n){
+static inline int32_t toBARK(int n){
   int i;
   for(i=0;i<27;i++) 
     if(n>=barklook[i] && n<barklook[i+1])break;

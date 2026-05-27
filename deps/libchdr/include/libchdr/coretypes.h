@@ -4,9 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#ifdef USE_LIBRETRO_VFS
-#include <streams/file_stream_transforms.h>
-#endif
 
 #define ARRAY_LENGTH(x) (sizeof(x)/sizeof(x[0]))
 

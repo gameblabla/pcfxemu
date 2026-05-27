@@ -104,7 +104,7 @@
         #define DO_AM_FPP()							\
             const uint32 arg1 = (tmpop >> 5) & 0x1F;				\
             const uint32 arg2 = (tmpop & 0x1F);					\
-            const uint32 arg3 = ((RB_RDOP(2) >> 10)&0x3F);			\
+            const uint32 arg3 = ((RB_RDOP(2, 2) >> 10)&0x3F);			\
 	    RB_INCPCBY4();
 
 
@@ -120,18 +120,18 @@
 
 
         #define DO_AM_IV()					\
-	    const uint32 arg1 = ((tmpop & 0x000003FF) << 16) | RB_RDOP(2);	\
+	    const uint32 arg1 = ((tmpop & 0x000003FF) << 16) | RB_RDOP(2, 2);	\
 
 
         #define DO_AM_V()					\
             const uint32 arg3 = (tmpop >> 5) & 0x1F;		\
             const uint32 arg2 = tmpop & 0x1F;			\
-            const uint32 arg1 = RB_RDOP(2);	\
+            const uint32 arg1 = RB_RDOP(2, 2);	\
             RB_INCPCBY4();
 
 
         #define DO_AM_VIa()					\
-            const uint32 arg1 = RB_RDOP(2);	\
+            const uint32 arg1 = RB_RDOP(2, 2);	\
             const uint32 arg2 = tmpop & 0x1F;			\
             const uint32 arg3 = (tmpop >> 5) & 0x1F;		\
             RB_INCPCBY4();						\
@@ -139,7 +139,7 @@
 
         #define DO_AM_VIb()					\
             const uint32 arg1 = (tmpop >> 5) & 0x1F;		\
-            const uint32 arg2 = RB_RDOP(2);	\
+            const uint32 arg2 = RB_RDOP(2, 2);	\
             const uint32 arg3 = (tmpop & 0x1F);			\
             RB_INCPCBY4();					\
 
@@ -384,7 +384,7 @@
 	BEGIN_OP(LDSR);		// Loads a Sys Reg with the value in specified PR
              ADDCLOCK(1);	// ?
 
-	     SetSREG(timestamp, arg1 & 0x1F, P_REG[arg2 & 0x1F]);
+	     V810_SetSREG(&timestamp, arg1 & 0x1F, P_REG[arg2 & 0x1F]);
 	END_OP();
 
 	BEGIN_OP(STSR);		// Loads a PR with the value in specified Sys Reg
@@ -555,7 +555,7 @@
 		        ADDCLOCK(1);
 			tmp2 = (sign_16(arg1)+P_REG[arg2])&0xFFFFFFFF;
 
-			SetPREG(arg3, sign_8(MemRead8(timestamp, tmp2)));
+			SetPREG(arg3, sign_8(MemRead8(&timestamp, tmp2)));
 
 			//should be 3 clocks when executed alone, 2 when precedes another LD, or 1
 			//when precedes an instruction with many clocks (I'm guessing FP, MUL, DIV, etc)
@@ -577,7 +577,7 @@
 	BEGIN_OP(LD_H);
                         ADDCLOCK(1);
 			tmp2 = (sign_16(arg1)+P_REG[arg2]) & 0xFFFFFFFE;
-		        SetPREG(arg3, sign_16(MemRead16(timestamp, tmp2)));
+		        SetPREG(arg3, sign_16(MemRead16(&timestamp, tmp2)));
 
 		        if(lastop >= 0)
 			{
@@ -602,7 +602,7 @@
 
 	                if(MemReadBus32[tmp2 >> 24])
 			{
-			 SetPREG(arg3, MemRead32(timestamp, tmp2));
+			 SetPREG(arg3, MemRead32(&timestamp, tmp2));
 
 			 if(lastop >= 0)
 			 {
@@ -620,8 +620,8 @@
 			{
 			 uint32 rv;
 
-			 rv = MemRead16(timestamp, tmp2);
-			 rv |= MemRead16(timestamp, tmp2 | 2) << 16;
+			 rv = MemRead16(&timestamp, tmp2);
+			 rv |= MemRead16(&timestamp, tmp2 | 2) << 16;
 
                          SetPREG(arg3, rv);
 
@@ -643,7 +643,7 @@
 	// ST.B
 	BEGIN_OP(ST_B);
              ADDCLOCK(1);
-             MemWrite8(timestamp, sign_16(arg2)+P_REG[arg3], P_REG[arg1] & 0xFF);
+             MemWrite8(&timestamp, sign_16(arg2)+P_REG[arg3], P_REG[arg1] & 0xFF);
 
              if(lastop == LASTOP_ST)
 	     {
@@ -656,7 +656,7 @@
 	BEGIN_OP(ST_H);
              ADDCLOCK(1);
 
-             MemWrite16(timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE, P_REG[arg1] & 0xFFFF);
+             MemWrite16(&timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE, P_REG[arg1] & 0xFFFF);
 
              if(lastop == LASTOP_ST)
 	     {
@@ -672,7 +672,7 @@
 
 	     if(MemWriteBus32[tmp2 >> 24])
 	     {
-	      MemWrite32(timestamp, tmp2, P_REG[arg1]);
+	      MemWrite32(&timestamp, tmp2, P_REG[arg1]);
 
               if(lastop == LASTOP_ST)
 	      {
@@ -681,8 +681,8 @@
 	     }
 	     else
 	     {
-              MemWrite16(timestamp, tmp2, P_REG[arg1] & 0xFFFF);
-              MemWrite16(timestamp, tmp2 | 2, P_REG[arg1] >> 16);
+              MemWrite16(&timestamp, tmp2, P_REG[arg1] & 0xFFFF);
+              MemWrite16(&timestamp, tmp2 | 2, P_REG[arg1] >> 16);
 
               if(lastop == LASTOP_ST)
 	      {
@@ -696,7 +696,7 @@
 	BEGIN_OP(IN_B);
 	    {
              ADDCLOCK(3);
-             SetPREG(arg3, IORead8(timestamp, sign_16(arg1)+P_REG[arg2]));
+             SetPREG(arg3, IORead8(&timestamp, sign_16(arg1)+P_REG[arg2]));
 	    }
 	    lastop = LASTOP_IN;
 	END_OP_SKIPLO();
@@ -706,7 +706,7 @@
 	BEGIN_OP(IN_H);
 	    {
              ADDCLOCK(3);
-             SetPREG(arg3, IORead16(timestamp, (sign_16(arg1)+P_REG[arg2]) & 0xFFFFFFFE));
+             SetPREG(arg3, IORead16(&timestamp, (sign_16(arg1)+P_REG[arg2]) & 0xFFFFFFFE));
 	    }
 	    lastop = LASTOP_IN;
 	END_OP_SKIPLO();
@@ -717,7 +717,7 @@
 	     if(IORead32)
 	     {
               ADDCLOCK(3);
-              SetPREG(arg3, IORead32(timestamp, (sign_16(arg1)+P_REG[arg2]) & 0xFFFFFFFC));
+              SetPREG(arg3, IORead32(&timestamp, (sign_16(arg1)+P_REG[arg2]) & 0xFFFFFFFC));
 	     }
 	     else
 	     {
@@ -726,8 +726,8 @@
 
 	      ADDCLOCK(5);
 
-	      rv = IORead16(timestamp, eff_addr);
-	      rv |= IORead16(timestamp, eff_addr | 2) << 16;
+	      rv = IORead16(&timestamp, eff_addr);
+	      rv |= IORead16(&timestamp, eff_addr | 2) << 16;
 
               SetPREG(arg3, rv);
 	     }
@@ -738,7 +738,7 @@
 	// OUT.B
 	BEGIN_OP(OUT_B);
              ADDCLOCK(1);
-             IOWrite8(timestamp, sign_16(arg2)+P_REG[arg3],P_REG[arg1]&0xFF);
+             IOWrite8(&timestamp, sign_16(arg2)+P_REG[arg3],P_REG[arg1]&0xFF);
 
 	     if(lastop == LASTOP_OUT)
 	     {
@@ -751,7 +751,7 @@
 	// OUT.H
 	BEGIN_OP(OUT_H);
              ADDCLOCK(1);
-             IOWrite16(timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE,P_REG[arg1]&0xFFFF);
+             IOWrite16(&timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE,P_REG[arg1]&0xFFFF);
 
              if(lastop == LASTOP_OUT)
              {
@@ -766,12 +766,12 @@
              ADDCLOCK(1);
 
 	     if(IOWrite32)
-              IOWrite32(timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFC,P_REG[arg1]);
+              IOWrite32(&timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFC,P_REG[arg1]);
 	     else
 	     {
 	      uint32 eff_addr = (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFC;
-              IOWrite16(timestamp, eff_addr, P_REG[arg1] & 0xFFFF);
-              IOWrite16(timestamp, eff_addr | 2, P_REG[arg1] >> 16);
+              IOWrite16(&timestamp, eff_addr, P_REG[arg1] & 0xFFFF);
+              IOWrite16(&timestamp, eff_addr | 2, P_REG[arg1] >> 16);
 	     }
 
              if(lastop == LASTOP_OUT)
@@ -808,7 +808,7 @@
                 RB_SETPC(S_REG[EIPC] & 0xFFFFFFFE);
                 S_REG[PSW] = S_REG[EIPSW];
             }
-	    RecalcIPendingCache();
+	    V810_RecalcIPendingCache();
 
             RB_ADDBT(old_PC, RB_GETPC(), 0);
 	END_OP();
@@ -900,7 +900,7 @@
 
 	BEGIN_OP(FPP);
             ADDCLOCK(1);
-	    fpu_subop(timestamp, arg3, arg1, arg2);
+	    V810_fpu_subop(&timestamp, arg3, arg1, arg2);
 	    lastop = -1;
 	    CHECK_HALTED();
 	END_OP_SKIPLO();
@@ -911,7 +911,7 @@
              ADDCLOCK(1);
 	    }
 
-            if(bstr_subop(timestamp, arg2, arg1))
+            if(V810_bstr_subop(&timestamp, arg2, arg1))
 	    {
 	     RB_DECPCBY2();
              in_bstr = TRUE;
@@ -937,8 +937,15 @@
 
             ADDCLOCK(15);
 
-	    Exception(TRAP_HANDLER_BASE + (arg1 & 0x10), ECODE_TRAP_BASE + (arg1 & 0x1F));
-	    CHECK_HALTED();
+            if(EmuTrapHandler && EmuTrapHandler(arg1 & 0x1F))
+            {
+             CHECK_HALTED();
+            }
+            else
+            {
+	     Exception(TRAP_HANDLER_BASE + (arg1 & 0x10), ECODE_TRAP_BASE + (arg1 & 0x1F));
+	     CHECK_HALTED();
+            }
 	END_OP();
 
 	BEGIN_OP(CAXI);
@@ -956,11 +963,11 @@
 	     addr &= ~3;
 
 	     if(MemReadBus32[addr >> 24])
-	      tmp = MemRead32(timestamp, addr);
+	      tmp = MemRead32(&timestamp, addr);
 	     else
 	     {
-	      tmp = MemRead16(timestamp, addr);
-	      tmp |= MemRead16(timestamp, addr | 2) << 16;
+	      tmp = MemRead16(&timestamp, addr);
+	      tmp |= MemRead16(&timestamp, addr | 2) << 16;
 	     }
 
              compare_temp = P_REG[arg3] - tmp;
@@ -975,11 +982,11 @@
 	      to_write = tmp;
 
 	     if(MemWriteBus32[addr >> 24])
-	      MemWrite32(timestamp, addr, to_write);
+	      MemWrite32(&timestamp, addr, to_write);
 	     else
 	     {
-              MemWrite16(timestamp, addr, to_write & 0xFFFF);
-              MemWrite16(timestamp, addr | 2, to_write >> 16);
+              MemWrite16(&timestamp, addr, to_write & 0xFFFF);
+              MemWrite16(&timestamp, addr | 2, to_write >> 16);
 	     }
 	     P_REG[arg3] = tmp;
 	    }
@@ -994,10 +1001,10 @@
 	{
 	 int iNum = ilevel;
 
-	 S_REG[EIPC]  = GetPC();
+	 S_REG[EIPC]  = V810_GetPC();
 	 S_REG[EIPSW] = S_REG[PSW];
 
-	 SetPC(0xFFFFFE00 | (iNum << 4));
+	 V810_SetPC(0xFFFFFE00 | (iNum << 4));
 
 	 RB_ADDBT(old_PC, RB_GETPC(), 0xFE00 | (iNum << 4));
 

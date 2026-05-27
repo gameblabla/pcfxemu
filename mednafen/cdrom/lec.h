@@ -59,6 +59,6 @@ void lec_encode_mode2_form2_sector(uint32_t adr, uint8_t *sector);
 /* Scrambles and byte swaps an encoded sector.
  * 'sector' must be 2352 byte wide.
  */
-void lec_scramble(int8_t *sector);
+void lec_scramble(uint8_t *sector);
 
 #endif

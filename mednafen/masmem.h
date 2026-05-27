@@ -9,7 +9,7 @@
 #define MAS_NATIVE_IS_BIGENDIAN 0
 #endif
 
-static INLINE uint16 LoadU16_RBO(const uint16 *a)
+static inline uint16 LoadU16_RBO(const uint16 *a)
 {
  #ifdef ARCH_POWERPC
   uint16 tmp;
@@ -24,7 +24,7 @@ static INLINE uint16 LoadU16_RBO(const uint16 *a)
  #endif
 }
 
-static INLINE uint16 LoadU16_LE(const uint16 *a)
+static inline uint16 LoadU16_LE(const uint16 *a)
 {
 #ifdef MSB_FIRST
    return LoadU16_RBO(a);

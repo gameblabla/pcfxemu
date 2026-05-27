@@ -2,7 +2,7 @@
 #define _GIT_H
 
 #include <string.h>
-#include <libretro.h>
+#include <stdbool.h>
 
 #include "file.h"
 #include "state.h"
@@ -102,7 +102,7 @@ struct CheatFormatInfoStruct
 {
  unsigned NumFormats;
 
- CheatFormatStruct *Formats;
+ struct CheatFormatStruct *Formats;
 };
 
 // Miscellaneous system/simple commands(power, reset, dip switch toggles, coin insert, etc.)
@@ -224,7 +224,7 @@ typedef enum
  MODPRIO_EXTERNAL_HIGH = 40
 } ModPrio;
 
-class CDIF;
+typedef struct CDIF CDIF;
 
  #define MDFN_MASTERCLOCK_FIXED(n)	((int64)((float)(n) * (1LL << 32)))
 
@@ -275,14 +275,7 @@ typedef struct
  float mouse_sensitivity;
 } MDFNGI;
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 int StateAction(StateMem *sm, int load, int data_only);
-#ifdef __cplusplus
-}
-#endif
 
-extern retro_log_printf_t log_cb;
 
 #endif

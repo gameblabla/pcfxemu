@@ -1,11 +1,11 @@
 #ifndef __MDFN_MATH_OPS_H
 #define __MDFN_MATH_OPS_H
 
-#include <retro_inline.h>
+
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
 // Rounds up to the nearest power of 2.
-static INLINE uint32 round_up_pow2(uint32 v)
+static inline uint32 round_up_pow2(uint32 v)
 {
    v--;
    v |= v >> 1;

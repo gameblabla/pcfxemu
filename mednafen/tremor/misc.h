@@ -60,17 +60,17 @@ union magic {
 };
 #endif
 
-static INLINE int32_t MULT32(int32_t x, int32_t y) {
+static inline int32_t MULT32(int32_t x, int32_t y) {
   union magic magic;
   magic.whole = (int64_t)x * y;
   return magic.halves.hi;
 }
 
-static INLINE int32_t MULT31(int32_t x, int32_t y) {
+static inline int32_t MULT31(int32_t x, int32_t y) {
   return MULT32(x,y)<<1;
 }
 
-static INLINE int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
+static inline int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
   union magic magic;
   magic.whole  = (int64_t)x * y;
   return ((uint32_t)(magic.halves.lo)>>15) | ((magic.halves.hi)<<17);
@@ -92,15 +92,15 @@ static INLINE int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
  * tables in this case.
  */
 
-static INLINE int32_t MULT32(int32_t x, int32_t y) {
+static inline int32_t MULT32(int32_t x, int32_t y) {
   return (x >> 9) * y;  /* y preshifted >>23 */
 }
 
-static INLINE int32_t MULT31(int32_t x, int32_t y) {
+static inline int32_t MULT31(int32_t x, int32_t y) {
   return (x >> 8) * y;  /* y preshifted >>23 */
 }
 
-static INLINE int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
+static inline int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
   return (x >> 6) * y;  /* y preshifted >>9 */
 }
 
@@ -137,7 +137,7 @@ static INLINE int32_t MULT31_SHIFT15(int32_t x, int32_t y) {
 
 #else
 
-static INLINE void XPROD32(int32_t  a, int32_t  b,
+static inline void XPROD32(int32_t  a, int32_t  b,
 			   int32_t  t, int32_t  v,
 			   int32_t *x, int32_t *y)
 {
@@ -145,7 +145,7 @@ static INLINE void XPROD32(int32_t  a, int32_t  b,
   *y = MULT32(b, t) - MULT32(a, v);
 }
 
-static INLINE void XPROD31(int32_t  a, int32_t  b,
+static inline void XPROD31(int32_t  a, int32_t  b,
 			   int32_t  t, int32_t  v,
 			   int32_t *x, int32_t *y)
 {
@@ -153,7 +153,7 @@ static INLINE void XPROD31(int32_t  a, int32_t  b,
   *y = MULT31(b, t) - MULT31(a, v);
 }
 
-static INLINE void XNPROD31(int32_t  a, int32_t  b,
+static inline void XNPROD31(int32_t  a, int32_t  b,
 			    int32_t  t, int32_t  v,
 			    int32_t *x, int32_t *y)
 {
@@ -168,7 +168,7 @@ static INLINE void XNPROD31(int32_t  a, int32_t  b,
 #ifndef _V_CLIP_MATH
 #define _V_CLIP_MATH
 
-static INLINE int32_t CLIP_TO_15(int32_t x) {
+static inline int32_t CLIP_TO_15(int32_t x) {
   int ret=x;
   ret-= ((x<=32767)-1)&(x-32767);
   ret-= ((x>=-32768)-1)&(x+32768);
@@ -177,7 +177,7 @@ static INLINE int32_t CLIP_TO_15(int32_t x) {
 
 #endif
 
-static INLINE int32_t VFLOAT_MULT(int32_t a,int32_t ap,
+static inline int32_t VFLOAT_MULT(int32_t a,int32_t ap,
 				      int32_t b,int32_t bp,
 				      int32_t *p){
   if(a && b){
@@ -194,7 +194,7 @@ static INLINE int32_t VFLOAT_MULT(int32_t a,int32_t ap,
 
 int _ilog(unsigned int);
 
-static INLINE int32_t VFLOAT_MULTI(int32_t a,int32_t ap,
+static inline int32_t VFLOAT_MULTI(int32_t a,int32_t ap,
 				      int32_t i,
 				      int32_t *p){
 
@@ -202,7 +202,7 @@ static INLINE int32_t VFLOAT_MULTI(int32_t a,int32_t ap,
   return VFLOAT_MULT(a,ap,i<<-ip,ip,p);
 }
 
-static INLINE int32_t VFLOAT_ADD(int32_t a,int32_t ap,
+static inline int32_t VFLOAT_ADD(int32_t a,int32_t ap,
 				      int32_t b,int32_t bp,
 				      int32_t *p){
 

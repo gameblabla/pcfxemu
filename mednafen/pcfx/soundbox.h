@@ -22,9 +22,12 @@
 #ifndef _PCFX_SOUNDBOX_H
 #define _PCFX_SOUNDBOX_H
 
-#include <Blip_Buffer.h>
+#include "mednafen/sound/raw_audio.h"
 
-extern Blip_Buffer FXsbuf[2];		// Used in the CDROM code
+#ifdef __cplusplus
+extern "C" {
+#endif
+PCFX_RawAudioMixer *SoundBox_GetRawMixer(void);
 
 typedef struct {
     uint16 ADPCMControl;
@@ -69,6 +72,7 @@ void SoundBox_ResetTS(const v810_timestamp_t ts_base);
 void SoundBox_Kill(void);
 
 
-#include <mednafen/sound/Blip_Buffer.h>
-#include <mednafen/sound/Stereo_Buffer.h>
+#ifdef __cplusplus
+}
+#endif
 #endif

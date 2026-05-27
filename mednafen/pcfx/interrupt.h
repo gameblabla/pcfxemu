@@ -1,6 +1,11 @@
 #ifndef __PCFX_INTERRUPT_H
 #define __PCFX_INTERRUPT_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 #define PCFXIRQ_SOURCE_TIMER	1
 #define PCFXIRQ_SOURCE_EX	2
 #define PCFXIRQ_SOURCE_INPUT	3
@@ -16,5 +21,10 @@ uint8 PCFXIRQ_Read8(uint32 A);
 int PCFXIRQ_StateAction(StateMem *sm, int load, int data_only);
 
 void PCFXIRQ_Reset(void);
+
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
 
 #endif

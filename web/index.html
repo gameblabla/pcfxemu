@@ -3,82 +3,173 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PC-FX WebAssembly Backend</title>
+  <title>PC-FX / PC-FXGA WebAssembly</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="app-shell">
-    <header class="topbar">
-      <div>
-        <h1>PC-FX / PC-FXGA WebAssembly</h1>
-        <p>clang wasm32 backend, canvas frontend, no Emscripten</p>
+    <main class="stage">
+      <div id="screenFrame" class="screen-frame" tabindex="0" aria-label="PC-FX video output">
+        <canvas id="video" width="256" height="240" aria-label="PC-FX video output"></canvas>
+        <div id="touchGamepad" class="touch-gamepad" aria-hidden="true">
+          <div id="touchStick" class="touch-stick" aria-label="Virtual analog stick">
+            <div class="touch-stick-cardinals" aria-hidden="true">
+              <span class="touch-cardinal up">▲</span>
+              <span class="touch-cardinal right">▶</span>
+              <span class="touch-cardinal down">▼</span>
+              <span class="touch-cardinal left">◀</span>
+            </div>
+            <div id="touchKnob" class="touch-knob"></div>
+          </div>
+          <div class="touch-center-controls">
+            <button type="button" class="touch-btn system" data-button="Select"><span>SEL</span></button>
+            <button type="button" class="touch-btn system" data-button="Start"><span>RUN</span></button>
+          </div>
+          <div class="touch-buttons" aria-label="Virtual action buttons">
+            <button type="button" class="touch-btn action" data-button="X"><span class="touch-primary">IV</span><span class="touch-secondary">X</span></button>
+            <button type="button" class="touch-btn action" data-button="Y"><span class="touch-primary">V</span><span class="touch-secondary">Y</span></button>
+            <button type="button" class="touch-btn action" data-button="Z"><span class="touch-primary">VI</span><span class="touch-secondary">Z</span></button>
+            <button type="button" class="touch-btn action" data-button="A"><span class="touch-primary">I</span><span class="touch-secondary">A</span></button>
+            <button type="button" class="touch-btn action" data-button="B"><span class="touch-primary">II</span><span class="touch-secondary">B</span></button>
+            <button type="button" class="touch-btn action" data-button="C"><span class="touch-primary">III</span><span class="touch-secondary">C</span></button>
+          </div>
+        </div>
+        <div id="fpsCounter" class="fps-counter hidden" aria-live="off">0.0 FPS</div>
+        <div class="overlay-actions" id="overlayActions">
+          <button id="menuToggle" class="icon-button" title="Menu" aria-label="Menu">☰</button>
+          <button id="fullscreenToggle" class="icon-button" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+        </div>
       </div>
-      <div class="top-actions">
-        <button id="openStartup">BIOS / System</button>
-        <button id="pauseToggle">Pause</button>
-        <button id="saveState">Save State</button>
-        <button id="loadState">Load State</button>
-      </div>
-    </header>
+    </main>
 
-    <main class="layout">
-      <section class="screen-card">
-        <div id="screenFrame" class="screen-frame" tabindex="0" aria-label="PC-FX video output canvas">
-          <canvas id="video" width="256" height="240"></canvas>
-          <div id="hud" class="hud">booting wasm...</div>
+    <aside id="sideMenu" class="side-menu" aria-label="Emulator menu">
+      <header class="menu-header">
+        <div>
+          <h1>PC-FX / PC-FXGA</h1>
+          <p>clang wasm32, no Emscripten</p>
         </div>
-        <div class="drop-row">
-          <label class="file-button">
-            Load CD / HuEXE
-            <input id="mediaFile" type="file" accept=".cue,.ccd,.chd,.iso,.bin,.ex,.exe,.zip,application/octet-stream">
-          </label>
-          <span id="mediaName" class="muted">no media selected</span>
+        <button id="closeMenu" class="icon-button" aria-label="Close menu">×</button>
+      </header>
+
+      <section class="panel-section">
+        <h2>System</h2>
+        <div class="segmented" id="systemModeControls">
+          <label><input type="radio" name="systemMode" value="auto"> Auto</label>
+          <label><input type="radio" name="systemMode" value="pcfx"> PC-FX</label>
+          <label><input type="radio" name="systemMode" value="pcfxga"> PC-FXGA</label>
         </div>
+        <label class="check-row"><input id="enable3D" type="checkbox"> Enable HuC6273/Aurora 3D chip</label>
+        <div class="row"><button id="openStartup">BIOS manager</button><button id="softResetButton">Soft reset</button></div>
+        <dl class="runtime-grid">
+          <dt>Status</dt><dd id="runtimeStatus">loading</dd>
+          <dt>Resolution</dt><dd id="runtimeResolution">-</dd>
+          <dt>Frame</dt><dd id="runtimeFrame">0</dd>
+          <dt>Media</dt><dd id="runtimeMedia">none</dd>
+        </dl>
       </section>
 
-      <aside class="panel">
-        <section>
-          <h2>Controls</h2>
-          <div id="controlMap" class="control-map"></div>
-          <p class="hint">Click a mapping, then press a key. Click the canvas to focus keyboard input.</p>
-        </section>
-        <section>
-          <h2>Storage</h2>
-          <p id="storageStatus" class="muted">LocalStorage ready.</p>
-          <button id="clearStorage">Clear Config + Save</button>
-        </section>
-        <section>
-          <h2>Runtime</h2>
-          <dl class="runtime-grid">
-            <dt>System</dt><dd id="runtimeSystem">PC-FX</dd>
-            <dt>Status</dt><dd id="runtimeStatus">loading</dd>
-            <dt>Resolution</dt><dd id="runtimeResolution">-</dd>
-            <dt>Frame</dt><dd id="runtimeFrame">0</dd>
-          </dl>
-        </section>
-      </aside>
-    </main>
+      <section class="panel-section">
+        <h2>Load game / disc</h2>
+        <p class="hint">Browser loading accepts one file: a CHD, a PC-FXGA .EX/.EXE homebrew program, or a ZIP archive containing cue/bin sidecars. PC-FXGA mode rejects audio-only CD media.</p>
+        <label class="file-button wide">
+          Load new game / reset machine
+          <input id="mediaFiles" type="file" accept=".chd,.ex,.exe,.zip,application/zip,application/x-zip-compressed,application/octet-stream">
+        </label>
+        <label class="file-button wide">
+          Swap disc without reset
+          <input id="swapDiscFiles" type="file" accept=".chd,.zip,application/zip,application/x-zip-compressed,application/octet-stream">
+        </label>
+        <div id="mediaName" class="muted">no media selected</div>
+      </section>
+
+      <section class="panel-section">
+        <h2>Video</h2>
+        <label>Aspect
+          <select id="aspectMode">
+            <option value="native">Native pixels</option>
+            <option value="4:3">4:3 display</option>
+            <option value="stretch">Stretch to frame</option>
+          </select>
+        </label>
+        <label class="check-row"><input id="smoothUpscale" type="checkbox"> Browser bilinear final upscale</label>
+        <label class="check-row"><input id="scanlines" type="checkbox"> CSS scanline overlay</label>
+        <label class="check-row"><input id="showFps" type="checkbox"> Show visual FPS counter</label>
+      </section>
+
+      <section class="panel-section">
+        <h2>Controls</h2>
+        <label>Controller type
+          <select id="controllerType">
+            <option value="gamepad">Gamepad</option>
+            <option value="mouse">Mouse</option>
+          </select>
+        </label>
+        <div id="controlMap" class="control-map"></div>
+        <div id="touchOptions" class="touch-options">
+          <label>On-screen gamepad opacity
+            <input id="touchOpacity" type="range" min="20" max="100" step="5">
+          </label>
+        </div>
+        <p class="hint">For mouse mode, click the game window to capture relative mouse movement. Press Esc or open the menu to release it.</p>
+        <p class="hint">Click a mapping, then press a key. The canvas must be focused during gamepad play.</p>
+      </section>
+
+      <section class="panel-section">
+        <h2>Save states</h2>
+        <div class="row">
+          <button id="pauseToggle">Pause</button>
+          <button id="resetButton">Reset shell</button>
+        </div>
+        <label>Slot
+          <select id="stateSlot"></select>
+        </label>
+        <div class="row">
+          <button id="saveState">Save</button>
+          <button id="loadState">Load</button>
+          <button id="exportState">Export slot</button>
+        </div>
+        <p class="hint">Export downloads the selected slot for the currently loaded BIOS/game as a .pcfxstate file.</p>
+      </section>
+
+      <section class="panel-section">
+        <h2>Storage</h2>
+        <p id="storageStatus" class="muted">checking browser storage...</p>
+        <button id="clearStorage">Clear config, BIOS metadata, and save states</button>
+      </section>
+    </aside>
   </div>
 
-  <div id="startupModal" class="modal open" role="dialog" aria-modal="true" aria-labelledby="startupTitle">
+  <div id="startupModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="startupTitle">
     <div class="modal-card">
-      <h2 id="startupTitle">Select PC-FX BIOS</h2>
-      <p>The browser build does not bundle BIOS ROMs. Choose a PC-FX console BIOS or a PC-FXGA BIOS from your local machine.</p>
+      <h2 id="startupTitle">BIOS setup required</h2>
+      <p>The browser build does not bundle BIOS ROMs. Store a standard PC-FX BIOS, a PC-FXGA BIOS, or both. Auto mode selects PC-FX or PC-FXGA from the loaded media. Explicit PC-FX and PC-FXGA modes use only their matching BIOS/startup path; the 3D-chip toggle independently controls HuC6273/Aurora visibility.</p>
+
+      <div class="bios-grid">
+        <article class="bios-card" id="pcfxBiosCard">
+          <h3>Standard PC-FX BIOS</h3>
+          <p id="pcfxBiosStatus" class="muted">missing</p>
+          <label class="file-button wide">Store PC-FX BIOS<input id="pcfxBiosFile" type="file" accept=".rom,.bin,application/octet-stream"></label>
+        </article>
+        <article class="bios-card" id="pcfxgaBiosCard">
+          <h3>PC-FXGA BIOS</h3>
+          <p id="pcfxgaBiosStatus" class="muted">missing</p>
+          <label class="file-button wide">Store PC-FXGA BIOS<input id="pcfxgaBiosFile" type="file" accept=".rom,.bin,application/octet-stream"></label>
+        </article>
+      </div>
+
       <div class="system-choice">
-        <label><input type="radio" name="systemMode" value="pcfx" checked> PC-FX</label>
-        <label><input type="radio" name="systemMode" value="pcfxga"> PC-FXGA</label>
+        <label><input type="radio" name="startupSystemMode" value="auto"> Start Auto</label>
+        <label><input type="radio" name="startupSystemMode" value="pcfx"> Start PC-FX</label>
+        <label><input type="radio" name="startupSystemMode" value="pcfxga"> Start PC-FXGA</label>
       </div>
-      <label class="file-button wide">
-        Choose BIOS ROM
-        <input id="biosFile" type="file" accept=".rom,.bin,application/octet-stream">
-      </label>
-      <div id="biosName" class="muted">no BIOS selected</div>
+      <div id="startupError" class="status-bad"></div>
       <div class="modal-actions">
-        <button id="startButton" disabled>Start</button>
+        <button id="startButton">Start selected system</button>
       </div>
+
       <details>
         <summary>Backend details</summary>
-        <p>This target compiles <code>wasm/pcfx_wasm_core.c</code> with clang <code>--target=wasm32</code>, <code>-nostdlib</code>, <code>--no-entry</code>, and an exported memory. JavaScript handles input, canvas, file pickers, configuration, and LocalStorage-backed save data.</p>
+        <p>This target compiles <code>wasm/pcfx_wasm_core.c</code> using raw clang <code>--target=wasm32</code>, <code>-nostdlib</code>, <code>--no-entry</code>, and exported linear memory. JavaScript owns file pickers, IndexedDB-backed BIOS persistence, session media loading, LocalStorage configuration, input, and browser-side final scaling.</p>
       </details>
     </div>
   </div>

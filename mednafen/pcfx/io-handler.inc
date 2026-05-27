@@ -1,27 +1,27 @@
 #include "../mednafen-endian.h"
 
-static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
+static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x0FF)
-  return(FXINPUT_Read8(A, timestamp));
+  return(FXINPUT_Read8(A, (*timestamp)));
  else if(A >= 0x100 && A <= 0x2FF) // SOUNDBOX dummy
  {
-  timestamp += 4;
+  (*timestamp) += 4;
  }
  else if(A >= 0x300 && A <= 0x3FF) // FXVCE
  {
-  timestamp += 4;
+  (*timestamp) += 4;
   return(FXVCE_Read16(A));
  }
  else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
  {
-  timestamp += 4;
-  return(fx_vdc_chips[(A >> 8) & 0x1]->Read16((A & 4) >> 2));
+  (*timestamp) += 4;
+  return(VDC_Read16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, false));
  }
  else if(A >= 0x600 && A <= 0x6FF)
  {
-  timestamp += 4;
-  return(KING_Read8(timestamp, A));
+  (*timestamp) += 4;
+  return(KING_Read8((*timestamp), A));
  }
  else if(A >= 0x700 && A <= 0x7FF)
  {
@@ -47,7 +47,7 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
  }
  else if(A >= 0xf00 && A <= 0xfff)
  {
-  return(FXTIMER_Read8(A, timestamp));
+  return(FXTIMER_Read8(A, (*timestamp)));
  }
  #ifdef HAVE_HUC6273
  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
@@ -61,13 +61,13 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t &timestamp, uint32 A)
  return(0x00);
 }
 
-static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
+static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x0FF)
-  return(FXINPUT_Read16(A, timestamp));
+  return(FXINPUT_Read16(A, (*timestamp)));
  else if(A >= 0x100 && A <= 0x3FF) // SOUNDBOX dummy
  {
-  timestamp += 4;
+  (*timestamp) += 4;
   if(A >= 0x300)
   {
 	return(FXVCE_Read16(A));
@@ -75,13 +75,13 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
  }
  else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
  {
-  timestamp += 4;
-  return(fx_vdc_chips[(A >> 8) & 0x1]->Read16((A & 4) >> 2));
+  (*timestamp) += 4;
+  return(VDC_Read16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, false));
  }
  else if(A >= 0x600 && A <= 0x6FF)
  {
-  timestamp += 4;
-  return(KING_Read16(timestamp, A));
+  (*timestamp) += 4;
+  return(KING_Read16((*timestamp), A));
  }
  else if(A >= 0x700 && A <= 0x7FF)
  {
@@ -104,7 +104,7 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
  }
  else if(A >= 0xf00 && A <= 0xfff)
  {
-  return(FXTIMER_Read16(A, timestamp));
+  return(FXTIMER_Read16(A, (*timestamp)));
  }
  #ifdef HAVE_HUC6273
  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
@@ -118,38 +118,38 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t &timestamp, uint32 A)
  return(0x00);
 }
 
-static void MDFN_FASTCALL port_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8 V)
+static void MDFN_FASTCALL port_wbyte(v810_timestamp_t *timestamp, uint32 A, uint8 V)
 {
   if(A <= 0x0FF)
-   FXINPUT_Write8(A, V, timestamp);
+   FXINPUT_Write8(A, V, (*timestamp));
   else if(A >= 0x100 && A <= 0x1FF)
   {
-   timestamp += 4;
-   SoundBox_Write(A, V, timestamp);
+   (*timestamp) += 4;
+   SoundBox_Write(A, V, (*timestamp));
   }
   else if(A >= 0x200 && A <= 0x2FF)
   {
-   timestamp += 4;
+   (*timestamp) += 4;
    RAINBOW_Write8(A, V);
   }
   else if(A >= 0x300 && A <= 0x3FF) // FXVCE
   {
-   timestamp += 4;
+   (*timestamp) += 4;
    FXVCE_Write16(A, V);
   }
   else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
   {
-   timestamp += 4;
+   (*timestamp) += 4;
 
    if(!(A & 4))
     Last_VDC_AR[(A >> 8) & 0x1] = V;
 
-   fx_vdc_chips[(A >> 8) & 0x1]->Write16((A & 4) >> 2, V);
+   VDC_Write16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, V);
   }
   else if(A >= 0x600 && A <= 0x6FF)
   {
-   timestamp += 4;
-   KING_Write8(timestamp, A, V);
+   (*timestamp) += 4;
+   KING_Write8((*timestamp), A, V);
   }
   else if(A >= 0x700 && A <= 0x7FF)
   {
@@ -184,38 +184,38 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t &timestamp, uint32 A, uint
   #endif
 }
 
-static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uint16 V)
+static void MDFN_FASTCALL port_whword(v810_timestamp_t *timestamp, uint32 A, uint16 V)
 {
   if(A <= 0x0FF)
-   FXINPUT_Write16(A, V, timestamp);
+   FXINPUT_Write16(A, V, (*timestamp));
   else if(A >= 0x100 && A <= 0x1FF)
   {
-   timestamp += 4;
-   SoundBox_Write(A, V, timestamp);
+   (*timestamp) += 4;
+   SoundBox_Write(A, V, (*timestamp));
   }
   else if(A >= 0x200 && A <= 0x2FF)
   {
-   timestamp += 4;
+   (*timestamp) += 4;
    RAINBOW_Write16(A, V);
   }
   else if(A >= 0x300 && A <= 0x3FF)
   {
-   timestamp += 4;
+   (*timestamp) += 4;
    FXVCE_Write16(A, V);
   }
   else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
   {
-   timestamp += 4;
+   (*timestamp) += 4;
 
    if(!(A & 4))
     Last_VDC_AR[(A >> 8) & 0x1] = V;
 
-   fx_vdc_chips[(A >> 8) & 0x1]->Write16((A & 4) >> 2, V);
+   VDC_Write16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, V);
   }
   else if(A >= 0x600 && A <= 0x6FF)
   {
-   timestamp += 4;
-   KING_Write16(timestamp, A, V);
+   (*timestamp) += 4;
+   KING_Write16((*timestamp), A, V);
   }
   else if(A >= 0x700 && A <= 0x7FF)
   {
@@ -239,7 +239,7 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t &timestamp, uint32 A, uin
   }
   else if(A >= 0xF00 && A <= 0xFFF)
   {
-   FXTIMER_Write16(A, V, timestamp);
+   FXTIMER_Write16(A, V, (*timestamp));
   }
   #ifdef HAVE_HUC6273
   else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)

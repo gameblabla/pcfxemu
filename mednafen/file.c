@@ -21,10 +21,52 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include <streams/file_stream.h>
 
 #include "file.h"
 #include "mednafen-endian.h"
+
+static int read_entire_file(const char *path, uint8_t **out_data, int64_t *out_size)
+{
+   FILE *fp = NULL;
+   long len = 0;
+   uint8_t *buf = NULL;
+
+   if (!path || !out_data || !out_size)
+      return 0;
+
+   *out_data = NULL;
+   *out_size = 0;
+
+   fp = fopen(path, "rb");
+   if (!fp)
+      return 0;
+
+   if (fseek(fp, 0, SEEK_END) != 0)
+      goto error;
+   len = ftell(fp);
+   if (len < 0)
+      goto error;
+   if (fseek(fp, 0, SEEK_SET) != 0)
+      goto error;
+
+   buf = (uint8_t*)malloc((size_t)len ? (size_t)len : 1);
+   if (!buf)
+      goto error;
+
+   if (len && fread(buf, 1, (size_t)len, fp) != (size_t)len)
+      goto error;
+
+   fclose(fp);
+   *out_data = buf;
+   *out_size = (int64_t)len;
+   return 1;
+
+error:
+   if (fp)
+      fclose(fp);
+   free(buf);
+   return 0;
+}
 
 struct MDFNFILE *file_open(const char *path)
 {
@@ -35,7 +77,7 @@ struct MDFNFILE *file_open(const char *path)
    if (!file)
       return NULL;
 
-   if (!filestream_read_file(path, (void**)&file->data, &size))
+   if (!read_entire_file(path, &file->data, &size))
       goto error;
 
    ld          = (const char*)strrchr(path, '.');

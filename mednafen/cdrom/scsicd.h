@@ -4,11 +4,15 @@
 #include <stdint.h>
 
 #include "cdromif.h"
-#include "Blip_Buffer.h"
+#include "mednafen/sound/raw_audio.h"
 
 #include "../state.h"
 
 typedef int32_t scsicd_timestamp_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef struct
 {
@@ -90,17 +94,21 @@ enum
  SCSICD_IRQ_MAGICAL_REQ,
 };
 
-void SCSICD_GetCDDAValues(int16_t &left, int16_t &right);
+void SCSICD_GetCDDAValues(int16_t *left, int16_t *right);
 
 void SCSICD_SetLog(void (*logfunc)(const char *, const char *, ...));
 
-void SCSICD_Init(int type, int CDDATimeDiv, Blip_Buffer* left_hrbuf, Blip_Buffer* right_hrbuf, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int));
+void SCSICD_Init(int type, int CDDATimeDiv, PCFX_RawAudioMixer *audio_mixer, uint32_t TransferRate, uint32_t SystemClock, void (*IRQFunc)(int), void (*SSCFunc)(uint8_t, int));
 void SCSICD_Close(void);
 
 void SCSICD_SetTransferRate(uint32_t TransferRate);
 void SCSICD_SetCDDAVolume(float left, float right);
 int SCSICD_StateAction(StateMem *sm, const unsigned load, const bool data_only, const char *sname);
 
-void SCSICD_SetDisc(bool tray_open, CDIF *cdif, bool no_emu_side_effects = false);
+void SCSICD_SetDisc(bool tray_open, CDIF *cdif, bool no_emu_side_effects);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

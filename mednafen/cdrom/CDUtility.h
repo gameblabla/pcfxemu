@@ -2,8 +2,9 @@
 #define __MDFN_CDROM_CDUTILITY_H
 
 #include <string.h>
+#include <stdbool.h>
 
-#include <retro_inline.h>
+
 
  // Call once at app startup before creating any threads that could potentially cause re-entrancy to these functions.
  // It will also be called automatically if needed for the first time a function in this namespace that requires
@@ -29,13 +30,13 @@
  };
 
 
- struct TOC_Track
+typedef struct TOC_Track
  {
   uint8_t adr;
   uint8_t control;
   uint32_t lba;
   bool valid;	// valid/present; oh CD-i...
- };
+ } TOC_Track;
 
  // SubQ control field flags.
  enum
@@ -53,83 +54,75 @@
   DISC_TYPE_CD_XA      = 0x20
  };
 
- struct TOC
+
+typedef struct TOC
  {
-  INLINE TOC()
-  {
-   Clear();
-  }
-
-  INLINE void Clear(void)
-  {
-   first_track = last_track = 0;
-   disc_type = 0;
-
-   memset(tracks, 0, sizeof(tracks));	// FIXME if we change TOC_Track to non-POD type.
-  }
-
-  INLINE int FindTrackByLBA(uint32_t LBA) const
-  {
-   int32_t track;
-   int32_t lvt = 0;
-
-   for(track = 1; track <= 100; track++)
-   {
-      if(!tracks[track].valid)
-         continue;
-
-      if(LBA < tracks[track].lba)
-         break;
-
-      lvt = track;
-   }
-
-   return(lvt);
-  }
-
   uint8_t first_track;
   uint8_t last_track;
   uint8_t disc_type;
-  TOC_Track tracks[100 + 1];  // [0] is unused, [100] is for the leadout track.
- };
+  TOC_Track tracks[100 + 1];
+ } TOC;
+
+static inline void TOC_Clear(TOC *toc)
+{
+ toc->first_track = toc->last_track = 0;
+ toc->disc_type = 0;
+ memset(toc->tracks, 0, sizeof(toc->tracks));
+}
+
+static inline int TOC_FindTrackByLBA(const TOC *toc, uint32_t LBA)
+{
+ int32_t track;
+ int32_t lvt = 0;
+ for(track = 1; track <= 100; track++)
+ {
+  if(!toc->tracks[track].valid)
+   continue;
+  if(LBA < toc->tracks[track].lba)
+   break;
+  lvt = track;
+ }
+ return lvt;
+}
+
 
  //
  // Address conversion functions.
  //
- static INLINE uint32_t AMSF_to_ABA(int32_t m_a, int32_t s_a, int32_t f_a)
+ static inline uint32_t AMSF_to_ABA(int32_t m_a, int32_t s_a, int32_t f_a)
  {
   return(f_a + 75 * s_a + 75 * 60 * m_a);
  }
 
- static INLINE void ABA_to_AMSF(uint32_t aba, uint8_t *m_a, uint8_t *s_a, uint8_t *f_a)
+ static inline void ABA_to_AMSF(uint32_t aba, uint8_t *m_a, uint8_t *s_a, uint8_t *f_a)
  {
   *m_a = aba / 75 / 60;
   *s_a = (aba - *m_a * 75 * 60) / 75;
   *f_a = aba - (*m_a * 75 * 60) - (*s_a * 75);
  }
 
- static INLINE int32_t ABA_to_LBA(uint32_t aba)
+ static inline int32_t ABA_to_LBA(uint32_t aba)
  {
   return(aba - 150);
  }
 
- static INLINE uint32_t LBA_to_ABA(int32_t lba)
+ static inline uint32_t LBA_to_ABA(int32_t lba)
  {
   return(lba + 150);
  }
 
- static INLINE int32_t AMSF_to_LBA(uint8_t m_a, uint8_t s_a, uint8_t f_a)
+ static inline int32_t AMSF_to_LBA(uint8_t m_a, uint8_t s_a, uint8_t f_a)
  {
   return(ABA_to_LBA(AMSF_to_ABA(m_a, s_a, f_a)));
  }
 
- static INLINE void LBA_to_AMSF(int32_t lba, uint8_t *m_a, uint8_t *s_a, uint8_t *f_a)
+ static inline void LBA_to_AMSF(int32_t lba, uint8_t *m_a, uint8_t *s_a, uint8_t *f_a)
  {
   ABA_to_AMSF(LBA_to_ABA(lba), m_a, s_a, f_a);
  }
 
  /* BCD conversion functions */
- static INLINE bool BCD_is_valid(uint8_t bcd_number)
+ static inline bool BCD_is_valid(uint8_t bcd_number)
  {
   if((bcd_number & 0xF0) >= 0xA0)
    return(false);
@@ -140,18 +133,18 @@
   return(true);
  }
 
- static INLINE uint8_t BCD_to_U8(uint8_t bcd_number)
+ static inline uint8_t BCD_to_U8(uint8_t bcd_number)
  {
   return( ((bcd_number >> 4) * 10) + (bcd_number & 0x0F) );
  }
 
- static INLINE uint8_t U8_to_BCD(uint8_t num)
+ static inline uint8_t U8_to_BCD(uint8_t num)
  {
   return( ((num / 10) << 4) + (num % 10) );
  }
 
  // should always perform the conversion, even if the bcd number is invalid.
- static INLINE bool BCD_to_U8_check(uint8_t bcd_number, uint8_t *out_number)
+ static inline bool BCD_to_U8_check(uint8_t bcd_number, uint8_t *out_number)
  {
   *out_number = BCD_to_U8(bcd_number);
 
@@ -176,14 +169,14 @@
  // out_buf must be able to contain 2352+96 bytes.
  // "mode" is not used if the area is to be encoded as audio.
  // pass 0xFF for "mode" for "don't know", and to make guess based on the TOC.
- void synth_udapp_sector_lba(uint8_t mode, const TOC& toc, const int32_t lba, int32_t lba_subq_relative_offs, uint8_t* out_buf);
- void subpw_synth_udapp_lba(const TOC& toc, const int32_t lba, const int32_t lba_subq_relative_offs, uint8_t* SubPWBuf);
+ void synth_udapp_sector_lba(uint8_t mode, const TOC* toc, const int32_t lba, int32_t lba_subq_relative_offs, uint8_t* out_buf);
+ void subpw_synth_udapp_lba(const TOC* toc, const int32_t lba, const int32_t lba_subq_relative_offs, uint8_t* SubPWBuf);
 
  // out_buf must be able to contain 2352+96 bytes.
  // "mode" is not used if the area is to be encoded as audio.
  // pass 0xFF for "mode" for "don't know", and to make guess based on the TOC.
- void synth_leadout_sector_lba(uint8_t mode, const TOC& toc, const int32_t lba, uint8_t* out_buf);
- void subpw_synth_leadout_lba(const TOC& toc, const int32_t lba, uint8_t* SubPWBuf);
+ void synth_leadout_sector_lba(uint8_t mode, const TOC* toc, const int32_t lba, uint8_t* out_buf);
+ void subpw_synth_leadout_lba(const TOC* toc, const int32_t lba, uint8_t* SubPWBuf);
 
 
  //
@@ -210,7 +203,7 @@
  //
 
  // Returns false on checksum mismatch, true on match.
- bool subq_check_checksum(const uint8_t *subq_buf);
+ bool subq_check_checksum_C(const uint8_t *subq_buf);
 
  // Calculates the checksum of Q subchannel data(not including the checksum bytes of course ;)) from subq_buf, and stores it into the appropriate position
  // in subq_buf.

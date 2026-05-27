@@ -1,8 +1,14 @@
 #ifndef __PCFX_KING_H
 #define __PCFX_KING_H
 
-void KING_StartFrame(VDC **, EmulateSpecStruct *espec);	//MDFN_Surface *surface, MDFN_Rect *DisplayRect, MDFN_Rect *LineWidths, int skip);
-void KING_SetPixelFormat(void); //int rshift, int gshift, int bshift);
+#include "pcfx.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void KING_StartFrame(VDC **, EmulateSpecStruct *espec);
+void KING_SetPixelFormat(void);
 uint16 FXVCE_Read16(uint32 A);
 void FXVCE_Write16(uint32 A, uint16 V);
 
@@ -16,23 +22,19 @@ void KING_Close(void);
 void KING_Reset(const v810_timestamp_t timestamp);
 
 uint16 KING_GetADPCMHalfWord(int ch);
-
 uint8 KING_MemPeek(uint32 A);
-
-uint8 KING_RB_Fetch();
-
+uint8 KING_RB_Fetch(void);
+MDFN_Pixel FXVCE_GetPaletteNative(uint16 index);
 void KING_SetLayerEnableMask(uint64 mask);
-
 int KING_StateAction(StateMem *sm, int load, int data_only);
-
-//void KING_SetGraphicsDecode(MDFN_Surface *surface, int line, int which, int xscroll, int yscroll, int pbn);
-
 void KING_NotifyOfBPE(bool read, bool write);
-
 void KING_SetLogFunc(void (*logfunc)(const char *, const char *, ...));
-
 void KING_EndFrame(v810_timestamp_t timestamp);
 void KING_ResetTS(v810_timestamp_t ts_base);
-
 v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

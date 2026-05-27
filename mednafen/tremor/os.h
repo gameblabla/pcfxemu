@@ -20,7 +20,7 @@
 #include <stdint.h>
 #include <math.h>
 
-#include <retro_inline.h>
+
 
 #ifndef M_PI
 #  define M_PI (3.1415926536f)

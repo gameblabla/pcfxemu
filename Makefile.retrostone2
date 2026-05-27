@@ -1,6 +1,6 @@
+CSTD ?= -std=gnu11
 PRGNAME     = pcfx.elf
 CC          = /opt/retrostone2-toolchain/usr/bin/arm-linux-gcc
-CXX 		= /opt/retrostone2-toolchain/usr/bin/arm-linux-g++
 
 #### Configuration
 
@@ -16,14 +16,14 @@ FAST_VIDEO ?= YES
 
 GIT_VERSION := " $(shell git rev-parse --short HEAD || echo unknown)"
 
-INCLUDES	= -Ilibretro-common/include -Isrc
+INCLUDES	= -Ipcfx-common/include -Isrc
 INCLUDES	+= -Ishell/headers -Ishell/video/$(PORT) -Ishell/audio -Ishell/scalers -Ishell/input/sdl -Ishell/fonts -Ishell/menu
 INCLUDES	+= -Imednafen -I./mednafen/vb -I./mednafen/sound -I. -Ishell/emu -Imednafen/include -Ishell/input -Imednafen/video -Imednafen/hw_cpu
-INCLUDES	+= -Ilibretro-common/include  -Imednafen/hw_sound
+INCLUDES	+= -Ipcfx-common/include  -Imednafen/hw_sound
 
-DEFINES		= -DLSB_FIRST -DINLINE="inline" -DINLINE="inline" -DNDEBUG -DFORCE_FRAMESKIP
+DEFINES		= -DLSB_FIRST -DNDEBUG -DFORCE_FRAMESKIP
 DEFINES		+= -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565 -DENABLE_JOYSTICKCODE
-DEFINES		+= -DSIZEOF_DOUBLE=4 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D__LIBRETRO__ -D_LOW_ACCURACY_
+DEFINES		+= -DSIZEOF_DOUBLE=4 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\" -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS -D__STDC_LIMIT_MACROS -D_LOW_ACCURACY_
 DEFINES		+= -DPACKAGE_VERSION=\"1.3.3\" -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H -DGCW0
 DEFINES		+= -DPCFX_V810_FAST_ONLY=1 -DPCFX_HIGH_DOTCLOCK_WIDTH=256
 
@@ -38,10 +38,9 @@ DEFINES += -DPCFX_FAST_VIDEO_DEFAULT=1
 endif
 
 CFLAGS		= -Wall -Wextra -Ofast  -march=armv7-a+neon-vfpv4 -mtune=cortex-a7 -mfpu=neon-vfpv4 -fdata-sections -ffunction-sections -fno-builtin -fno-PIC -flto -fno-PIC -finline-limit=60
-CFLAGS		+= $(INCLUDES) $(DEFINES) -fno-math-errno 
+CFLAGS		+= $(INCLUDES) $(DEFINES) -fno-math-errno
 
-CXXFLAGS	= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -ftree-vectorize -fno-threadsafe-statics -fno-enforce-eh-specs -fstrict-enums
-LDFLAGS     = -nodefaultlibs -lc -lgcc -lstdc++ -lm -lSDL -lz -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
+LDFLAGS     = -nodefaultlibs -lc -lgcc -lm -lSDL -lz -Wl,-z,norelro -Wl,--hash-style=gnu -Wl,--build-id=none -Wl,-O1,--sort-common,--as-needed,--gc-sections -flto -no-pie -s
 
 ifeq ($(PROFILE), YES)
 CFLAGS 		+= -fprofile-generate -fprofile-dir=/usr/local/home/pcfxg
@@ -64,9 +63,7 @@ endif
 SRCDIR 		=  ./src ./shell ./shell/emu ./shell/menu
 SRCDIR		+= ./shell/input/sdl/ ./shell/video/$(PORT) ./shell/audio/$(SOUND_ENGINE)
 SRCDIR		+= ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270 ./mednafen/pcfx ./mednafen/pcfx/input ./mednafen/sound ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
-SRCDIR		+= ./libretro-common/compat ./libretro-common/file
-SRCDIR		+= ./libretro-common/streams ./libretro-common/string ./libretro-common/time
-SRCDIR		+= ./libretro-common/vfs
+SRCDIR		+= ./pcfx-common/compat
 ifeq ($(CHD), YES)
 SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src
 endif
@@ -74,20 +71,15 @@ endif
 
 VPATH		= $(SRCDIR)
 SRC_C		= $(foreach dir, $(SRCDIR), $(wildcard $(dir)/*.c))
-SRC_CPP		= $(foreach dir, $(SRCDIR), $(wildcard $(dir)/*.cpp))
 OBJ_C		= $(notdir $(patsubst %.c, %.o, $(SRC_C)))
-OBJ_CPP		= $(notdir $(patsubst %.cpp, %.o, $(SRC_CPP)))
-OBJS		= $(OBJ_C) $(OBJ_CPP)
+OBJS		= $(OBJ_C)
 
 # Rules to make executable
 $(PRGNAME): $(OBJS)
-	$(CXX) $(CXXFLAGS) -std=gnu99 -o $(PRGNAME) $^ $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CSTD) -o $(PRGNAME) $^ $(LDFLAGS)
 
-$(OBJ_CPP) : %.o : %.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-	
 $(OBJ_C) : %.o : %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
-	
+	$(CC) $(CFLAGS) $(CSTD) -c -o $@ $<
+
 clean:
 	rm -f $(PRGNAME)$(EXESUFFIX) *.o

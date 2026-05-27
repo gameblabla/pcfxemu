@@ -2,26 +2,32 @@
 #define _STATE_HELPERS_H
 
 #include <stdint.h>
-#include <retro_inline.h>
+#include <stdbool.h>
 
-INLINE bool SF_IS_BOOL(bool *) { return(1); }
-INLINE bool SF_IS_BOOL(void *) { return(0); }
+#include "state.h"
 
-INLINE uint32_t SF_FORCE_AB(bool *) { return(0); }
-
-INLINE uint32_t SF_FORCE_A8(int8_t *) { return(0); }
-INLINE uint32_t SF_FORCE_A8(uint8_t *) { return(0); }
-
-INLINE uint32_t SF_FORCE_A16(int16_t *) { return(0); }
-INLINE uint32_t SF_FORCE_A16(uint16_t *) { return(0); }
-
-INLINE uint32_t SF_FORCE_A32(int32_t *) { return(0); }
-INLINE uint32_t SF_FORCE_A32(uint32_t *) { return(0); }
-
-INLINE uint32_t SF_FORCE_A64(int64_t *) { return(0); }
-INLINE uint32_t SF_FORCE_A64(uint64_t *) { return(0); }
-
-INLINE uint32_t SF_FORCE_D(float *) { return(0); }
+#ifdef __cplusplus
+inline bool SF_IS_BOOL(bool *) { return(1); }
+inline bool SF_IS_BOOL(void *) { return(0); }
+inline uint32_t SF_FORCE_AB(bool *) { return(0); }
+inline uint32_t SF_FORCE_A8(int8_t *) { return(0); }
+inline uint32_t SF_FORCE_A8(uint8_t *) { return(0); }
+inline uint32_t SF_FORCE_A16(int16_t *) { return(0); }
+inline uint32_t SF_FORCE_A16(uint16_t *) { return(0); }
+inline uint32_t SF_FORCE_A32(int32_t *) { return(0); }
+inline uint32_t SF_FORCE_A32(uint32_t *) { return(0); }
+inline uint32_t SF_FORCE_A64(int64_t *) { return(0); }
+inline uint32_t SF_FORCE_A64(uint64_t *) { return(0); }
+inline uint32_t SF_FORCE_D(float *) { return(0); }
+#else
+#define SF_IS_BOOL(p) _Generic((p), bool*: 1, default: 0)
+#define SF_FORCE_AB(p) 0
+#define SF_FORCE_A8(p) 0
+#define SF_FORCE_A16(p) 0
+#define SF_FORCE_A32(p) 0
+#define SF_FORCE_A64(p) 0
+#define SF_FORCE_D(p) 0
+#endif
 
 #define SFVARN(x, n) { &(x), SF_IS_BOOL(&(x)) ? 1 : (uint32_t)sizeof(x), MDFNSTATE_RLSB | (SF_IS_BOOL(&(x)) ? MDFNSTATE_BOOL : 0), n }
 #define SFVAR(x) SFVARN((x), #x)

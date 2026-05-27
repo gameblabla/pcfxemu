@@ -3,8 +3,16 @@
 
 #include "shared.h"
 
-extern uint32_t Audio_Init();
-extern void Audio_Write(int16_t* buffer, uint32_t buffer_size);
-extern void Audio_Close();
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+uint32_t Audio_Init(void);
+void Audio_Write(int16_t* buffer, uint32_t buffer_size);
+void Audio_Close(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

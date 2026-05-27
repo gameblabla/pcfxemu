@@ -1,6 +1,11 @@
 #ifndef __PCFX_TIMER_H
 #define __PCFX_TIMER_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
 void FXTIMER_Write16(uint32 A, uint16 V, const v810_timestamp_t timestamp);
 uint16 FXTIMER_Read16(uint32 A, const v810_timestamp_t timestamp);
 uint8 FXTIMER_Read8(uint32 A, const v810_timestamp_t timestamp);
@@ -11,4 +16,9 @@ void FXTIMER_Reset(void);
 void FXTIMER_Init(void);
 
 int FXTIMER_StateAction(StateMem *sm, int load, int data_only);
+
+#ifdef __cplusplus
+} /* extern "C" */
+#endif
+
 #endif

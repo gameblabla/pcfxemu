@@ -19,9 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <boolean.h>
-#include <retro_inline.h>
-#include <compat/strl.h>
+#include <stdbool.h>
+
+
 
 #include "mednafen-endian.h"
 #include "state.h"

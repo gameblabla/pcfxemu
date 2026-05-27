@@ -1,6 +1,6 @@
 #include "../mednafen-endian.h"
 
-static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
+static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -15,7 +15,7 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
  else if(A >= 0xF0000000)	// BIOS ROM mirrored throughout 0xF0000000-0xFFFFFFFF, the "official" location
 				// is at 0xFFF00000(what about on a PC-FXGA??)
  {
-  timestamp += 2;
+  (*timestamp) += 2;
   return(BIOSROM[A & 0xFFFFF]);
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
@@ -42,7 +42,7 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t &timestamp, uint32 A)
  return(0xFF);
 }
 
-static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
+static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -57,28 +57,28 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
  else if(A >= 0xF0000000)       // BIOS ROM mirrored throughout 0xF0000000-0xFFFFFFFF, the "official" location
                                 // is at 0xFFF00000
  {
-  timestamp += 2;
+  (*timestamp) += 2;
   return(le16toh(*(uint16 *)&BIOSROM[A & 0xFFFFF]));
  }
  else if(A >= 0xA0000000 && A <= 0xA3FFFFFF)
  {
-  timestamp += 4;
+  (*timestamp) += 4;
   return(FXVCE_Read16(0x4));
  }
  else if(A >= 0xA4000000 && A <= 0xA7FFFFFF)
  {
-  timestamp += 4;
-  return(fx_vdc_chips[0]->Read16(1));
+  (*timestamp) += 4;
+  return(VDC_Read16(fx_vdc_chips[0], 1, false));
  }
  else if(A >= 0xA8000000 && A <= 0xABFFFFFF)
  {
-  timestamp += 4;
-  return(fx_vdc_chips[1]->Read16(1));
+  (*timestamp) += 4;
+  return(VDC_Read16(fx_vdc_chips[1], 1, false));
  }
  else if(A >= 0xAC000000 && A <= 0xAFFFFFFF)
  {
-  timestamp += 4;
-  return(KING_Read16(timestamp, 0x604));
+  (*timestamp) += 4;
+  return(KING_Read16((*timestamp), 0x604));
  }
  else if(A >= 0xB0000000 && A <= 0xBFFFFFFF) // Write only
  {
@@ -116,7 +116,7 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t &timestamp, uint32 A)
  return(0xFFFF);
 }
 
-static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t &timestamp, uint32 A)
+static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
  {
@@ -149,7 +149,7 @@ static uint32 MDFN_FASTCALL mem_rword(v810_timestamp_t &timestamp, uint32 A)
  return(0xFFFFFFFF);
 }
 
-static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8 V)
+static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t *timestamp, uint32 A, uint8 V)
 {
  if(A <= 0x001FFFFF)
  {
@@ -182,7 +182,7 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t &timestamp, uint32 A, uint8
  }
 }
 
-static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint16 V)
+static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint16 V)
 {
  if(A <= 0x001FFFFF)
  {
@@ -211,23 +211,23 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  }
  else if(A >= 0xB0000000 && A <= 0xB3FFFFFF)
  {
-  timestamp += 4;
+  (*timestamp) += 4;
   FXVCE_Write16(0x4, V);
  }
  else if(A >= 0xB4000000 && A <= 0xB7FFFFFF)
  {
-  timestamp += 4;
-  fx_vdc_chips[0]->Write16(1, V);
+  (*timestamp) += 4;
+  VDC_Write16(fx_vdc_chips[0], 1, V);
  }
  else if(A >= 0xB8000000 && A <= 0xBBFFFFFF)
  {
-  timestamp += 4;
-  fx_vdc_chips[1]->Write16(1, V);
+  (*timestamp) += 4;
+  VDC_Write16(fx_vdc_chips[1], 1, V);
  }
  else if(A >= 0xBC000000 && A <= 0xBFFFFFFF)
  {
-  timestamp += 4;
-  KING_Write16(timestamp, 0x604, V);
+  (*timestamp) += 4;
+  KING_Write16((*timestamp), 0x604, V);
  }
  else if(A >= 0x80000000 && A <= 0x807FFFFF)
  {
@@ -237,14 +237,14 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t &timestamp, uint32 A, uint
  }
 }
 
-static void MDFN_FASTCALL mem_wword(v810_timestamp_t &timestamp, uint32 A, uint32 V)
+static void MDFN_FASTCALL mem_wword(v810_timestamp_t *timestamp, uint32 A, uint32 V)
 {
 #ifdef HAVE_HUC6273
  if(A >= 0x80500000 && A <= 0x8052FFFF)
  {
   if(WantHuC6273)
   {
-   timestamp += 4;
+   (*timestamp) += 4;
    HuC6273_Write32(A & 0x7FFFFF, V);
    return;
   }

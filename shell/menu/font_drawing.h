@@ -1,6 +1,10 @@
 #ifndef FONT_DRAWING_H
 #define FONT_DRAWING_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <string.h>
 
@@ -10,4 +14,8 @@
 
 void print_string(const char *s, const uint16_t fg_color, const uint16_t bg_color, uint32_t x, uint32_t y, uint16_t* buffer);
 
+
+#ifdef __cplusplus
+}
+#endif
 #endif

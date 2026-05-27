@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef int8_t int8;
 typedef int16_t int16;

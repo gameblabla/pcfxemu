@@ -18,7 +18,7 @@
 #include <errno.h>
 #include <string.h>
 
-#include <boolean.h>
+#include <stdbool.h>
 
 #include "settings.h"
 

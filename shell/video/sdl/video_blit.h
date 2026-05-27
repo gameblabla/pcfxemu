@@ -2,6 +2,7 @@
 #define VIDEO_BLIT_H
 
 #include <SDL/SDL.h>
+#include <stdint.h>
 
 #define HOST_WIDTH_RESOLUTION sdl_screen->w
 #define HOST_HEIGHT_RESOLUTION sdl_screen->h
@@ -9,8 +10,11 @@
 #define BACKBUFFER_WIDTH_RESOLUTION backbuffer->w
 #define BACKBUFFER_HEIGHT_RESOLUTION backbuffer->h
 
-extern SDL_Surface *sdl_screen, *backbuffer;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
+extern SDL_Surface *sdl_screen, *backbuffer;
 extern const uint32_t internal_pitch;
 #if defined(WANT_32BPP)
 extern uint32_t* __restrict__ internal_pix;
@@ -20,7 +24,6 @@ extern uint16_t* __restrict__ internal_pix;
 extern uint8_t* __restrict__ internal_pix;
 #endif
 
-
 void Init_Video(void);
 void Set_Video_Menu(void);
 void Set_Video_InGame(void);
@@ -28,5 +31,9 @@ void Video_Close(void);
 void Update_Video_Menu(void);
 void Update_Video_Ingame(void);
 void Clear_Video(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
