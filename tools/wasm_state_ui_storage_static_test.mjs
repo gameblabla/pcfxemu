@@ -1,0 +1,11 @@
+import { readFile } from 'node:fs/promises';
+const source = await readFile('web/pcfx-wasm.js', 'utf8');
+if (!source.includes("const DB_STATE_PREFIX = 'state:'")) throw new Error('state DB prefix missing');
+if (!source.includes('async function saveStateToIndexedDB()')) throw new Error('IndexedDB save function missing');
+if (!source.includes('await dbPut(stateDbKey(), bytes)')) throw new Error('save state is not written to IndexedDB');
+if (!source.includes('async function loadStateFromIndexedDB()')) throw new Error('IndexedDB load function missing');
+if (!source.includes('normalizeStoredBytes(await dbGet(stateDbKey()))')) throw new Error('load state is not read from IndexedDB');
+const saveBody = source.slice(source.indexOf('async function saveStateToIndexedDB()'), source.indexOf('async function loadStateFromIndexedDB()'));
+if (/localStorage\.setItem\(stateKey/.test(saveBody)) throw new Error('save state still writes large payload to localStorage');
+if (!source.includes('pcfx.wasm.savestate.v2.')) throw new Error('legacy v2 migration missing');
+console.log('wasm UI state storage static test ok');
