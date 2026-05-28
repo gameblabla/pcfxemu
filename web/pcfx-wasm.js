@@ -955,7 +955,9 @@ async function startSelectedSystem(system) {
     if (!started) throw new Error(`BIOS boot failed; wasm error ${wasmErrorString(wasm.pcfx_wasm_get_error?.())}`);
     els.modal.classList.remove('open');
     els.screenFrame.focus();
-    updateStorageStatus(`${displaySystemName(system)} BIOS active: ${activeBios.name}`, 'ok');
+    els.mediaName.textContent = `${displaySystemName(system)} BIOS running (no CD inserted)`;
+    updateStorageStatus(`${displaySystemName(system)} BIOS active without mounted media: ${activeBios.name}`, 'ok');
+    startAudio();
     resetFrameLimiter();
     renderOnce();
   } finally {
@@ -1152,12 +1154,16 @@ function renderOnce() {
   const media = wasm.pcfx_wasm_get_media_kind ? wasm.pcfx_wasm_get_media_kind() : 0;
   let w = wasm.pcfx_wasm_get_width();
   let h = wasm.pcfx_wasm_get_height();
+  const fbPtr = status >= 3 && w > 0 && h > 0 && wasm.pcfx_wasm_get_framebuffer
+    ? wasm.pcfx_wasm_get_framebuffer()
+    : 0;
 
-  // Do not paint the emulator fallback/framebuffer before real media is
-  // mounted. With BIOS-only startup the core has no rendered frame yet, and
-  // displaying fallback memory looked like a red corruption pattern. The
-  // visible screen should remain black until a game/disc has actually started.
-  if (!activeMedia || media === 0 || status < 3) {
+  // BIOS-only boot is valid: the core can be running with no mounted media.
+  // Do not gate video presentation on activeMedia/media-kind, or the browser
+  // UI hides the BIOS screen while the emulator continues to run in the
+  // background. Only suppress rendering before the core has produced a real
+  // framebuffer.
+  if (!fbPtr || status < 3) {
     if (!w) w = config.systemMode === 'pcfxga' ? 344 : 256;
     if (!h) h = 240;
     clearCanvasToBlack(w, h);
@@ -1167,7 +1173,7 @@ function renderOnce() {
     const pitch = wasm.pcfx_wasm_get_pitch_pixels();
     const pixelFormat = wasm.pcfx_wasm_get_pixel_format ? wasm.pcfx_wasm_get_pixel_format() : 2;
     const bytesPerPixel = wasm.pcfx_wasm_get_bytes_per_pixel ? wasm.pcfx_wasm_get_bytes_per_pixel() : 4;
-    framebufferToImageData(wasm.pcfx_wasm_get_framebuffer(), w, h, pitch, pixelFormat, bytesPerPixel);
+    framebufferToImageData(fbPtr, w, h, pitch, pixelFormat, bytesPerPixel);
     ctx.putImageData(imageData, 0, 0);
     applyVideoLayout(w, h);
     updateFpsCounter(frame);
@@ -1176,7 +1182,7 @@ function renderOnce() {
   els.runtimeStatus.textContent = STATUS_TEXT[status] || String(status);
   els.runtimeResolution.textContent = `${w}x${h}`;
   els.runtimeFrame.textContent = String(frame);
-  els.runtimeMedia.textContent = MEDIA_TEXT[media] || String(media);
+  els.runtimeMedia.textContent = media === 0 && status >= 3 ? 'BIOS / no CD' : (MEDIA_TEXT[media] || String(media));
   if (els.dropHint) els.dropHint.classList.add('hidden');
 }
 
@@ -1558,7 +1564,10 @@ function wireEvents() {
     wasm.pcfx_wasm_set_controller_type?.(controllerTypeValue());
     try {
       await loadStoredBios(config.systemMode);
-      wasm.pcfx_wasm_start();
+      if (wasm.pcfx_wasm_start()) {
+        els.mediaName.textContent = `${displaySystemName(config.systemMode)} BIOS running (no CD inserted)`;
+        startAudio();
+      }
     } catch (_) {}
     activeMedia = null;
     resetFrameLimiter();

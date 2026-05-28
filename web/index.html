@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PC-FX / PC-FXGA WebAssembly</title>
+  <title>PC-FX / PC-FXGA Emulator</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -45,8 +45,8 @@
     <aside id="sideMenu" class="side-menu" aria-label="Emulator menu">
       <header class="menu-header">
         <div>
-          <h1>PC-FX / PC-FXGA</h1>
-          <p>clang wasm32, no Emscripten</p>
+          <h1>PCFXemu</h1>
+          <p>by gameblabla</p>
         </div>
         <button id="closeMenu" class="icon-button" aria-label="Close menu">×</button>
       </header>
@@ -167,10 +167,6 @@
         <button id="startButton">Start selected system</button>
       </div>
 
-      <details>
-        <summary>Backend details</summary>
-        <p>This target compiles <code>wasm/pcfx_wasm_core.c</code> using raw clang <code>--target=wasm32</code>, <code>-nostdlib</code>, <code>--no-entry</code>, and exported linear memory. JavaScript owns file pickers, IndexedDB-backed BIOS persistence, session media loading, LocalStorage configuration, input, and browser-side final scaling.</p>
-      </details>
     </div>
   </div>
 
