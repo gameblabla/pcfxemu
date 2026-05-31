@@ -25,6 +25,7 @@ int Load_BIOS_Memory(void);
 void Emulation_Run(void);
 void PCFX_CoreClose(void);
 void PCFX_SoftReset(void);
+int PCFX_SwapCD(const char* path);
 void PCFX_SetSystemMode(int mode);
 void PCFX_SetPreferFXGABIOS(bool enabled);
 void PCFX_SetBIOSPatches(uint32_t flags);

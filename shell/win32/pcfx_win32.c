@@ -52,6 +52,7 @@
 #define ID_FILE_LOAD             100
 #define ID_FILE_BOOT_BIOS        101
 #define ID_FILE_LOAD_PHYSICAL    104
+#define ID_FILE_SWAP_PHYSICAL    105
 #define ID_FILE_CLOSE            102
 #define ID_FILE_EXIT             103
 #define ID_SYSTEM_RESET          200
@@ -783,6 +784,9 @@ static void update_menu_checks(void)
     CheckMenuItem(g_menu, ID_AUDIO_ADPCM_SUPPRESS_CLICKS,
                   MF_BYCOMMAND | (g_adpcm_suppress_reset_clicks ? MF_CHECKED : MF_UNCHECKED));
 #endif
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    EnableMenuItem(g_menu, ID_FILE_SWAP_PHYSICAL, MF_BYCOMMAND | (g_game_loaded ? MF_ENABLED : MF_GRAYED));
+#endif
     if(g_audio_menu)
     {
         UINT cd_id = g_cd_speed <= 1 ? ID_AUDIO_CD_SPEED_1X :
@@ -904,6 +908,7 @@ static HMENU build_menu(void)
     AppendMenuA(file, MF_STRING, ID_FILE_LOAD, "&Load Disc / EXE...\tCtrl+O");
 #ifdef PCFX_ENABLE_PHYSICAL_CD
     AppendMenuA(file, MF_STRING, ID_FILE_LOAD_PHYSICAL, "Load &Physical CD-ROM");
+    AppendMenuA(file, MF_STRING, ID_FILE_SWAP_PHYSICAL, "&Swap to Physical CD-ROM");
 #endif
     AppendMenuA(file, MF_STRING, ID_FILE_BOOT_BIOS, "&Boot BIOS");
     AppendMenuA(file, MF_SEPARATOR, 0, NULL);
@@ -1400,6 +1405,7 @@ static int load_game_path(HWND hwnd, const char* path)
     }
     Load_Configuration();
     g_game_loaded = 1;
+    update_menu_checks();
     open_audio_once(hwnd);
     update_audio_mute_state();
     exit_vb = 0;
@@ -1436,6 +1442,7 @@ static int boot_bios(HWND hwnd)
     }
     Load_Configuration();
     g_game_loaded = 1;
+    update_menu_checks();
     open_audio_once(hwnd);
     update_audio_mute_state();
     exit_vb = 0;
@@ -1471,6 +1478,26 @@ static void load_physical_cd(HWND hwnd)
 {
     load_game_path(hwnd, "cdrom:");
 }
+
+static void swap_physical_cd(HWND hwnd)
+{
+    if(!g_game_loaded)
+    {
+        pcfx_message_box(hwnd, "No game is running.", "PCFXEmu - Swap CD", MB_ICONINFORMATION | MB_OK);
+        return;
+    }
+
+    if(PCFX_SwapCD("cdrom:"))
+    {
+        SetWindowTextA(hwnd, "PCFXEmu - Physical CD-ROM");
+        force_video_redraw(hwnd);
+    }
+    else
+    {
+        pcfx_message_box(hwnd, "Could not swap to the physical CD-ROM drive. Check that a readable PC-FX CD-ROM is inserted and that the drive is available.",
+                         "PCFXEmu - Swap CD failed", MB_ICONERROR | MB_OK);
+    }
+}
 #endif
 
 static void close_game(void)
@@ -1485,6 +1512,7 @@ static void close_game(void)
             g_audio_open = 0;
         }
         g_game_loaded = 0;
+        update_menu_checks();
         update_audio_mute_state();
         GameName_emu[0] = 0;
         SetWindowTextA(g_hwnd, "PCFXEmu");
@@ -2071,6 +2099,7 @@ static void handle_command(HWND hwnd, int id)
         case ID_FILE_LOAD: browse_load(hwnd); break;
 #ifdef PCFX_ENABLE_PHYSICAL_CD
         case ID_FILE_LOAD_PHYSICAL: load_physical_cd(hwnd); break;
+        case ID_FILE_SWAP_PHYSICAL: swap_physical_cd(hwnd); break;
 #endif
         case ID_FILE_BOOT_BIOS: boot_bios(hwnd); break;
         case ID_FILE_CLOSE: close_game(); break;
