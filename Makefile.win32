@@ -1,0 +1,110 @@
+# Win32 frontend build for PCFXEmu.
+#
+# Default target builds two Windows executables:
+#   pcfx.exe        - 64-bit recommended build, D3D11 video and WASAPI audio enabled
+#   pcfx-winxp.exe  - 32-bit legacy/XP compatibility build, GDI + WaveOut only
+#
+# The toolchain names and common build knobs are ordinary makefile assignments,
+# not ?= defaults, so environment variables such as CC=cc do not silently select
+# the host compiler. Command-line make overrides still work when explicitly used.
+# BPP is compile-time only. Edit BPP below, or invoke make BPP=16, to switch.
+
+CSTD = -std=gnu11
+PRGNAME64 = pcfx.exe
+PRGNAME32 = pcfx-winxp.exe
+CC64 = x86_64-w64-mingw32-gcc
+CC32 = i686-w64-mingw32-gcc
+WINDRES64 = x86_64-w64-mingw32-windres
+WINDRES32 = i686-w64-mingw32-windres
+BPP = 32
+CHD = YES
+FAST_VIDEO = NO
+
+GIT_VERSION := " $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+INCLUDES  = -Ishell/win32 -Ishell/video/win32 -Ishell/input/win32 -Ishell/audio/win32
+INCLUDES += -Ishell/headers -Ishell/menu -Ishell/emu -Ishell/input -Ishell/audio
+INCLUDES += -Imednafen -Imednafen/pcfx -I./mednafen/vb -I./mednafen/sound
+INCLUDES += -Imednafen/include -Imednafen/video -Imednafen/hw_cpu -Imednafen/hw_sound
+INCLUDES += -Ipcfx-common/include -I.
+
+DEFINES_COMMON  = -DLSB_FIRST -DNDEBUG -DWANT_STEREO_SOUND -DWANT_PCFX_EMU
+DEFINES_COMMON += -DPCFX_EXTERNAL_FRONTEND -DPCFX_WIN32 -DWIN32_LEAN_AND_MEAN -DNOMINMAX
+DEFINES_COMMON += -DSIZEOF_DOUBLE=8 -DMEDNAFEN_VERSION=\"0.9.36.5\" -DPACKAGE=\"mednafen\"
+DEFINES_COMMON += -DMEDNAFEN_VERSION_NUMERIC=9365 -DMPC_FIXED_POINT -DSTDC_HEADERS
+DEFINES_COMMON += -D__STDC_LIMIT_MACROS -D_LOW_ACCURACY_ -DPACKAGE_VERSION=\"1.3.3\"
+DEFINES_COMMON += -DHAVE_LROUND -DHAVE_STDINT_H -DHAVE_STDLIB_H -DHAVE_SYS_PARAM_H
+DEFINES_COMMON += -DHAVE_HUC6273 -DPCFX_V810_ACCURATE_ONLY=1
+DEFINES_COMMON += -DPCFX_ADPCM_COMPAT_OPTIONS
+
+ifeq ($(BPP),16)
+DEFINES_COMMON += -DWANT_16BPP -DFRONTEND_SUPPORTS_RGB565
+else ifeq ($(BPP),32)
+DEFINES_COMMON += -DWANT_32BPP -DFRONTEND_SUPPORTS_XRGB8888
+else
+$(error BPP must be 16 or 32)
+endif
+
+ifeq ($(FAST_VIDEO),YES)
+DEFINES_COMMON += -DPCFX_FAST_VIDEO_DEFAULT=1
+endif
+
+DEFINES64 = $(DEFINES_COMMON) -D_WIN32_WINNT=0x0601 -DPCFX_WIN32_HAVE_D3D11 -DPCFX_WIN32_HAVE_WASAPI
+DEFINES32 = $(DEFINES_COMMON) -D_WIN32_WINNT=0x0501 -DPCFX_WIN32_XP_COMPAT
+
+SRCDIR  = ./shell/emu ./shell/win32 ./shell/video/win32 ./shell/input/win32 ./shell/audio/win32
+SRCDIR += ./mednafen ./mednafen/cdrom ./mednafen/hw_sound/pce_psg ./mednafen/hw_video/huc6270
+SRCDIR += ./mednafen/pcfx ./mednafen/pcfx/huc6273 ./mednafen/pcfx/input ./mednafen/sound
+SRCDIR += ./mednafen/hw_cpu/v810 ./mednafen/hw_cpu/v810/fpu-new ./mednafen/video
+SRCDIR += ./pcfx-common/compat
+
+ifeq ($(CHD),YES)
+INCLUDES += -Ideps/libchdr/include -Ideps/lzma-19.00/include -Ideps/zlib-1.2.11
+DEFINES64 += -DHAVE_CHD -D_7ZIP_ST
+DEFINES32 += -DHAVE_CHD -D_7ZIP_ST
+SRCDIR += ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/zlib-1.2.11
+endif
+
+SRC_C = $(sort $(foreach dir,$(SRCDIR),$(wildcard $(dir)/*.c)))
+SRC_REL = $(patsubst ./%,%,$(SRC_C))
+OBJ64 = $(addprefix build/win64/,$(SRC_REL:.c=.o)) build/win64/shell/win32/pcfx_win32_res.o
+OBJ32 = $(addprefix build/winxp/,$(SRC_REL:.c=.o)) build/winxp/shell/win32/pcfx_win32_res.o
+
+CFLAGS_COMMON = -O2 -g -fno-common -Wall -Wextra -Wno-unused-parameter $(INCLUDES)
+CFLAGS64 = $(CFLAGS_COMMON) $(DEFINES64)
+CFLAGS32 = $(CFLAGS_COMMON) $(DEFINES32)
+LDFLAGS64 = -mwindows -lcomdlg32 -lgdi32 -ld3d11 -ldxgi -ldxguid -lwinmm -lole32 -luuid -lshell32 -lxinput9_1_0 -lm
+LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm
+
+all: $(PRGNAME64) $(PRGNAME32)
+
+$(PRGNAME64): $(OBJ64)
+	$(CC64) $(CFLAGS64) $(CSTD) -o $@ $^ $(LDFLAGS64)
+
+$(PRGNAME32): $(OBJ32)
+	$(CC32) $(CFLAGS32) $(CSTD) -o $@ $^ $(LDFLAGS32)
+
+build/win64/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC64) $(CFLAGS64) $(CSTD) -c -o $@ $<
+
+build/winxp/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC32) $(CFLAGS32) $(CSTD) -c -o $@ $<
+
+build/win64/shell/win32/pcfx_win32_res.o: shell/win32/pcfx_win32.rc shell/win32/resource.h shell/win32/pcfx.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES64) -Ishell/win32 -O coff -o $@ $<
+
+build/winxp/shell/win32/pcfx_win32_res.o: shell/win32/pcfx_win32.rc shell/win32/resource.h shell/win32/pcfx.ico
+	@mkdir -p $(dir $@)
+	$(WINDRES32) -Ishell/win32 -O coff -o $@ $<
+
+win64: $(PRGNAME64)
+win32: $(PRGNAME32)
+winxp: $(PRGNAME32)
+
+clean:
+	rm -rf build $(PRGNAME64) $(PRGNAME32)
+
+.PHONY: all win64 win32 winxp clean

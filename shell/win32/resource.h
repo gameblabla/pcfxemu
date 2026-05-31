@@ -1,0 +1,6 @@
+#ifndef PCFX_WIN32_RESOURCE_H
+#define PCFX_WIN32_RESOURCE_H
+
+#define IDI_PCFX_APP 101
+
+#endif

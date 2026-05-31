@@ -8,7 +8,9 @@
 #include <strings.h>
 #include <ctype.h>
 #include <limits.h>
+#if !defined(_WIN32) || !defined(PCFX_EXTERNAL_FRONTEND)
 #include <libgen.h>
+#endif
 #define _BSD_SOURCE
 #include <sys/time.h>
 
@@ -53,8 +55,8 @@ char GameName_emu[256];
 uint8_t exit_vb = 0;
 extern uint32_t emulator_state;
 
-static char pcfx_base_directory[1024];
-static char pcfx_save_directory[1024];
+static char pcfx_base_directory[2048];
+static char pcfx_save_directory[2048];
 
 /* Mednafen - Multi-system Emulator
  *
@@ -161,6 +163,160 @@ typedef enum PCFXBIOSKind
 static PCFXBIOSKind CurrentBIOSKind = PCFX_BIOS_UNKNOWN;
 static char CurrentBIOSPath[512];
 static char CurrentBIOSMD5[33];
+
+/* Optional in-memory patches for the original PC-FX console BIOS.
+ * Patch data is derived from PC-FX_Bios_Patches by pcfx-devel, MIT licensed.
+ * They are applied only to known 1MB PC-FX console BIOS dumps after loading
+ * the BIOS into emulator memory; the file on disk is never modified. */
+static uint32 PCFXBIOSPatchFlags = 0;
+
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+static int PCFXADPCMBuggyCodecMode = PCFX_ADPCM_BUGGY_AUTO;
+static bool PCFXADPCMSuppressResetClicks = true;
+static bool PCFXADPCMGameNeedsBuggyCodec = false;
+#endif
+
+void PCFX_SetBIOSPatches(uint32_t flags)
+{
+ PCFXBIOSPatchFlags = flags & (PCFX_BIOS_PATCH_SHORTINTRO | PCFX_BIOS_PATCH_ENGLISH | PCFX_BIOS_PATCH_AUTOLAUNCH);
+}
+
+uint32_t PCFX_GetBIOSPatches(void)
+{
+ return PCFXBIOSPatchFlags;
+}
+
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+static void PCFX_ApplyADPCMCompatOptions(void)
+{
+ bool emulate_buggy_codec = false;
+ if(PCFXADPCMBuggyCodecMode == PCFX_ADPCM_BUGGY_ON)
+  emulate_buggy_codec = true;
+ else if(PCFXADPCMBuggyCodecMode == PCFX_ADPCM_BUGGY_AUTO)
+  emulate_buggy_codec = PCFXADPCMGameNeedsBuggyCodec;
+ SoundBox_SetADPCMOptions(emulate_buggy_codec, PCFXADPCMSuppressResetClicks);
+}
+
+void PCFX_SetADPCMOptions(bool emulate_buggy_codec, bool suppress_channel_reset_clicks)
+{
+ PCFXADPCMBuggyCodecMode = emulate_buggy_codec ? PCFX_ADPCM_BUGGY_ON : PCFX_ADPCM_BUGGY_OFF;
+ PCFXADPCMSuppressResetClicks = suppress_channel_reset_clicks;
+ PCFX_ApplyADPCMCompatOptions();
+}
+
+void PCFX_SetADPCMCompatOptions(int buggy_codec_mode, bool suppress_channel_reset_clicks)
+{
+ if(buggy_codec_mode < PCFX_ADPCM_BUGGY_AUTO || buggy_codec_mode > PCFX_ADPCM_BUGGY_ON)
+  buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
+ PCFXADPCMBuggyCodecMode = buggy_codec_mode;
+ PCFXADPCMSuppressResetClicks = suppress_channel_reset_clicks;
+ PCFX_ApplyADPCMCompatOptions();
+}
+
+int PCFX_GetADPCMBuggyCodecMode(void)
+{
+ return PCFXADPCMBuggyCodecMode;
+}
+
+bool PCFX_GetADPCMEmulateBuggyCodec(void)
+{
+ return SoundBox_GetADPCMEmulateBuggyCodec();
+}
+
+bool PCFX_GetADPCMSuppressChannelResetClicks(void)
+{
+ return SoundBox_GetADPCMSuppressChannelResetClicks();
+}
+#endif
+
+void PCFX_SetCDSpeed(uint_fast32_t speed)
+{
+ MDFN_SetPCFXCDSpeed(speed);
+ SCSICD_SetTransferRate(153600 * setting_cd_speed);
+}
+
+uint_fast32_t PCFX_GetCDSpeed(void)
+{
+ return MDFN_GetPCFXCDSpeed();
+}
+
+
+static const uint8 PCFX_BIOS_PATCH_ENGLISH_DATA[499] =
+{
+ 0x18, 0x14, 0x4D, 0x75, 0x73, 0x69, 0x63, 0x20, 0x20, 0x43, 0x44, 0x20, 0x20, 0x4C, 0x6F, 0x61,
+ 0x64, 0x65, 0x64, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x18, 0x20, 0x20, 0x50, 0x43, 0x2D, 0x46,
+ 0x58, 0x20, 0x20, 0x43, 0x44, 0x2D, 0x52, 0x4F, 0x4D, 0x20, 0x20, 0x4C, 0x6F, 0x61, 0x64, 0x65,
+ 0x64, 0x20, 0x20, 0x20, 0x20, 0x00, 0x1C, 0x50, 0x68, 0x6F, 0x74, 0x6F, 0x20, 0x20, 0x43, 0x44,
+ 0x20, 0x20, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x64, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00,
+ 0x20, 0x20, 0x50, 0x43, 0x20, 0x20, 0x45, 0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x20, 0x43, 0x44,
+ 0x2D, 0x52, 0x4F, 0x4D, 0x20, 0x20, 0x4C, 0x6F, 0x61, 0x64, 0x65, 0x64, 0x00, 0x07, 0x18, 0x20,
+ 0x20, 0x4E, 0x6F, 0x74, 0x20, 0x20, 0x61, 0x20, 0x20, 0x50, 0x43, 0x2D, 0x46, 0x58, 0x20, 0x20,
+ 0x43, 0x44, 0x2D, 0x52, 0x4F, 0x4D, 0x20, 0x20, 0x20, 0x00, 0x18, 0x50, 0x6C, 0x65, 0x61, 0x73,
+ 0x65, 0x20, 0x20, 0x49, 0x6E, 0x73, 0x65, 0x72, 0x74, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63, 0x20,
+ 0x20, 0x31, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x18, 0x20, 0x50, 0x6C, 0x65, 0x61,
+ 0x73, 0x65, 0x20, 0x20, 0x49, 0x6E, 0x73, 0x65, 0x72, 0x74, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63,
+ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x10, 0x13, 0x50, 0x6C, 0x65, 0x61, 0x73, 0x65,
+ 0x20, 0x20, 0x43, 0x6C, 0x6F, 0x73, 0x65, 0x20, 0x20, 0x4C, 0x69, 0x64, 0x20, 0x20, 0x20, 0x20,
+ 0x00, 0x1C, 0x1C, 0x4C, 0x6F, 0x61, 0x64, 0x69, 0x6E, 0x67, 0x20, 0x2E, 0x2E, 0x2E, 0x20, 0x20,
+ 0x20, 0x20, 0x20, 0x00, 0x0E, 0x43, 0x68, 0x65, 0x63, 0x6B, 0x69, 0x6E, 0x67, 0x20, 0x20, 0x44,
+ 0x69, 0x73, 0x63, 0x20, 0x20, 0x46, 0x6F, 0x72, 0x6D, 0x61, 0x74, 0x20, 0x20, 0x20, 0x20, 0x20,
+ 0x20, 0x00, 0x18, 0x20, 0x20, 0x4E, 0x6F, 0x74, 0x20, 0x20, 0x61, 0x20, 0x20, 0x50, 0x43, 0x2D,
+ 0x46, 0x58, 0x20, 0x20, 0x43, 0x44, 0x2D, 0x52, 0x4F, 0x4D, 0x20, 0x20, 0x20, 0x20, 0x00, 0x10,
+ 0x13, 0x55, 0x6E, 0x61, 0x62, 0x6C, 0x65, 0x20, 0x20, 0x54, 0x6F, 0x20, 0x20, 0x4C, 0x6F, 0x61,
+ 0x64, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63, 0x00, 0x18, 0x18, 0x20, 0x20, 0x50, 0x6C, 0x65, 0x61,
+ 0x73, 0x65, 0x20, 0x20, 0x53, 0x65, 0x6C, 0x65, 0x63, 0x74, 0x00, 0x18, 0x18, 0x43, 0x44, 0x2F,
+ 0x43, 0x44, 0x2D, 0x47, 0x20, 0x20, 0x50, 0x6C, 0x61, 0x79, 0x65, 0x72, 0x20, 0x20, 0x20, 0x20,
+ 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x1C, 0x10, 0x50, 0x68, 0x6F, 0x74, 0x6F, 0x20, 0x20,
+ 0x43, 0x44, 0x20, 0x20, 0x50, 0x6C, 0x61, 0x79, 0x65, 0x72, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20,
+ 0x00, 0x18, 0x18, 0x4C, 0x6F, 0x61, 0x64, 0x20, 0x20, 0x50, 0x43, 0x2D, 0x46, 0x58, 0x20, 0x20,
+ 0x44, 0x69, 0x73, 0x63, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x18, 0x10,
+ 0x46, 0x69, 0x6C, 0x65, 0x20, 0x20, 0x4D, 0x61, 0x69, 0x6E, 0x74, 0x65, 0x6E, 0x61, 0x6E, 0x63,
+ 0x65, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x00, 0x18, 0x18, 0x10, 0x43, 0x68, 0x61, 0x6E, 0x67,
+ 0x65, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63, 0x00, 0x10, 0x10, 0x50, 0x6C, 0x65, 0x61, 0x73, 0x65,
+ 0x20, 0x20, 0x43, 0x68, 0x61, 0x6E, 0x67, 0x65, 0x20, 0x20, 0x44, 0x69, 0x73, 0x63, 0x20, 0x20,
+ 0x20, 0x20, 0x20
+};
+
+static void PCFX_BIOSPatchCopy(uint32 offset, const uint8* data, uint32 size)
+{
+ if(!BIOSROM || !data || !size)
+  return;
+ if(offset >= 1024 * 1024 || size > (1024 * 1024) - offset)
+  return;
+ memcpy(BIOSROM + offset, data, size);
+}
+
+static void PCFX_BIOSPatchByte(uint32 offset, uint8 value)
+{
+ PCFX_BIOSPatchCopy(offset, &value, 1);
+}
+
+static void PCFX_ApplyBIOSPatchesToLoadedROM(void)
+{
+ if(!BIOSROM)
+  return;
+
+ /* These offsets are valid for the known original console BIOS revisions.
+  * Do not apply them to the PC-FXGA BIOS or to unknown 1MB images. */
+ if(CurrentBIOSKind != PCFX_BIOS_CONSOLE_100 && CurrentBIOSKind != PCFX_BIOS_CONSOLE_101)
+  return;
+
+ if(PCFXBIOSPatchFlags & PCFX_BIOS_PATCH_SHORTINTRO)
+ {
+  static const uint8 p0[4] = { 0x00, 0xAC, 0x0E, 0x02 };
+  static const uint8 p1[4] = { 0xE3, 0x40, 0xE3, 0x40 };
+  PCFX_BIOSPatchCopy(0x003C98, p0, sizeof(p0));
+  PCFX_BIOSPatchCopy(0x003EDA, p1, sizeof(p1));
+  PCFX_BIOSPatchByte(0x003F26, 0x02);
+ }
+
+ if(PCFXBIOSPatchFlags & PCFX_BIOS_PATCH_ENGLISH)
+  PCFX_BIOSPatchCopy(0x009438, PCFX_BIOS_PATCH_ENGLISH_DATA, sizeof(PCFX_BIOS_PATCH_ENGLISH_DATA));
+
+ if(PCFXBIOSPatchFlags & PCFX_BIOS_PATCH_AUTOLAUNCH)
+  PCFX_BIOSPatchByte(0x004171, 0x00);
+}
+
 enum
 {
  PCFX_SYSTEM_MODE_PCFX = 0,
@@ -529,6 +685,30 @@ static struct MDFNFILE* PCFX_TryOpenBIOS(const char* path, PCFXBIOSKind* kind_ou
  return fp;
 }
 
+
+static bool PCFX_ReloadCurrentBIOSROM(void)
+{
+ if(!BIOSROM || !CurrentBIOSPath[0])
+  return false;
+
+ struct MDFNFILE* fp = file_open(CurrentBIOSPath);
+ if(!fp)
+  return false;
+
+ if(fp->size != 1024 * 1024)
+ {
+  file_close(fp);
+  return false;
+ }
+
+ PCFX_MD5Hex(fp->data, fp->size, CurrentBIOSMD5);
+ CurrentBIOSKind = PCFX_ClassifyBIOS(CurrentBIOSMD5);
+ memcpy(BIOSROM, fp->data, 1024 * 1024);
+ file_close(fp);
+ PCFX_ApplyBIOSPatchesToLoadedROM();
+ return true;
+}
+
 static struct MDFNFILE* PCFX_TryOpenBIOSList(const char* base, const char* const* names, size_t count)
 {
  for(size_t i = 0; i < count; i++)
@@ -555,16 +735,46 @@ static struct MDFNFILE* PCFX_OpenBIOS(bool media_wants_fxga)
  CurrentBIOSPath[0] = 0;
  CurrentBIOSMD5[0] = 0;
 
- const bool use_fxga = PCFX_SystemModeForcesFXGA() || (PCFX_SystemModeIsAuto() && ((EmuFlags & CDGE_FLAG_FXGA) || media_wants_fxga));
+ const bool force_fxga = PCFX_SystemModeForcesFXGA();
+ const bool auto_mode = PCFX_SystemModeIsAuto();
+ const bool media_prefers_fxga = ((EmuFlags & CDGE_FLAG_FXGA) || media_wants_fxga);
  const char* base = pcfx_base_directory[0] ? pcfx_base_directory : ".";
- struct MDFNFILE* fp = use_fxga ?
-  PCFX_TryOpenBIOSList(base, fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0])) :
-  PCFX_TryOpenBIOSList(base, console_names, sizeof(console_names) / sizeof(console_names[0]));
- if(fp)
-  return fp;
+ struct MDFNFILE* fp = NULL;
+
+ if(force_fxga)
+ {
+  fp = PCFX_TryOpenBIOSList(base, fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0]));
+  if(fp)
+   return fp;
+ }
+ else if(auto_mode && media_prefers_fxga)
+ {
+  /* HuEXE and FXGA-flagged software often prefer the PC-FXGA BIOS, but they
+   * should still boot with the standard PC-FX BIOS when no PC-FXGA dump is
+   * available.  Only explicit PC-FXGA mode requires the PC-FXGA ROM. */
+  fp = PCFX_TryOpenBIOSList(base, fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0]));
+  if(fp)
+   return fp;
+  fp = PCFX_TryOpenBIOSList(base, console_names, sizeof(console_names) / sizeof(console_names[0]));
+  if(fp)
+   return fp;
+ }
+ else
+ {
+  fp = PCFX_TryOpenBIOSList(base, console_names, sizeof(console_names) / sizeof(console_names[0]));
+  if(fp)
+   return fp;
+  if(auto_mode)
+  {
+   fp = PCFX_TryOpenBIOSList(base, fxga_names, sizeof(fxga_names) / sizeof(fxga_names[0]));
+   if(fp)
+    return fp;
+  }
+ }
+
  PCFXBIOSKind base_kind = PCFX_BIOS_UNKNOWN;
  fp = PCFX_TryOpenBIOS(base, &base_kind);
- if(fp && !PCFX_BIOSKindUsableForMode(base_kind, use_fxga))
+ if(fp && !auto_mode && !PCFX_BIOSKindUsableForMode(base_kind, force_fxga))
  {
   file_close(fp);
   CurrentBIOSKind = PCFX_BIOS_UNKNOWN;
@@ -602,6 +812,7 @@ static bool LoadCommon(CDIFList *CDInterfaces)
    if(!BIOSROM)
       return(0);
    memcpy(BIOSROM, BIOSFile->data, 1024 * 1024);
+   PCFX_ApplyBIOSPatchesToLoadedROM();
 
    file_close(BIOSFile);
    BIOSFile = NULL;
@@ -772,6 +983,10 @@ static void DoMD5CDVoodoo(CDIFList *CDInterfaces)
   if(found_entry)
   {
    EmuFlags = found_entry->flags;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+   PCFXADPCMGameNeedsBuggyCodec = (found_entry->name && !strcmp(found_entry->name, "Miraculum: The Last Revelation"));
+   PCFX_ApplyADPCMCompatOptions();
+#endif
 
    if(found_entry->discs > 1)
    {
@@ -806,6 +1021,10 @@ static void DoMD5CDVoodoo(CDIFList *CDInterfaces)
 static int LoadCD(CDIFList *CDInterfaces)
 {
  EmuFlags = 0;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+ PCFXADPCMGameNeedsBuggyCodec = false;
+ PCFX_ApplyADPCMCompatOptions();
+#endif
 
  cdifs = CDInterfaces;
 
@@ -1731,6 +1950,10 @@ int Load_BIOS_Memory(void)
 
 void PCFX_SoftReset(void)
 {
+	/* Reload the original BIOS image before reset so changed in-memory BIOS
+	 * patch options are applied and previously applied patches are removed
+	 * cleanly when their option is disabled. */
+	PCFX_ReloadCurrentBIOSROM();
 	PCFX_Reset();
 }
 
@@ -1808,6 +2031,9 @@ void Emulation_Run()
 #ifdef PCFX_HEADLESS
    pcfx_headless_video_set_full_width(WantHuC6273 ? 1 : 0);
 #endif
+#ifdef PCFX_WIN32
+   PCFX_Win32_SetFullWidth(WantHuC6273 ? 1 : 0);
+#endif
    PCFX_ServicePendingHuEXEUpload();
 	EmulateSpecStruct spec = {0};
 	static int16_t sound_buf[0x10000];
@@ -1836,6 +2062,9 @@ void Emulation_Run()
 	Emulate(&spec);
 #ifdef PCFX_HEADLESS
    pcfx_headless_video_set_display_width(spec.DisplayRect.w);
+#endif
+#ifdef PCFX_WIN32
+   PCFX_Win32_SetDisplayWidth(spec.DisplayRect.w);
 #endif
 
    //int16 *const SoundBuf = spec.SoundBuf + spec.SoundBufSizeALMS * curgame->soundchan;
@@ -2082,10 +2311,15 @@ static void Clean_Emu(void)
    BIOSROM = NULL;
 }
 
+void PCFX_CoreClose(void)
+{
+   Clean_Emu();
+}
+
 #ifdef PCFX_HEADLESS
 void PCFX_Headless_CoreClose(void)
 {
-   Clean_Emu();
+   PCFX_CoreClose();
 }
 
 uint8_t* PCFX_Headless_CoreRAM(size_t* size)
@@ -2101,7 +2335,7 @@ uint8_t* PCFX_Headless_CoreSaveRAM(size_t* size)
 }
 #endif
 
-#ifndef PCFX_HEADLESS
+#if !defined(PCFX_HEADLESS) && !defined(PCFX_EXTERNAL_FRONTEND)
 /* Main entrypoint of the emulator */
 int main(int argc, char* argv[])
 {

@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDI_PCFX_APP ICON "pcfx.ico"

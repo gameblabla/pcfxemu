@@ -18,8 +18,10 @@
 #ifndef __MDFN_CDROM_CDROMIF_H
 #define __MDFN_CDROM_CDROMIF_H
 
-#include "CDUtility.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include "CDUtility.h"
 
 typedef struct CDIF CDIF;
 

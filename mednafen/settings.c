@@ -26,7 +26,7 @@ const uint_fast32_t setting_initial_scanline = 0;
 const uint_fast32_t setting_last_scanline = 239;
 const uint_fast32_t setting_nospritelimit = 0;
 const uint_fast32_t setting_rainbow_chromaip = 0;
-const uint_fast32_t setting_cd_speed = 2;
+uint_fast32_t setting_cd_speed = 2;
 #ifndef PCFX_FAST_VIDEO_DEFAULT
 #define PCFX_FAST_VIDEO_DEFAULT 0
 #endif
@@ -35,6 +35,18 @@ uint_fast32_t setting_video_fast_fallback = PCFX_FAST_VIDEO_DEFAULT;
 void MDFN_SetPCFXFastVideo(uint_fast32_t enabled)
 {
    setting_video_fast_fallback = enabled ? 1 : 0;
+}
+
+void MDFN_SetPCFXCDSpeed(uint_fast32_t speed)
+{
+   if(speed < 1) speed = 1;
+   if(speed > 16) speed = 16;
+   setting_cd_speed = speed;
+}
+
+uint_fast32_t MDFN_GetPCFXCDSpeed(void)
+{
+   return setting_cd_speed;
 }
 
 /*

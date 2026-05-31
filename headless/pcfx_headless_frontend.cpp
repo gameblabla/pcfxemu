@@ -9,10 +9,10 @@
 t_config option;
 uint32_t emulator_state = 0;
 uint32_t done = 0;
-char home_path[128];
-char save_path[192];
-char sram_path[192];
-char conf_path[192];
+char home_path[2048];
+char save_path[2048];
+char sram_path[2048];
+char conf_path[2048];
 
 static void mkdir_if_missing(const char* path)
 {

@@ -21,7 +21,7 @@ uint32_t emulator_state = 0;
 
 extern uint8_t exit_vb;
 
-char home_path[128], save_path[192], sram_path[192], conf_path[192];
+char home_path[2048], save_path[2048], sram_path[2048], conf_path[2048];
 
 extern SDL_Surface *sdl_screen;
 extern char GameName_emu[256];

@@ -65,6 +65,26 @@ static uint32 adpcm_lastts;
 
 static t_soundbox psg;
 static float ADPCMVolTable[0x40];
+static bool EmulateBuggyCodec = false;
+static bool ResetAntiClickEnabled = false;
+
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+void SoundBox_SetADPCMOptions(bool emulate_buggy_codec, bool suppress_channel_reset_clicks)
+{
+	EmulateBuggyCodec = emulate_buggy_codec;
+	ResetAntiClickEnabled = suppress_channel_reset_clicks;
+}
+
+bool SoundBox_GetADPCMEmulateBuggyCodec(void)
+{
+	return EmulateBuggyCodec;
+}
+
+bool SoundBox_GetADPCMSuppressChannelResetClicks(void)
+{
+	return ResetAntiClickEnabled;
+}
+#endif
 
 static void RedoVolume(void)
 {
@@ -141,14 +161,14 @@ void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp)
 				{
 					if(!(psg.ADPCMControl & (0x10 << ch)) && (V & (0x10 << ch)))
 					{
-						/*if(ResetAntiClickEnabled)
+						if(ResetAntiClickEnabled)
 						{
-						psg.ResetAntiClick[ch] += (int64)psg.ADPCMPredictor[ch] << 32;
-						if(psg.ResetAntiClick[ch] > ((int64)0x3FFF << 32))
-							psg.ResetAntiClick[ch] = (int64)0x3FFF << 32;
-						if(psg.ResetAntiClick[ch] < ((int64)-0x4000 << 32))
-							psg.ResetAntiClick[ch] = (int64)-0x4000 << 32;
-						}*/
+							psg.ResetAntiClick[ch] += (int64)((uint64)psg.ADPCMPredictor[ch] << 32);
+							if(psg.ResetAntiClick[ch] > ((int64)0x3FFF << 32))
+								psg.ResetAntiClick[ch] = (int64)0x3FFF << 32;
+							if(psg.ResetAntiClick[ch] < -((int64)0x4000 << 32))
+								psg.ResetAntiClick[ch] = -((int64)0x4000 << 32);
+						}
 						psg.ADPCMPredictor[ch] = 0;
 						psg.StepSizeIndex[ch] = 0;
 					}
@@ -241,7 +261,14 @@ v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp)
 							uint8 nibble = (psg.ADPCMHalfWord[ch] >> (psg.ADPCMWhichNibble[ch])) & 0xF;
 							int32 BaseStepSize = StepSizes[psg.StepSizeIndex[ch]];
 							
-							psg.ADPCMDelta[ch] = BaseStepSize * ((nibble & 0x7) + 1);
+							if(EmulateBuggyCodec)
+							{
+								if(BaseStepSize == 1552)
+									BaseStepSize = 1522;
+								psg.ADPCMDelta[ch] = BaseStepSize * ((nibble & 0x7) + 1) * 2;
+							}
+							else
+								psg.ADPCMDelta[ch] = BaseStepSize * ((nibble & 0x7) + 1);
 
 							// Linear interpolation turned on?
 							if(psg.ADPCMControl & (0x4 << ch))
@@ -291,8 +318,16 @@ v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp)
 			if(SoundEnabled)
 			{
 				int32 samp[2];
-				samp[0] = (int32)((psg.ADPCMPredictor[ch] + (psg.ResetAntiClick[ch] >> 32)) * psg.VolumeFiltered[ch][0]);
-				samp[1] = (int32)((psg.ADPCMPredictor[ch] + (psg.ResetAntiClick[ch] >> 32)) * psg.VolumeFiltered[ch][1]);
+				if(EmulateBuggyCodec)
+				{
+					samp[0] = (int32)(((psg.ADPCMPredictor[ch] >> 1) + (psg.ResetAntiClick[ch] >> 33)) * psg.VolumeFiltered[ch][0]);
+					samp[1] = (int32)(((psg.ADPCMPredictor[ch] >> 1) + (psg.ResetAntiClick[ch] >> 33)) * psg.VolumeFiltered[ch][1]);
+				}
+				else
+				{
+					samp[0] = (int32)((psg.ADPCMPredictor[ch] + (psg.ResetAntiClick[ch] >> 32)) * psg.VolumeFiltered[ch][0]);
+					samp[1] = (int32)((psg.ADPCMPredictor[ch] + (psg.ResetAntiClick[ch] >> 32)) * psg.VolumeFiltered[ch][1]);
+				}
 				PCFX_RawAudio_AddDelta(&FXRawMixer, synthtime, (samp[0] - psg.ADPCM_last[ch][0]) / 2, (samp[1] - psg.ADPCM_last[ch][1]) / 2);
 				psg.ADPCM_last[ch][0] = samp[0];
 				psg.ADPCM_last[ch][1] = samp[1];
@@ -410,8 +445,8 @@ int SoundBox_StateAction(StateMem *sm, int load, int data_only)
 			SoundBox_Clamp32(&psg.ADPCMPredictor[ch], -0x4000, 0x3FFF);
 			SoundBox_Clamp64(&psg.ResetAntiClick[ch], -((int64)0x4000 << 32), ((int64)0x3FFF << 32));
 
-			//if(!ResetAntiClickEnabled)
-			psg.ResetAntiClick[ch] = 0;
+			if(!ResetAntiClickEnabled)
+				psg.ResetAntiClick[ch] = 0;
 			SoundBox_Clamp32(&psg.StepSizeIndex[ch], 0, 48);
 			SoundBox_Clamp32(&psg.bigdiv, 1, 1365);
 			SoundBox_Clamp32(&psg.smalldiv, 1, 8);

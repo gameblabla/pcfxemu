@@ -59,6 +59,12 @@ int32 SoundBox_Flush(const uint32, int16 *SoundBuf, const int32 MaxSoundFrames);
 void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp);
 int SoundBox_Init(void);
 
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+void SoundBox_SetADPCMOptions(bool emulate_buggy_codec, bool suppress_channel_reset_clicks);
+bool SoundBox_GetADPCMEmulateBuggyCodec(void);
+bool SoundBox_GetADPCMSuppressChannelResetClicks(void);
+#endif
+
 void SoundBox_Reset(const v810_timestamp_t timestamp);
 
 int SoundBox_StateAction(StateMem *sm, int load, int data_only);
