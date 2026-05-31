@@ -1,4 +1,4 @@
-const STORAGE_CONFIG = 'pcfx.wasm.config.v7';
+const STORAGE_CONFIG = 'pcfx.wasm.config.v8';
 const STORAGE_STATE_PREFIX = 'pcfx.wasm.savestate.v3.';
 const DB_STATE_PREFIX = 'state:';
 const STORAGE_MANIFEST = 'pcfx.wasm.storage.manifest.v2';
@@ -43,6 +43,8 @@ const DEFAULT_CONFIG = {
   keysP2: { ...DEFAULT_KEYS_P2 },
   touchGamepad: { opacity: 0.72 },
   video: { aspect: 'native', smoothUpscale: false, scanlines: false, showFps: true },
+  audio: { adpcmBuggyMode: 'auto', adpcmSuppressClicks: true, cdSpeed: 2 },
+  biosPatches: { shortIntro: false, english: false, autoLaunch: false },
   enable3D: true,
   controllerType: 'gamepad',
   stateSlot: 0,
@@ -89,6 +91,12 @@ const els = {
   runtimeFrame: document.getElementById('runtimeFrame'),
   runtimeMedia: document.getElementById('runtimeMedia'),
   enable3D: document.getElementById('enable3D'),
+  biosPatchShortIntro: document.getElementById('biosPatchShortIntro'),
+  biosPatchEnglish: document.getElementById('biosPatchEnglish'),
+  biosPatchAutoLaunch: document.getElementById('biosPatchAutoLaunch'),
+  adpcmBuggyMode: document.getElementById('adpcmBuggyMode'),
+  adpcmSuppressClicks: document.getElementById('adpcmSuppressClicks'),
+  cdSpeed: document.getElementById('cdSpeed'),
   aspectMode: document.getElementById('aspectMode'),
   smoothUpscale: document.getElementById('smoothUpscale'),
   scanlines: document.getElementById('scanlines'),
@@ -168,6 +176,16 @@ function loadConfig() {
           scanlines: !!saved.video?.scanlines,
           showFps: saved.video?.showFps !== false,
         },
+        audio: {
+          adpcmBuggyMode: ['auto', 'off', 'on'].includes(saved.audio?.adpcmBuggyMode) ? saved.audio.adpcmBuggyMode : 'auto',
+          adpcmSuppressClicks: saved.audio?.adpcmSuppressClicks !== false,
+          cdSpeed: [1, 2, 4, 8, 16].includes(Number(saved.audio?.cdSpeed)) ? Number(saved.audio.cdSpeed) : 2,
+        },
+        biosPatches: {
+          shortIntro: !!saved.biosPatches?.shortIntro,
+          english: !!saved.biosPatches?.english,
+          autoLaunch: !!saved.biosPatches?.autoLaunch,
+        },
         enable3D: saved.enable3D !== false,
         controllerType: saved.controllerType === 'mouse' ? 'mouse' : 'gamepad',
         stateSlot: Number.isInteger(saved.stateSlot) ? saved.stateSlot : 0,
@@ -236,6 +254,24 @@ function dbClear() {
 
 function normalizeSystemMode(mode) { return mode === 'pcfx' || mode === 'pcfxga' || mode === 'auto' ? mode : 'auto'; }
 function systemModeValue(mode = config.systemMode) { return mode === 'pcfxga' ? 1 : mode === 'auto' ? 2 : 0; }
+function biosPatchFlags() {
+  return (config.biosPatches?.shortIntro ? 1 : 0) |
+         (config.biosPatches?.english ? 2 : 0) |
+         (config.biosPatches?.autoLaunch ? 4 : 0);
+}
+function adpcmBuggyModeValue() {
+  return config.audio?.adpcmBuggyMode === 'off' ? 1 : config.audio?.adpcmBuggyMode === 'on' ? 2 : 0;
+}
+function cdSpeedValue() {
+  const v = Number(config.audio?.cdSpeed);
+  return [1, 2, 4, 8, 16].includes(v) ? v : 2;
+}
+function applyWasmCoreOptions() {
+  if (!wasm) return;
+  wasm.pcfx_wasm_set_bios_patches?.(biosPatchFlags());
+  wasm.pcfx_wasm_set_cd_speed?.(cdSpeedValue());
+  wasm.pcfx_wasm_set_adpcm_compat?.(adpcmBuggyModeValue(), config.audio?.adpcmSuppressClicks === false ? 0 : 1);
+}
 function biosKindForSystem(system) { return system === 'pcfxga' ? 2 : 1; }
 function displaySystemName(system) { return system === 'pcfxga' ? 'PC-FXGA' : system === 'auto' ? 'Auto' : 'PC-FX'; }
 function selectedStartupSystem() { return normalizeSystemMode(document.querySelector('input[name="startupSystemMode"]:checked')?.value); }
@@ -249,6 +285,12 @@ function applyConfigToControls() {
   setRadioGroup('systemMode', config.systemMode);
   setRadioGroup('startupSystemMode', config.systemMode);
   els.enable3D.checked = config.enable3D;
+  if (els.biosPatchShortIntro) els.biosPatchShortIntro.checked = !!config.biosPatches?.shortIntro;
+  if (els.biosPatchEnglish) els.biosPatchEnglish.checked = !!config.biosPatches?.english;
+  if (els.biosPatchAutoLaunch) els.biosPatchAutoLaunch.checked = !!config.biosPatches?.autoLaunch;
+  if (els.adpcmBuggyMode) els.adpcmBuggyMode.value = ['auto', 'off', 'on'].includes(config.audio?.adpcmBuggyMode) ? config.audio.adpcmBuggyMode : 'auto';
+  if (els.adpcmSuppressClicks) els.adpcmSuppressClicks.checked = config.audio?.adpcmSuppressClicks !== false;
+  if (els.cdSpeed) els.cdSpeed.value = String(cdSpeedValue());
   els.aspectMode.value = config.video.aspect;
   els.smoothUpscale.checked = config.video.smoothUpscale;
   els.scanlines.checked = config.video.scanlines;
@@ -336,6 +378,7 @@ async function instantiateBackend() {
   wasm.pcfx_wasm_init(systemModeValue());
   wasm.pcfx_wasm_set_3d_enabled(config.enable3D ? 1 : 0);
   wasm.pcfx_wasm_set_browser_smooth(config.video.smoothUpscale ? 1 : 0);
+  applyWasmCoreOptions();
   renderOnce();
 }
 
@@ -551,6 +594,14 @@ async function loadStoredBios(system) {
   const entry = requireSelectedBios(system);
   resetHostFiles();
   wasm.pcfx_wasm_reset_heap();
+  // pcfx_wasm_reset_heap() preserves options now, but re-send the browser
+  // configuration here as a guard against older cached cores and to keep the
+  // call order explicit: reset VFS/heap, then apply options, then load BIOS.
+  wasm.pcfx_wasm_set_system_mode?.(systemModeValue(system));
+  wasm.pcfx_wasm_set_3d_enabled?.(config.enable3D ? 1 : 0);
+  wasm.pcfx_wasm_set_browser_smooth?.(config.video.smoothUpscale ? 1 : 0);
+  wasm.pcfx_wasm_set_controller_type?.(controllerTypeValue());
+  applyWasmCoreOptions();
 
   const loadOne = async (name) => {
     const biosEntry = manifest.bios?.[name];
@@ -867,6 +918,7 @@ async function storeMedia(files) {
     wasm.pcfx_wasm_set_3d_enabled(config.enable3D ? 1 : 0);
     wasm.pcfx_wasm_set_browser_smooth(config.video.smoothUpscale ? 1 : 0);
     wasm.pcfx_wasm_set_controller_type?.(controllerTypeValue());
+    applyWasmCoreOptions();
     await loadStoredBios(config.systemMode);
 
     const media = await loadMediaFilesIntoWasm(files);
@@ -950,6 +1002,7 @@ async function startSelectedSystem(system) {
     wasm.pcfx_wasm_set_3d_enabled(config.enable3D ? 1 : 0);
     wasm.pcfx_wasm_set_browser_smooth(config.video.smoothUpscale ? 1 : 0);
     wasm.pcfx_wasm_set_controller_type?.(controllerTypeValue());
+    applyWasmCoreOptions();
     await loadStoredBios(system);
     const started = wasm.pcfx_wasm_start();
     if (!started) throw new Error(`BIOS boot failed; wasm error ${wasmErrorString(wasm.pcfx_wasm_get_error?.())}`);
@@ -1450,6 +1503,7 @@ async function clearAllStorage() {
   rebuildControlMap();
   resetHostFiles();
   wasm?.pcfx_wasm_init(systemModeValue());
+  applyWasmCoreOptions();
   clearAudioQueue();
   clearCanvasToBlack();
   updateStorageStatus('browser storage cleared', 'warn');
@@ -1475,6 +1529,16 @@ function setSystemMode(mode) {
 
 function applyRuntimeOptions() {
   config.enable3D = els.enable3D.checked;
+  config.biosPatches = {
+    shortIntro: !!els.biosPatchShortIntro?.checked,
+    english: !!els.biosPatchEnglish?.checked,
+    autoLaunch: !!els.biosPatchAutoLaunch?.checked,
+  };
+  config.audio = {
+    adpcmBuggyMode: ['auto', 'off', 'on'].includes(els.adpcmBuggyMode?.value) ? els.adpcmBuggyMode.value : 'auto',
+    adpcmSuppressClicks: els.adpcmSuppressClicks?.checked !== false,
+    cdSpeed: [1, 2, 4, 8, 16].includes(Number(els.cdSpeed?.value)) ? Number(els.cdSpeed.value) : 2,
+  };
   config.video.aspect = els.aspectMode.value;
   config.video.smoothUpscale = els.smoothUpscale.checked;
   config.video.scanlines = els.scanlines.checked;
@@ -1487,6 +1551,7 @@ function applyRuntimeOptions() {
   wasm?.pcfx_wasm_set_3d_enabled(config.enable3D ? 1 : 0);
   wasm?.pcfx_wasm_set_browser_smooth(config.video.smoothUpscale ? 1 : 0);
   wasm?.pcfx_wasm_set_controller_type?.(controllerTypeValue());
+  applyWasmCoreOptions();
   if (config.controllerType !== 'mouse' && document.pointerLockElement === els.canvas) document.exitPointerLock?.();
   resetMouseDeltas();
   mouseButtons = 0;
@@ -1562,6 +1627,7 @@ function wireEvents() {
     resetHostFiles();
     wasm.pcfx_wasm_set_3d_enabled(config.enable3D ? 1 : 0);
     wasm.pcfx_wasm_set_controller_type?.(controllerTypeValue());
+    applyWasmCoreOptions();
     try {
       await loadStoredBios(config.systemMode);
       if (wasm.pcfx_wasm_start()) {
@@ -1610,7 +1676,7 @@ function wireEvents() {
     loadingMedia = false;
   }));
 
-  for (const el of [els.enable3D, els.aspectMode, els.smoothUpscale, els.scanlines, els.showFps, els.controllerType, els.stateSlot, els.touchOpacity].filter(Boolean)) {
+  for (const el of [els.enable3D, els.biosPatchShortIntro, els.biosPatchEnglish, els.biosPatchAutoLaunch, els.adpcmBuggyMode, els.adpcmSuppressClicks, els.cdSpeed, els.aspectMode, els.smoothUpscale, els.scanlines, els.showFps, els.controllerType, els.stateSlot, els.touchOpacity].filter(Boolean)) {
     el.addEventListener('change', applyRuntimeOptions);
   }
 

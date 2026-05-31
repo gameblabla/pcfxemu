@@ -16,6 +16,8 @@ void PCFX_Win32_AudioSetBackend(int backend);
 int  PCFX_Win32_AudioGetBackend(void);
 const char* PCFX_Win32_AudioBackendName(int backend);
 const char* PCFX_Win32_AudioLastError(void);
+void PCFX_Win32_AudioSetMuted(int muted);
+int  PCFX_Win32_AudioGetMuted(void);
 
 #ifdef __cplusplus
 }

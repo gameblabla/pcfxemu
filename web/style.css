@@ -68,6 +68,7 @@ p { margin: .35rem 0; color: var(--muted); }
 .row > * { flex: 1; }
 .segmented, .system-choice { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--text); }
+.option-group { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,0.03); }
 .runtime-grid { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 10px 0 0; }
 dt { color: var(--muted); }
 dd { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }

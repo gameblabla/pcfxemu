@@ -37,6 +37,16 @@ void PCFX_SetSystemMode(int mode);
 void PCFX_SetControllerType(uint8_t type);
 uint8_t PCFX_GetControllerType(void);
 void PCFX_SoftReset(void);
+void PCFX_SetBIOSPatches(uint32_t flags);
+uint32_t PCFX_GetBIOSPatches(void);
+void PCFX_SetCDSpeed(uint_fast32_t speed);
+uint_fast32_t PCFX_GetCDSpeed(void);
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+void PCFX_SetADPCMCompatOptions(int buggy_codec_mode, bool suppress_channel_reset_clicks);
+int PCFX_GetADPCMBuggyCodecMode(void);
+bool PCFX_GetADPCMEmulateBuggyCodec(void);
+bool PCFX_GetADPCMSuppressChannelResetClicks(void);
+#endif
 extern int Load_Game_Memory(char* path);
 extern int Load_BIOS_Memory(void);
 extern int PCFX_SwapCD(const char* path);
@@ -270,6 +280,13 @@ PCFX_Headless* pcfx_headless_create(const PCFX_HeadlessConfig* config)
     emu->enable_3d_hardware = !(config && config->disable_3d_hardware);
     PCFX_SetHuC6273Enabled(emu->enable_3d_hardware);
     PCFX_SetSystemMode(config ? config->prefer_fxga_bios : 0);
+    pcfx_headless_set_bios_patches(emu, config ? config->bios_patch_flags : 0u);
+    pcfx_headless_set_cd_speed(emu, (config && config->cd_speed) ? (uint32_t)config->cd_speed : 2u);
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+    pcfx_headless_set_adpcm_compat(emu,
+        config ? config->adpcm_buggy_codec_mode : PCFX_ADPCM_BUGGY_AUTO,
+        config ? config->adpcm_suppress_reset_clicks : 1);
+#endif
 
     g_active = emu;
     Emu_Init();
@@ -455,6 +472,75 @@ int pcfx_headless_using_fast_video(const PCFX_Headless* emu)
 int pcfx_headless_3d_hardware_enabled(const PCFX_Headless* emu)
 {
     return emu ? (emu->enable_3d_hardware ? 1 : 0) : (PCFX_GetHuC6273Enabled() ? 1 : 0);
+}
+
+void pcfx_headless_set_bios_patches(PCFX_Headless* emu, uint32_t flags)
+{
+    (void)emu;
+    PCFX_SetBIOSPatches(flags);
+}
+
+uint32_t pcfx_headless_get_bios_patches(PCFX_Headless* emu)
+{
+    (void)emu;
+    return PCFX_GetBIOSPatches();
+}
+
+void pcfx_headless_set_cd_speed(PCFX_Headless* emu, uint32_t speed)
+{
+    (void)emu;
+    if(speed != 1u && speed != 2u && speed != 4u && speed != 8u && speed != 16u)
+        speed = 2u;
+    PCFX_SetCDSpeed((uint_fast32_t)speed);
+}
+
+uint32_t pcfx_headless_get_cd_speed(PCFX_Headless* emu)
+{
+    (void)emu;
+    return (uint32_t)PCFX_GetCDSpeed();
+}
+
+void pcfx_headless_set_adpcm_compat(PCFX_Headless* emu, int buggy_codec_mode, int suppress_reset_clicks)
+{
+    (void)emu;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+    if(buggy_codec_mode < PCFX_ADPCM_BUGGY_AUTO || buggy_codec_mode > PCFX_ADPCM_BUGGY_ON)
+        buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
+    PCFX_SetADPCMCompatOptions(buggy_codec_mode, suppress_reset_clicks != 0);
+#else
+    (void)buggy_codec_mode;
+    (void)suppress_reset_clicks;
+#endif
+}
+
+int pcfx_headless_get_adpcm_buggy_codec_mode(PCFX_Headless* emu)
+{
+    (void)emu;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+    return PCFX_GetADPCMBuggyCodecMode();
+#else
+    return PCFX_ADPCM_BUGGY_AUTO;
+#endif
+}
+
+int pcfx_headless_get_adpcm_suppress_reset_clicks(PCFX_Headless* emu)
+{
+    (void)emu;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+    return PCFX_GetADPCMSuppressChannelResetClicks() ? 1 : 0;
+#else
+    return 1;
+#endif
+}
+
+int pcfx_headless_get_adpcm_effective_buggy_codec(PCFX_Headless* emu)
+{
+    (void)emu;
+#ifdef PCFX_ADPCM_COMPAT_OPTIONS
+    return PCFX_GetADPCMEmulateBuggyCodec() ? 1 : 0;
+#else
+    return 0;
+#endif
 }
 
 int pcfx_headless_save_screenshot_ppm(PCFX_Headless* emu, const char* path)

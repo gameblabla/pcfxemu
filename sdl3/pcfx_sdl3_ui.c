@@ -50,13 +50,14 @@ enum MenuTab
     MENU_TAB_MEDIA = 0,
     MENU_TAB_SYSTEM,
     MENU_TAB_VIDEO,
+    MENU_TAB_AUDIO,
     MENU_TAB_STATES,
     MENU_TAB_CONTROLS,
     MENU_TAB_COUNT
 };
 
 static const char* const k_menu_tabs[MENU_TAB_COUNT] = {
-    "Media", "System", "Video", "States", "Controls"
+    "Media", "System", "Video", "Audio", "States", "Controls"
 };
 
 struct Binding
@@ -111,6 +112,63 @@ static int next_system_mode(int mode)
     return mode == PCFX_UI_MODE_AUTO ? PCFX_UI_MODE_PCFX : mode + 1;
 }
 
+static const char* adpcm_buggy_mode_name(int mode)
+{
+    switch(mode)
+    {
+        case PCFX_ADPCM_BUGGY_OFF: return "Off";
+        case PCFX_ADPCM_BUGGY_ON: return "On";
+        default: return "Auto (Miraculum only)";
+    }
+}
+
+static int next_adpcm_buggy_mode(int mode)
+{
+    return mode >= PCFX_ADPCM_BUGGY_ON ? PCFX_ADPCM_BUGGY_AUTO : mode + 1;
+}
+
+static int normalize_cd_speed(int speed)
+{
+    return (speed == 1 || speed == 2 || speed == 4 || speed == 8 || speed == 16) ? speed : 2;
+}
+
+static int next_cd_speed(int speed)
+{
+    switch(normalize_cd_speed(speed))
+    {
+        case 1: return 2;
+        case 2: return 4;
+        case 4: return 8;
+        case 8: return 16;
+        default: return 1;
+    }
+}
+
+static uint32_t parse_bios_patch_flags(const char* value)
+{
+    uint32_t flags = 0;
+    if(!value || !value[0])
+        return 0;
+    if(!strcasecmp(value, "all"))
+        return PCFX_BIOS_PATCH_SHORTINTRO | PCFX_BIOS_PATCH_ENGLISH | PCFX_BIOS_PATCH_AUTOLAUNCH;
+    if(!strcasecmp(value, "none") || !strcmp(value, "0"))
+        return 0;
+
+    char tmp[128];
+    snprintf(tmp, sizeof(tmp), "%s", value);
+    for(char* tok = strtok(tmp, ",+;"); tok; tok = strtok(NULL, ",+;"))
+    {
+        while(*tok == ' ' || *tok == '	') tok++;
+        if(!strcasecmp(tok, "short") || !strcasecmp(tok, "shortintro") || !strcasecmp(tok, "fastboot"))
+            flags |= PCFX_BIOS_PATCH_SHORTINTRO;
+        else if(!strcasecmp(tok, "english") || !strcasecmp(tok, "en"))
+            flags |= PCFX_BIOS_PATCH_ENGLISH;
+        else if(!strcasecmp(tok, "autolaunch") || !strcasecmp(tok, "autoboot") || !strcasecmp(tok, "cd"))
+            flags |= PCFX_BIOS_PATCH_AUTOLAUNCH;
+    }
+    return flags;
+}
+
 struct App
 {
     SDL_Window* window;
@@ -158,6 +216,10 @@ struct App
     int menu_hover_tab;
     int menu_hover_item;
     bool fast_video;
+    uint32_t bios_patch_flags;
+    int adpcm_buggy_codec_mode;
+    bool adpcm_suppress_reset_clicks;
+    int cd_speed;
     bool pending_load;
     volatile bool pending_swap;
     char pending_load_path[PATH_MAX];
@@ -1000,6 +1062,10 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
     cfg.fast_video = app->fast_video ? 1 : 0;
     cfg.disable_3d_hardware = app->enable_3d_hardware ? 0 : 1;
     cfg.prefer_fxga_bios = app->system_mode;
+    cfg.bios_patch_flags = app->bios_patch_flags;
+    cfg.cd_speed = normalize_cd_speed(app->cd_speed);
+    cfg.adpcm_buggy_codec_mode = app->adpcm_buggy_codec_mode;
+    cfg.adpcm_suppress_reset_clicks = app->adpcm_suppress_reset_clicks ? 1 : 0;
     app->emu = pcfx_headless_create(&cfg);
     if(!app->emu)
     {
@@ -1108,8 +1174,9 @@ static int menu_item_count(int tab)
     switch(tab)
     {
         case MENU_TAB_MEDIA: return 5;
-        case MENU_TAB_SYSTEM: return 6;
+        case MENU_TAB_SYSTEM: return 9;
         case MENU_TAB_VIDEO: return 4;
+        case MENU_TAB_AUDIO: return 3;
         case MENU_TAB_STATES: return 5;
         case MENU_TAB_CONTROLS: return 10;
         default: return 0;
@@ -1169,6 +1236,9 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
                 case 3: label = "Soft reset current system"; break;
                 case 4: label = "Reload current media"; break;
                 case 5: snprintf(out, out_size, "BIOS path: %.86s", app->bios_dir[0] ? app->bios_dir : "."); return;
+                case 6: snprintf(out, out_size, "BIOS patch: short intro / faster boot: %s", (app->bios_patch_flags & PCFX_BIOS_PATCH_SHORTINTRO) ? "on" : "off"); return;
+                case 7: snprintf(out, out_size, "BIOS patch: partial English menus: %s", (app->bios_patch_flags & PCFX_BIOS_PATCH_ENGLISH) ? "on" : "off"); return;
+                case 8: snprintf(out, out_size, "BIOS patch: auto-launch CD: %s", (app->bios_patch_flags & PCFX_BIOS_PATCH_AUTOLAUNCH) ? "on" : "off"); return;
             }
             break;
         case MENU_TAB_VIDEO:
@@ -1178,6 +1248,14 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
                 case 1: snprintf(out, out_size, "Scaling filter: %s", app->bilinear ? "linear" : "nearest"); return;
                 case 2: snprintf(out, out_size, "Scanlines: %s", app->scanlines ? "on" : "off"); return;
                 case 3: snprintf(out, out_size, "Fullscreen: %s", app->fullscreen ? "on" : "off"); return;
+            }
+            break;
+        case MENU_TAB_AUDIO:
+            switch(index)
+            {
+                case 0: snprintf(out, out_size, "ADPCM buggy encoder codec: %s%s", adpcm_buggy_mode_name(app->adpcm_buggy_codec_mode), pcfx_headless_get_adpcm_effective_buggy_codec((PCFX_Headless*)app->emu) ? " (active)" : ""); return;
+                case 1: snprintf(out, out_size, "ADPCM suppress channel-reset clicks: %s", app->adpcm_suppress_reset_clicks ? "on" : "off"); return;
+                case 2: snprintf(out, out_size, "CD-ROM emulator speed: %dx", normalize_cd_speed(app->cd_speed)); return;
             }
             break;
         case MENU_TAB_STATES:
@@ -1301,6 +1379,21 @@ static void activate_menu_item(struct App* app)
                 case 5:
                     set_message(app, "BIOS path: %s", app->bios_dir[0] ? app->bios_dir : ".");
                     break;
+                case 6:
+                    app->bios_patch_flags ^= PCFX_BIOS_PATCH_SHORTINTRO;
+                    pcfx_headless_set_bios_patches(app->emu, app->bios_patch_flags);
+                    set_message(app, "BIOS short-intro patch %s; soft reset or boot BIOS to apply", (app->bios_patch_flags & PCFX_BIOS_PATCH_SHORTINTRO) ? "on" : "off");
+                    break;
+                case 7:
+                    app->bios_patch_flags ^= PCFX_BIOS_PATCH_ENGLISH;
+                    pcfx_headless_set_bios_patches(app->emu, app->bios_patch_flags);
+                    set_message(app, "BIOS English patch %s; soft reset or boot BIOS to apply", (app->bios_patch_flags & PCFX_BIOS_PATCH_ENGLISH) ? "on" : "off");
+                    break;
+                case 8:
+                    app->bios_patch_flags ^= PCFX_BIOS_PATCH_AUTOLAUNCH;
+                    pcfx_headless_set_bios_patches(app->emu, app->bios_patch_flags);
+                    set_message(app, "BIOS auto-launch patch %s; soft reset or boot BIOS to apply", (app->bios_patch_flags & PCFX_BIOS_PATCH_AUTOLAUNCH) ? "on" : "off");
+                    break;
             }
             break;
         case MENU_TAB_VIDEO:
@@ -1324,6 +1417,26 @@ static void activate_menu_item(struct App* app)
                     app->fullscreen = !app->fullscreen;
                     SDL_SetWindowFullscreen(app->window, app->fullscreen);
                     set_message(app, app->fullscreen ? "Fullscreen" : "Windowed");
+                    break;
+            }
+            break;
+        case MENU_TAB_AUDIO:
+            switch(idx)
+            {
+                case 0:
+                    app->adpcm_buggy_codec_mode = next_adpcm_buggy_mode(app->adpcm_buggy_codec_mode);
+                    pcfx_headless_set_adpcm_compat(app->emu, app->adpcm_buggy_codec_mode, app->adpcm_suppress_reset_clicks ? 1 : 0);
+                    set_message(app, "ADPCM buggy codec: %s", adpcm_buggy_mode_name(app->adpcm_buggy_codec_mode));
+                    break;
+                case 1:
+                    app->adpcm_suppress_reset_clicks = !app->adpcm_suppress_reset_clicks;
+                    pcfx_headless_set_adpcm_compat(app->emu, app->adpcm_buggy_codec_mode, app->adpcm_suppress_reset_clicks ? 1 : 0);
+                    set_message(app, "ADPCM reset-click suppression: %s", app->adpcm_suppress_reset_clicks ? "on" : "off");
+                    break;
+                case 2:
+                    app->cd_speed = next_cd_speed(app->cd_speed);
+                    pcfx_headless_set_cd_speed(app->emu, (uint32_t)app->cd_speed);
+                    set_message(app, "CD-ROM speed: %dx", app->cd_speed);
                     break;
             }
             break;
@@ -1712,7 +1825,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--disable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen] [--native-aspect] [--stretch] [--nearest] [--scanlines] [--mouse] game.cue|game.chd|game.zip|homebrew_dir|program.EX\n\n"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--disable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen] [--native-aspect] [--stretch] [--nearest] [--scanlines] [--mouse] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST] game.cue|game.chd|game.zip|homebrew_dir|program.EX\n\n"
             "Keyboard P1: arrows, Z/X/C, A/S/D, Enter, Right Shift. P2: IJKL, numpad 1-8. Hotkeys: Esc/F1 menu, F5 save, F7 load, F6/F8 slot, F9 screenshot, F10 3D status, F11 fullscreen, F12 swap disc.\n",
             argv0);
 }
@@ -1738,6 +1851,9 @@ int main(int argc, char** argv)
     app.menu_hover_tab = -1;
     app.menu_hover_item = -1;
     app.aspect = 0;
+    app.adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
+    app.adpcm_suppress_reset_clicks = true;
+    app.cd_speed = 2;
     app.display_x = 32;
     app.display_y = 0;
     app.display_w = 256;
@@ -1777,6 +1893,28 @@ int main(int argc, char** argv)
             app.scanlines = true;
         else if(!strcmp(argv[i], "--mouse"))
             app.controller_type = 1;
+        else if(!strcmp(argv[i], "--cd-speed") && i + 1 < argc)
+            app.cd_speed = normalize_cd_speed(atoi(argv[++i]));
+        else if(!strncmp(argv[i], "--cd-speed=", 11))
+            app.cd_speed = normalize_cd_speed(atoi(argv[i] + 11));
+        else if(!strcmp(argv[i], "--adpcm-buggy") && i + 1 < argc)
+        {
+            const char* v = argv[++i];
+            app.adpcm_buggy_codec_mode = !strcasecmp(v, "on") ? PCFX_ADPCM_BUGGY_ON : !strcasecmp(v, "off") ? PCFX_ADPCM_BUGGY_OFF : PCFX_ADPCM_BUGGY_AUTO;
+        }
+        else if(!strncmp(argv[i], "--adpcm-buggy=", 15))
+        {
+            const char* v = argv[i] + 15;
+            app.adpcm_buggy_codec_mode = !strcasecmp(v, "on") ? PCFX_ADPCM_BUGGY_ON : !strcasecmp(v, "off") ? PCFX_ADPCM_BUGGY_OFF : PCFX_ADPCM_BUGGY_AUTO;
+        }
+        else if(!strcmp(argv[i], "--adpcm-suppress-clicks"))
+            app.adpcm_suppress_reset_clicks = true;
+        else if(!strcmp(argv[i], "--no-adpcm-suppress-clicks"))
+            app.adpcm_suppress_reset_clicks = false;
+        else if(!strcmp(argv[i], "--bios-patches") && i + 1 < argc)
+            app.bios_patch_flags = parse_bios_patch_flags(argv[++i]);
+        else if(!strncmp(argv[i], "--bios-patches=", 15))
+            app.bios_patch_flags = parse_bios_patch_flags(argv[i] + 15);
         else if(!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
         {
             print_usage(argv[0]);
@@ -1871,6 +2009,10 @@ int main(int argc, char** argv)
     cfg.fast_video = app.fast_video ? 1 : 0;
     cfg.disable_3d_hardware = disable_3d_hardware ? 1 : 0;
     cfg.prefer_fxga_bios = app.system_mode;
+    cfg.bios_patch_flags = app.bios_patch_flags;
+    cfg.cd_speed = normalize_cd_speed(app.cd_speed);
+    cfg.adpcm_buggy_codec_mode = app.adpcm_buggy_codec_mode;
+    cfg.adpcm_suppress_reset_clicks = app.adpcm_suppress_reset_clicks ? 1 : 0;
     app.enable_3d_hardware = !disable_3d_hardware;
     app.emu = pcfx_headless_create(&cfg);
     if(!app.emu)

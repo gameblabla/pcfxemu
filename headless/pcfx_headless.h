@@ -35,6 +35,10 @@ typedef struct PCFX_HeadlessConfig
     int fast_video; /* Nonzero selects the legacy fast RAINBOW backend. */
     int disable_3d_hardware; /* Nonzero disables the optional HuC6273/Aurora 3D chip. Default is enabled for every BIOS/system mode. */
     int prefer_fxga_bios; /* 0 = force PC-FX, 1 = force PC-FXGA, 2 = Auto based on media. */
+    uint32_t bios_patch_flags; /* PCFX_BIOS_PATCH_* flags; applied in memory to known original console BIOS dumps. */
+    int cd_speed; /* 1, 2, 4, 8, or 16. 0 = default 2x. */
+    int adpcm_buggy_codec_mode; /* PCFX_ADPCM_BUGGY_* when PCFX_ADPCM_COMPAT_OPTIONS is enabled. */
+    int adpcm_suppress_reset_clicks; /* nonzero = suppress ADPCM channel-reset clicks. */
 } PCFX_HeadlessConfig;
 
 PCFX_Headless* pcfx_headless_create(const PCFX_HeadlessConfig* config);
@@ -71,6 +75,28 @@ uint64_t pcfx_headless_audio_frame_count(const PCFX_Headless* emu);
 const char* pcfx_headless_last_error(const PCFX_Headless* emu);
 int pcfx_headless_using_fast_video(const PCFX_Headless* emu);
 int pcfx_headless_3d_hardware_enabled(const PCFX_Headless* emu);
+
+/* Core runtime options shared by SDL3/WASM/Win32 frontends. */
+#ifndef PCFX_BIOS_PATCH_SHORTINTRO
+#define PCFX_BIOS_PATCH_SHORTINTRO 0x01u
+#define PCFX_BIOS_PATCH_ENGLISH 0x02u
+#define PCFX_BIOS_PATCH_AUTOLAUNCH 0x04u
+#endif
+
+#ifndef PCFX_ADPCM_BUGGY_AUTO
+#define PCFX_ADPCM_BUGGY_AUTO 0
+#define PCFX_ADPCM_BUGGY_OFF  1
+#define PCFX_ADPCM_BUGGY_ON   2
+#endif
+
+void pcfx_headless_set_bios_patches(PCFX_Headless* emu, uint32_t flags);
+uint32_t pcfx_headless_get_bios_patches(PCFX_Headless* emu);
+void pcfx_headless_set_cd_speed(PCFX_Headless* emu, uint32_t speed);
+uint32_t pcfx_headless_get_cd_speed(PCFX_Headless* emu);
+void pcfx_headless_set_adpcm_compat(PCFX_Headless* emu, int buggy_codec_mode, int suppress_reset_clicks);
+int pcfx_headless_get_adpcm_buggy_codec_mode(PCFX_Headless* emu);
+int pcfx_headless_get_adpcm_suppress_reset_clicks(PCFX_Headless* emu);
+int pcfx_headless_get_adpcm_effective_buggy_codec(PCFX_Headless* emu);
 
 int pcfx_headless_save_screenshot_ppm(PCFX_Headless* emu, const char* path);
 int pcfx_headless_open_y4m(PCFX_Headless* emu, const char* path);

@@ -144,6 +144,12 @@ static HMENU g_audio_menu;
 static HMENU g_adpcm_buggy_menu;
 static int g_game_loaded;
 static int g_audio_open;
+static int g_window_active = 1;
+static int g_window_minimized;
+static int g_menu_mute_depth;
+static int g_modal_mute_depth;
+static int g_transition_mute_depth;
+static int g_effective_audio_muted = -1;
 static int g_core_initialized;
 static int g_system_mode = 2; /* 0=PC-FX, 1=FXGA, 2=Auto */
 static int g_huc6273_enabled = 1;
@@ -174,6 +180,57 @@ static int g_config_repair_needed;
 
 static LARGE_INTEGER g_qpc_freq;
 static LARGE_INTEGER g_next_frame;
+
+
+static void update_audio_mute_state(void)
+{
+    int muted = (!g_window_active || g_window_minimized ||
+                 g_menu_mute_depth > 0 || g_modal_mute_depth > 0 ||
+                 g_transition_mute_depth > 0 || emulator_state != 0) ? 1 : 0;
+    if(!g_game_loaded)
+        muted = 1;
+    if(muted != g_effective_audio_muted)
+    {
+        PCFX_Win32_AudioSetMuted(muted);
+        g_effective_audio_muted = muted;
+    }
+}
+
+static void audio_modal_mute_begin(void)
+{
+    g_modal_mute_depth++;
+    update_audio_mute_state();
+}
+
+static void audio_modal_mute_end(void)
+{
+    if(g_modal_mute_depth > 0)
+        g_modal_mute_depth--;
+    update_audio_mute_state();
+}
+
+static void audio_transition_mute_begin(void)
+{
+    g_transition_mute_depth++;
+    update_audio_mute_state();
+}
+
+static void audio_transition_mute_end(void)
+{
+    if(g_transition_mute_depth > 0)
+        g_transition_mute_depth--;
+    update_audio_mute_state();
+}
+
+static int pcfx_message_box(HWND hwnd, const char* text, const char* caption, UINT type)
+{
+    int ret;
+    audio_modal_mute_begin();
+    ret = MessageBoxA(hwnd, text, caption, type);
+    audio_modal_mute_end();
+    return ret;
+}
+
 
 static void safe_copy(char* dst, size_t dst_size, const char* src)
 {
@@ -376,7 +433,7 @@ static void show_missing_bios_message(HWND parent)
         need,
         g_exe_dir[0] ? g_exe_dir : ".",
         g_common_doc_dir[0] ? g_common_doc_dir : "Public Documents\\PCFXEmu");
-    MessageBoxA(parent, msg, "PCFXEmu - BIOS missing", MB_ICONERROR | MB_OK);
+    pcfx_message_box(parent, msg, "PCFXEmu - BIOS missing", MB_ICONERROR | MB_OK);
 }
 
 static void set_frontend_root_from_bios_search(void)
@@ -762,6 +819,7 @@ static DWORD sanitize_windowed_exstyle(DWORD style, DWORD exstyle)
     return exstyle;
 }
 
+
 static void set_save_slot(HWND hwnd, int slot)
 {
     if(slot < 0) slot = 0;
@@ -785,7 +843,7 @@ static void state_menu_action(HWND hwnd, uint_fast8_t load_mode)
 {
     if(!g_game_loaded || !GameName_emu[0])
     {
-        MessageBoxA(hwnd, "No game is running.", "PCFXEmu - Save states", MB_ICONINFORMATION | MB_OK);
+        pcfx_message_box(hwnd, "No game is running.", "PCFXEmu - Save states", MB_ICONINFORMATION | MB_OK);
         return;
     }
 
@@ -802,7 +860,7 @@ static void state_menu_action(HWND hwnd, uint_fast8_t load_mode)
         char msg[384];
         snprintf(msg, sizeof(msg), "Could not %s state slot %d.\n\n%s",
                  load_mode ? "load" : "save", g_save_slot, tmp);
-        MessageBoxA(hwnd, msg, "PCFXEmu - Save states", MB_ICONERROR | MB_OK);
+        pcfx_message_box(hwnd, msg, "PCFXEmu - Save states", MB_ICONERROR | MB_OK);
     }
 }
 
@@ -816,7 +874,7 @@ static void toggle_bios_patch(HWND hwnd, uint32_t flag)
 
     if(g_game_loaded)
     {
-        MessageBoxA(hwnd,
+        pcfx_message_box(hwnd,
                     "BIOS patch options will be applied on the next soft reset or BIOS/game boot.\n\n"
                     "Soft Reset reloads the BIOS image from disk, reapplies the selected in-memory patches, and then resets the emulated machine.\n"
                     "The BIOS file on disk is never modified.",
@@ -1044,17 +1102,24 @@ static void set_video_backend(HWND hwnd, int backend)
 
 static void set_fullscreen_mode(HWND hwnd, int mode)
 {
+    if(g_fullscreen)
+        audio_transition_mute_begin();
     PCFX_Win32_SetFullscreenMode(mode);
     PCFX_Win32_SetPresentationFullscreen(g_fullscreen);
     force_video_redraw(hwnd);
+    UpdateWindow(hwnd);
     update_menu_checks();
     save_config();
+    if(g_fullscreen)
+        audio_transition_mute_end();
 }
 
 static void toggle_fullscreen(HWND hwnd)
 {
     if(!hwnd)
         return;
+
+    audio_transition_mute_begin();
 
     if(!g_fullscreen)
     {
@@ -1120,7 +1185,9 @@ static void toggle_fullscreen(HWND hwnd)
     update_menu_checks();
     DrawMenuBar(hwnd);
     force_video_redraw(hwnd);
+    UpdateWindow(hwnd);
     save_config();
+    audio_transition_mute_end();
 }
 
 static int show_audio_error(HWND hwnd, int backend)
@@ -1134,7 +1201,7 @@ static int show_audio_error(HWND hwnd, int backend)
 #endif
              PCFX_Win32_AudioBackendName(backend),
              PCFX_Win32_AudioLastError());
-    MessageBoxA(hwnd, msg, "PCFXEmu - Audio output failed", MB_ICONERROR | MB_OK);
+    pcfx_message_box(hwnd, msg, "PCFXEmu - Audio output failed", MB_ICONERROR | MB_OK);
     return 0;
 }
 
@@ -1281,10 +1348,12 @@ static int open_audio_once(HWND hwnd)
 {
     if(!g_audio_open)
     {
+        update_audio_mute_state();
         if(Audio_Init() == 0)
             g_audio_open = 1;
         else
             show_audio_error(hwnd, PCFX_Win32_AudioGetBackend());
+        update_audio_mute_state();
     }
     return g_audio_open;
 }
@@ -1316,12 +1385,13 @@ static int load_game_path(HWND hwnd, const char* path)
     set_game_name_from_path(path);
     if(!Load_Game_Memory((char*)path))
     {
-        MessageBoxA(hwnd, "The file could not be loaded. Check the image path, BIOS mode, and BIOS file.", "PCFXEmu - Load failed", MB_ICONERROR | MB_OK);
+        pcfx_message_box(hwnd, "The file could not be loaded. Check the image path, BIOS mode, and BIOS file.", "PCFXEmu - Load failed", MB_ICONERROR | MB_OK);
         return 0;
     }
     Load_Configuration();
-    open_audio_once(hwnd);
     g_game_loaded = 1;
+    open_audio_once(hwnd);
+    update_audio_mute_state();
     exit_vb = 0;
     SetWindowTextA(hwnd, path_basename_win32(path));
     g_next_frame.QuadPart = 0;
@@ -1351,12 +1421,13 @@ static int boot_bios(HWND hwnd)
     safe_copy(GameName_emu, sizeof(GameName_emu), "bios");
     if(!Load_BIOS_Memory())
     {
-        MessageBoxA(hwnd, "The BIOS could not be booted. Check the BIOS mode and BIOS image.", "PCFXEmu - BIOS boot failed", MB_ICONERROR | MB_OK);
+        pcfx_message_box(hwnd, "The BIOS could not be booted. Check the BIOS mode and BIOS image.", "PCFXEmu - BIOS boot failed", MB_ICONERROR | MB_OK);
         return 0;
     }
     Load_Configuration();
-    open_audio_once(hwnd);
     g_game_loaded = 1;
+    open_audio_once(hwnd);
+    update_audio_mute_state();
     exit_vb = 0;
     SetWindowTextA(hwnd, "PCFXEmu - BIOS");
     g_next_frame.QuadPart = 0;
@@ -1376,10 +1447,13 @@ static void browse_load(HWND hwnd)
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
     ofn.lpstrTitle = "Load PC-FX / PC-FXGA image";
     g_open_hotkey_dialog_active = 1;
-    if(GetOpenFileNameA(&ofn))
-        load_game_path(hwnd, path);
+    audio_modal_mute_begin();
+    int selected = GetOpenFileNameA(&ofn) ? 1 : 0;
+    audio_modal_mute_end();
     g_open_hotkey_dialog_active = 0;
     g_open_hotkey_pad_prev = 1;
+    if(selected)
+        load_game_path(hwnd, path);
 }
 
 static void close_game(void)
@@ -1394,6 +1468,7 @@ static void close_game(void)
             g_audio_open = 0;
         }
         g_game_loaded = 0;
+        update_audio_mute_state();
         GameName_emu[0] = 0;
         SetWindowTextA(g_hwnd, "PCFXEmu");
         Clear_Video();
@@ -1421,7 +1496,7 @@ static void show_about(HWND hwnd)
              g_launchbox_mode ? "on" : "off",
              g_exe_dir[0] ? g_exe_dir : ".",
              g_common_doc_dir[0] ? g_common_doc_dir : "");
-    MessageBoxA(hwnd, msg, "About PCFXEmu", MB_ICONINFORMATION | MB_OK);
+    pcfx_message_box(hwnd, msg, "About PCFXEmu", MB_ICONINFORMATION | MB_OK);
 }
 
 typedef struct MapDialogState
@@ -1682,6 +1757,7 @@ static void show_input_dialog(HWND parent)
                                parent, NULL, g_hinst, &st);
     if(!dlg)
         return;
+    audio_modal_mute_begin();
     EnableWindow(parent, FALSE);
     ShowWindow(dlg, SW_SHOW);
     UpdateWindow(dlg);
@@ -1697,6 +1773,7 @@ static void show_input_dialog(HWND parent)
     }
     EnableWindow(parent, TRUE);
     SetForegroundWindow(parent);
+    audio_modal_mute_end();
     if(st.cancelled)
     {
         for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
@@ -1939,6 +2016,7 @@ static void show_hotkey_dialog(HWND parent)
         return;
 
     g_open_hotkey_dialog_active = 1;
+    audio_modal_mute_begin();
     EnableWindow(parent, FALSE);
     ShowWindow(dlg, SW_SHOW);
     UpdateWindow(dlg);
@@ -1955,6 +2033,7 @@ static void show_hotkey_dialog(HWND parent)
     EnableWindow(parent, TRUE);
     SetForegroundWindow(parent);
     g_open_hotkey_dialog_active = 0;
+    audio_modal_mute_end();
 
     if(st.cancelled)
     {
@@ -2356,7 +2435,7 @@ static void apply_command_line_options(const CommandLineOptions* opt)
 
 static void show_command_line_help(HWND hwnd)
 {
-    MessageBoxA(hwnd,
+    pcfx_message_box(hwnd,
         "Command line options:\n\n"
         "  pcfx.exe [options] [image]\n\n"
         "  --fullscreen           Start in fullscreen. F11 or Alt+Enter toggles at runtime.\n"
@@ -2458,6 +2537,30 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case WM_COMMAND:
             handle_command(hwnd, LOWORD(wp));
             return 0;
+        case WM_ACTIVATEAPP:
+            g_window_active = wp ? 1 : 0;
+            update_audio_mute_state();
+            if(g_window_active)
+                force_video_redraw(hwnd);
+            break;
+        case WM_ACTIVATE:
+            g_window_active = (LOWORD(wp) == WA_INACTIVE) ? 0 : 1;
+            update_audio_mute_state();
+            if(g_window_active)
+                force_video_redraw(hwnd);
+            break;
+        case WM_ENTERMENULOOP:
+            g_menu_mute_depth++;
+            update_audio_mute_state();
+            break;
+        case WM_EXITMENULOOP:
+            if(g_menu_mute_depth > 0)
+                g_menu_mute_depth--;
+            update_audio_mute_state();
+            break;
+        case WM_ENTERSIZEMOVE:
+            audio_transition_mute_begin();
+            break;
         case WM_SYSKEYDOWN:
             if(wp == VK_RETURN)
             {
@@ -2523,12 +2626,17 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         case WM_SIZE:
+            g_window_minimized = (wp == SIZE_MINIMIZED) ? 1 : 0;
             if(wp != SIZE_MINIMIZED)
                 PCFX_Win32_SetClientSize(LOWORD(lp), HIWORD(lp));
+            update_audio_mute_state();
             return 0;
         case WM_WINDOWPOSCHANGED:
         case WM_DISPLAYCHANGE:
+            force_video_redraw(hwnd);
+            break;
         case WM_EXITSIZEMOVE:
+            audio_transition_mute_end();
             force_video_redraw(hwnd);
             break;
         case WM_CLOSE:
@@ -2621,6 +2729,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
         if(exit_vb)
             break;
+        update_audio_mute_state();
         if(g_game_loaded)
         {
             throttle_frame();

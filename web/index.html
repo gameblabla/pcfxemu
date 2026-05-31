@@ -59,6 +59,13 @@
           <label><input type="radio" name="systemMode" value="pcfxga"> PC-FXGA</label>
         </div>
         <label class="check-row"><input id="enable3D" type="checkbox"> Enable HuC6273/Aurora 3D chip</label>
+        <div class="option-group">
+          <strong>Original PC-FX BIOS in-memory patches</strong>
+          <label class="check-row"><input id="biosPatchShortIntro" type="checkbox"> Short intro / faster boot</label>
+          <label class="check-row"><input id="biosPatchEnglish" type="checkbox"> Partial English BIOS menus</label>
+          <label class="check-row"><input id="biosPatchAutoLaunch" type="checkbox"> Auto-launch CD after intro</label>
+          <p class="hint">Patches affect known original console BIOS images only and are applied in memory after soft reset or boot.</p>
+        </div>
         <div class="row"><button id="openStartup">BIOS manager</button><button id="softResetButton">Soft reset</button></div>
         <dl class="runtime-grid">
           <dt>Status</dt><dd id="runtimeStatus">loading</dd>
@@ -94,6 +101,27 @@
         <label class="check-row"><input id="smoothUpscale" type="checkbox"> Browser bilinear final upscale</label>
         <label class="check-row"><input id="scanlines" type="checkbox"> CSS scanline overlay</label>
         <label class="check-row"><input id="showFps" type="checkbox"> Show visual FPS counter</label>
+      </section>
+
+      <section class="panel-section">
+        <h2>Audio / CD-ROM</h2>
+        <label>ADPCM buggy encoder codec
+          <select id="adpcmBuggyMode">
+            <option value="auto">Auto: Miraculum only</option>
+            <option value="off">Off</option>
+            <option value="on">On</option>
+          </select>
+        </label>
+        <label class="check-row"><input id="adpcmSuppressClicks" type="checkbox"> Suppress ADPCM channel-reset clicks</label>
+        <label>CD-ROM emulator speed
+          <select id="cdSpeed">
+            <option value="1">1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+            <option value="8">8x</option>
+            <option value="16">16x</option>
+          </select>
+        </label>
       </section>
 
       <section class="panel-section">

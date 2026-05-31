@@ -70,10 +70,12 @@ static WasapiState g_wasapi;
 #endif
 
 static void waveout_close(void);
+static void audio_apply_mute_state(void);
 
 static int g_selected_backend = PCFX_WIN32_AUDIO_WAVEOUT;
 static int g_active_backend = -1;
 static char g_audio_error[384];
+static int g_audio_muted;
 
 static void audio_set_error(const char* fmt, ...)
 {
@@ -133,6 +135,8 @@ static int waveout_init(void)
 
 static void waveout_write(int16_t* buffer, uint32_t buffer_size)
 {
+    if(g_audio_muted)
+        return;
     if(!g_wave_ready || !g_waveout || !buffer || !buffer_size)
         return;
 
@@ -349,6 +353,8 @@ static int wasapi_init(int exclusive)
 
 static void wasapi_write(int16_t* buffer, uint32_t buffer_size)
 {
+    if(g_audio_muted)
+        return;
     if(!g_wasapi.render || !g_wasapi.client || !buffer || !buffer_size)
         return;
 
@@ -398,6 +404,47 @@ static void wasapi_write(int16_t* buffer, uint32_t buffer_size)
 }
 static void wasapi_release(void) { }
 #endif /* PCFX_WIN32_HAVE_WASAPI */
+
+
+static void audio_apply_mute_state(void)
+{
+    if(g_active_backend == PCFX_WIN32_AUDIO_WAVEOUT)
+    {
+        if(g_waveout)
+            waveOutReset(g_waveout);
+        g_block_index = 0;
+        return;
+    }
+
+#if defined(PCFX_WIN32_HAVE_WASAPI)
+    if(g_active_backend == PCFX_WIN32_AUDIO_WASAPI_SHARED ||
+       g_active_backend == PCFX_WIN32_AUDIO_WASAPI_EXCLUSIVE)
+    {
+        if(!g_wasapi.client)
+            return;
+        if(g_audio_muted)
+        {
+            if(g_wasapi.running)
+            {
+                IAudioClient_Stop(g_wasapi.client);
+                g_wasapi.running = 0;
+            }
+            IAudioClient_Reset(g_wasapi.client);
+        }
+        else
+        {
+            if(!g_wasapi.running)
+            {
+                HRESULT hr = IAudioClient_Start(g_wasapi.client);
+                if(SUCCEEDED(hr))
+                    g_wasapi.running = 1;
+                else
+                    audio_set_error("IAudioClient::Start failed while unmuting (HRESULT 0x%08lX).", (unsigned long)hr);
+            }
+        }
+    }
+#endif
+}
 
 /* Public frontend API ---------------------------------------------------- */
 
@@ -465,11 +512,15 @@ uint32_t Audio_Init(void)
     }
 
     g_active_backend = g_selected_backend;
+    if(g_audio_muted)
+        audio_apply_mute_state();
     return 0;
 }
 
 void Audio_Write(int16_t* buffer, uint32_t buffer_size)
 {
+    if(g_audio_muted)
+        return;
     if(g_active_backend == PCFX_WIN32_AUDIO_WAVEOUT)
         waveout_write(buffer, buffer_size);
 #if defined(PCFX_WIN32_HAVE_WASAPI)
@@ -477,6 +528,20 @@ void Audio_Write(int16_t* buffer, uint32_t buffer_size)
             g_active_backend == PCFX_WIN32_AUDIO_WASAPI_EXCLUSIVE)
         wasapi_write(buffer, buffer_size);
 #endif
+}
+
+void PCFX_Win32_AudioSetMuted(int muted)
+{
+    int new_muted = muted ? 1 : 0;
+    if(g_audio_muted == new_muted)
+        return;
+    g_audio_muted = new_muted;
+    audio_apply_mute_state();
+}
+
+int PCFX_Win32_AudioGetMuted(void)
+{
+    return g_audio_muted;
 }
 
 void Audio_Close(void)

@@ -70,11 +70,11 @@ SRC_REL = $(patsubst ./%,%,$(SRC_C))
 OBJ64 = $(addprefix build/win64/,$(SRC_REL:.c=.o)) build/win64/shell/win32/pcfx_win32_res.o
 OBJ32 = $(addprefix build/winxp/,$(SRC_REL:.c=.o)) build/winxp/shell/win32/pcfx_win32_res.o
 
-CFLAGS_COMMON = -O2 -g -fno-common -Wall -Wextra -Wno-unused-parameter $(INCLUDES)
+CFLAGS_COMMON = -O3 -fno-common -Wall -Wextra -Wno-unused-parameter $(INCLUDES)
 CFLAGS64 = $(CFLAGS_COMMON) $(DEFINES64)
 CFLAGS32 = $(CFLAGS_COMMON) $(DEFINES32)
 LDFLAGS64 = -mwindows -lcomdlg32 -lgdi32 -ld3d11 -ldxgi -ldxguid -lwinmm -lole32 -luuid -lshell32 -lxinput9_1_0 -lm
-LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm
+LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm -s -Wl,--as-needed -Wl,--gc-sections -flto
 
 all: $(PRGNAME64) $(PRGNAME32)
 

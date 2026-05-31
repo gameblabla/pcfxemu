@@ -30,7 +30,32 @@ const required = [
 ];
 for (const name of required) if (!(name in e)) throw new Error(`missing export ${name}`);
 if (e.pcfx_wasm_get_controller_type) { e.pcfx_wasm_set_controller_type(1); if (e.pcfx_wasm_get_controller_type() !== 1) throw new Error('controller type export failed'); e.pcfx_wasm_set_controller_type(0); }
-if (e.pcfx_wasm_version() !== 0x00030010) throw new Error(`unexpected ABI version 0x${e.pcfx_wasm_version().toString(16)}`);
+if (e.pcfx_wasm_version() !== 0x00030012) throw new Error(`unexpected ABI version 0x${e.pcfx_wasm_version().toString(16)}`);
+
+// Regression check for browser option ordering.  The web frontend resets the
+// heap/VFS while loading BIOS blobs; that must not discard user-selected
+// runtime options immediately before pcfx_wasm_start().
+for (const name of [
+  'pcfx_wasm_set_bios_patches', 'pcfx_wasm_get_bios_patches',
+  'pcfx_wasm_set_cd_speed', 'pcfx_wasm_get_cd_speed',
+  'pcfx_wasm_set_adpcm_compat', 'pcfx_wasm_get_adpcm_buggy_codec_mode',
+  'pcfx_wasm_get_adpcm_suppress_reset_clicks',
+  'pcfx_wasm_set_3d_enabled', 'pcfx_wasm_get_3d_enabled'
+]) {
+  if (!(name in e)) throw new Error(`missing export ${name}`);
+}
+e.pcfx_wasm_init(2);
+e.pcfx_wasm_set_bios_patches(0x7);
+e.pcfx_wasm_set_cd_speed(8);
+e.pcfx_wasm_set_adpcm_compat(2, 0);
+e.pcfx_wasm_set_3d_enabled(0);
+e.pcfx_wasm_set_controller_type?.(1);
+e.pcfx_wasm_reset_heap();
+if (e.pcfx_wasm_get_bios_patches() !== 0x7) throw new Error('BIOS patch flags lost across reset_heap');
+if (e.pcfx_wasm_get_cd_speed() !== 8) throw new Error('CD speed lost across reset_heap');
+if (e.pcfx_wasm_get_adpcm_buggy_codec_mode() !== 2 || e.pcfx_wasm_get_adpcm_suppress_reset_clicks() !== 0) throw new Error('ADPCM options lost across reset_heap');
+if (e.pcfx_wasm_get_3d_enabled() !== 0) throw new Error('3D option lost across reset_heap');
+if (e.pcfx_wasm_get_controller_type?.() !== 1) throw new Error('controller option lost across reset_heap');
 
 function bytesView() { return new Uint8Array(e.memory.buffer); }
 function copyIn(bytes) {

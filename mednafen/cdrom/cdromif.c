@@ -60,6 +60,9 @@ typedef struct CDTrack
     DIFormat di_format;
     bool from_chd;
     bool raw_audio_msb_first;
+    bool file_is_wave;
+    int64_t file_data_offset;
+    int64_t file_data_bytes;
     char path[PATH_MAX];
 } CDTrack;
 
@@ -146,6 +149,92 @@ static int64_t file_size_bytes(const char *path)
     return pos < 0 ? -1 : (int64_t)pos;
 }
 
+
+
+static uint16_t read_le16_buf(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t read_le32_buf(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static bool parse_wave_pcm_data(const char *path, int64_t *data_offset, int64_t *data_bytes)
+{
+    FILE *fp;
+    uint8_t hdr[12];
+    bool have_fmt = false;
+    bool have_data = false;
+    uint16_t audio_format = 0;
+    uint16_t channels = 0;
+    uint32_t sample_rate = 0;
+    uint16_t bits_per_sample = 0;
+
+    if(data_offset) *data_offset = 0;
+    if(data_bytes) *data_bytes = 0;
+    if(!path || !data_offset || !data_bytes)
+        return false;
+
+    fp = fopen(path, "rb");
+    if(!fp)
+        return false;
+    if(fread(hdr, 1, sizeof(hdr), fp) != sizeof(hdr) || memcmp(hdr, "RIFF", 4) || memcmp(hdr + 8, "WAVE", 4))
+    {
+        fclose(fp);
+        return false;
+    }
+
+    while(!have_data)
+    {
+        uint8_t ch[8];
+        uint32_t chunk_size;
+        long chunk_data_pos;
+        if(fread(ch, 1, sizeof(ch), fp) != sizeof(ch))
+            break;
+        chunk_size = read_le32_buf(ch + 4);
+        chunk_data_pos = ftell(fp);
+        if(chunk_data_pos < 0)
+            break;
+
+        if(!memcmp(ch, "fmt ", 4))
+        {
+            uint8_t fmt[40];
+            size_t want = chunk_size < sizeof(fmt) ? (size_t)chunk_size : sizeof(fmt);
+            memset(fmt, 0, sizeof(fmt));
+            if(want < 16 || fread(fmt, 1, want, fp) != want)
+                break;
+            audio_format = read_le16_buf(fmt + 0);
+            channels = read_le16_buf(fmt + 2);
+            sample_rate = read_le32_buf(fmt + 4);
+            bits_per_sample = read_le16_buf(fmt + 14);
+            have_fmt = true;
+        }
+        else if(!memcmp(ch, "data", 4))
+        {
+            *data_offset = (int64_t)chunk_data_pos;
+            *data_bytes = (int64_t)chunk_size;
+            have_data = true;
+        }
+
+        if(fseek(fp, chunk_data_pos + (long)chunk_size + (long)(chunk_size & 1U), SEEK_SET) != 0)
+            break;
+    }
+
+    fclose(fp);
+
+    /* CUE FILE WAVE tracks are CD-DA sectors stored as normal PCM WAV data.
+       Feeding the RIFF/fmt header to the CDDA mixer causes a loud click/glitch
+       and shifts every following sample by the header size.  Only accept the
+       CD-DA-compatible format here; unsupported WAV variants should fail load
+       instead of being interpreted as raw PCM sectors. */
+    if(!have_fmt || !have_data || audio_format != 1 || channels != 2 || sample_rate != 44100 || bits_per_sample != 16)
+        return false;
+    if(*data_bytes < 2352)
+        return false;
+    return true;
+}
 static int quoted_arg(const char *line, char *out, size_t out_size)
 {
     const char *p = strchr(line, '"');
@@ -157,6 +246,57 @@ static int quoted_arg(const char *line, char *out, size_t out_size)
     if(n >= out_size) n = out_size - 1;
     memcpy(out, p, n);
     out[n] = 0;
+    return 1;
+}
+
+static int file_arg_and_type(const char *line, char *out, size_t out_size, char *type, size_t type_size)
+{
+    const char *p;
+    const char *q;
+    size_t n;
+
+    if(out && out_size) out[0] = 0;
+    if(type && type_size) type[0] = 0;
+    if(!line || !out || out_size == 0)
+        return 0;
+
+    p = line + 4;
+    while(*p && isspace((unsigned char)*p)) p++;
+    if(*p == '"')
+    {
+        p++;
+        q = strchr(p, '"');
+        if(!q)
+            return 0;
+        n = (size_t)(q - p);
+        if(n >= out_size) n = out_size - 1;
+        memcpy(out, p, n);
+        out[n] = 0;
+        p = q + 1;
+    }
+    else
+    {
+        q = p;
+        while(*q && !isspace((unsigned char)*q)) q++;
+        if(q == p)
+            return 0;
+        n = (size_t)(q - p);
+        if(n >= out_size) n = out_size - 1;
+        memcpy(out, p, n);
+        out[n] = 0;
+        p = q;
+    }
+
+    while(*p && isspace((unsigned char)*p)) p++;
+    if(type && type_size && *p)
+    {
+        q = p;
+        while(*q && !isspace((unsigned char)*q)) q++;
+        n = (size_t)(q - p);
+        if(n >= type_size) n = type_size - 1;
+        memcpy(type, p, n);
+        type[n] = 0;
+    }
     return 1;
 }
 
@@ -220,6 +360,7 @@ static bool parse_cue(CDIF *cdif, const char *path)
     path_dirname(path, base_dir, sizeof(base_dir));
 
     char cur_file[PATH_MAX] = {0};
+    bool cur_file_is_wave = false;
     char linebuf[4096];
     int current_track = 0;
 
@@ -236,8 +377,12 @@ static bool parse_cue(CDIF *cdif, const char *path)
         if(!strncasecmp(line, "FILE", 4))
         {
             char leaf[PATH_MAX];
-            if(quoted_arg(line, leaf, sizeof(leaf)))
+            char file_type[32];
+            if(file_arg_and_type(line, leaf, sizeof(leaf), file_type, sizeof(file_type)))
+            {
                 path_join(cur_file, sizeof(cur_file), base_dir, leaf);
+                cur_file_is_wave = ends_with_ci(leaf, ".wav") || !strcasecmp(file_type, "WAVE");
+            }
         }
         else if(!strncasecmp(line, "TRACK", 5))
         {
@@ -255,6 +400,9 @@ static bool parse_cue(CDIF *cdif, const char *path)
                 else if(t->format == TRACK_MODE1_2352) t->di_format = DI_FORMAT_MODE1_RAW;
                 else if(t->format == TRACK_MODE2_2352) t->di_format = DI_FORMAT_MODE2_RAW;
                 snprintf(t->path, sizeof(t->path), "%s", cur_file);
+                t->file_is_wave = cur_file_is_wave && t->format == TRACK_AUDIO;
+                t->file_data_offset = 0;
+                t->file_data_bytes = 0;
                 if(tn > cdif->last_track) cdif->last_track = tn;
                 if(cdif->num_tracks == 0 || tn < cdif->first_track) cdif->first_track = tn;
                 cdif->num_tracks++;
@@ -319,6 +467,12 @@ static bool parse_cue(CDIF *cdif, const char *path)
 
         int64_t fsize = file_size_bytes(t->path);
         if(fsize < 0 || t->sector_size <= 0) return false;
+        if(t->file_is_wave)
+        {
+            if(!parse_wave_pcm_data(t->path, &t->file_data_offset, &t->file_data_bytes))
+                return false;
+            fsize = t->file_data_bytes;
+        }
         int32_t file_sectors = (int32_t)(fsize / t->sector_size);
         t->sectors = file_sectors - t->file_index1;
         if(t->sectors < 0) t->sectors = 0;
@@ -803,7 +957,7 @@ bool CDIF_ReadRawSector_C(CDIF *cdif, uint8_t *buf, int32_t lba)
         fclose(fp);
         return false;
     }
-    int64_t offset = sector_index * (int64_t)t->sector_size;
+    int64_t offset = t->file_data_offset + sector_index * (int64_t)t->sector_size;
     if(fseek(fp, (long)offset, SEEK_SET) != 0)
     {
         fclose(fp);

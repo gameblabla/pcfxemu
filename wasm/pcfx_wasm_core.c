@@ -50,6 +50,10 @@ static uint32_t frame_counter;
 static uint32_t huc6273_enabled = 1;
 static uint32_t browser_smooth;
 static uint32_t controller_type;
+static uint32_t bios_patch_flags;
+static uint32_t cd_speed = 2;
+static uint32_t adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
+static uint32_t adpcm_suppress_reset_clicks = 1;
 static char media_path[260];
 static uint8_t *save_buf;
 static uint32_t save_size;
@@ -69,7 +73,7 @@ static uint32_t fnv1a(const uint8_t *p, uint32_t n)
 }
 
 __attribute__((export_name("pcfx_wasm_version")))
-uint32_t pcfx_wasm_version(void) { return 0x00030010u; }
+uint32_t pcfx_wasm_version(void) { return 0x00030012u; }
 
 static void wasm_audio_callback(void *userdata, const int16_t *samples, uint32_t frames)
 {
@@ -115,6 +119,13 @@ void pcfx_wasm_reset_heap(void)
     media_kind = MEDIA_NONE;
     media_path[0] = 0;
     frame_counter = 0;
+    /* Preserve frontend runtime options across heap/VFS resets.
+     * The browser loader intentionally calls pcfx_wasm_reset_heap() while
+     * reloading BIOS/media blobs.  Resetting these here discarded user-selected
+     * BIOS patches, CD speed, ADPCM compatibility, 3D visibility, and controller
+     * type immediately before pcfx_wasm_start(), so BIOS patching appeared to
+     * do nothing in the WASM UI.  pcfx_wasm_init() remains the API that resets
+     * options to defaults for a new frontend session/system mode. */
     status_code = STATUS_NO_BIOS;
     error_code = 0;
 }
@@ -143,6 +154,10 @@ void pcfx_wasm_init(uint32_t mode)
     save_capacity = 0;
     huc6273_enabled = 1;
     controller_type = 0;
+    bios_patch_flags = 0;
+    cd_speed = 2;
+    adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
+    adpcm_suppress_reset_clicks = 1;
 }
 
 __attribute__((export_name("pcfx_wasm_set_system_mode")))
@@ -171,6 +186,59 @@ void pcfx_wasm_set_controller_type(uint32_t type)
 
 __attribute__((export_name("pcfx_wasm_get_controller_type")))
 uint32_t pcfx_wasm_get_controller_type(void) { return controller_type; }
+
+static uint32_t normalize_cd_speed_wasm(uint32_t speed)
+{
+    return (speed == 1u || speed == 2u || speed == 4u || speed == 8u || speed == 16u) ? speed : 2u;
+}
+
+static uint32_t normalize_adpcm_mode_wasm(uint32_t mode)
+{
+    return mode <= (uint32_t)PCFX_ADPCM_BUGGY_ON ? mode : (uint32_t)PCFX_ADPCM_BUGGY_AUTO;
+}
+
+__attribute__((export_name("pcfx_wasm_set_bios_patches")))
+void pcfx_wasm_set_bios_patches(uint32_t flags)
+{
+    bios_patch_flags = flags & (PCFX_BIOS_PATCH_SHORTINTRO | PCFX_BIOS_PATCH_ENGLISH | PCFX_BIOS_PATCH_AUTOLAUNCH);
+    if(emu)
+        pcfx_headless_set_bios_patches(emu, bios_patch_flags);
+}
+
+__attribute__((export_name("pcfx_wasm_get_bios_patches")))
+uint32_t pcfx_wasm_get_bios_patches(void) { return bios_patch_flags; }
+
+__attribute__((export_name("pcfx_wasm_set_cd_speed")))
+void pcfx_wasm_set_cd_speed(uint32_t speed)
+{
+    cd_speed = normalize_cd_speed_wasm(speed);
+    if(emu)
+        pcfx_headless_set_cd_speed(emu, cd_speed);
+}
+
+__attribute__((export_name("pcfx_wasm_get_cd_speed")))
+uint32_t pcfx_wasm_get_cd_speed(void) { return cd_speed; }
+
+__attribute__((export_name("pcfx_wasm_set_adpcm_compat")))
+void pcfx_wasm_set_adpcm_compat(uint32_t buggy_codec_mode, uint32_t suppress_reset_clicks)
+{
+    adpcm_buggy_codec_mode = normalize_adpcm_mode_wasm(buggy_codec_mode);
+    adpcm_suppress_reset_clicks = suppress_reset_clicks ? 1u : 0u;
+    if(emu)
+        pcfx_headless_set_adpcm_compat(emu, (int)adpcm_buggy_codec_mode, (int)adpcm_suppress_reset_clicks);
+}
+
+__attribute__((export_name("pcfx_wasm_get_adpcm_buggy_codec_mode")))
+uint32_t pcfx_wasm_get_adpcm_buggy_codec_mode(void) { return adpcm_buggy_codec_mode; }
+
+__attribute__((export_name("pcfx_wasm_get_adpcm_suppress_reset_clicks")))
+uint32_t pcfx_wasm_get_adpcm_suppress_reset_clicks(void) { return adpcm_suppress_reset_clicks; }
+
+__attribute__((export_name("pcfx_wasm_get_adpcm_effective_buggy_codec")))
+uint32_t pcfx_wasm_get_adpcm_effective_buggy_codec(void)
+{
+    return emu ? (uint32_t)pcfx_headless_get_adpcm_effective_buggy_codec(emu) : 0u;
+}
 
 __attribute__((export_name("pcfx_wasm_load_bios")))
 uint32_t pcfx_wasm_load_bios(uint32_t ptr, uint32_t size, uint32_t kind)
@@ -222,6 +290,10 @@ uint32_t pcfx_wasm_start(void)
     cfg.sound_rate = 44100;
     cfg.disable_3d_hardware = huc6273_enabled ? 0 : 1;
     cfg.prefer_fxga_bios = (int)system_mode;
+    cfg.bios_patch_flags = bios_patch_flags;
+    cfg.cd_speed = (int)normalize_cd_speed_wasm(cd_speed);
+    cfg.adpcm_buggy_codec_mode = (int)normalize_adpcm_mode_wasm(adpcm_buggy_codec_mode);
+    cfg.adpcm_suppress_reset_clicks = adpcm_suppress_reset_clicks ? 1 : 0;
     emu = pcfx_headless_create(&cfg);
     if(!emu) { set_error(0xE0000001u); return 0; }
     pcfx_headless_set_audio_callback(emu, wasm_audio_callback, NULL);
