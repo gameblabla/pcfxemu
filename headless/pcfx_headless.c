@@ -62,6 +62,7 @@ size_t PCFX_StateSerializeSize(void);
 bool PCFX_StateSerializeMalloc(uint8_t **out_data, size_t *out_size);
 extern char GameName_emu[256];
 #include "mednafen/pcfx/rainbow.h"
+#include "mednafen/cdrom/cdromif.h"
 void PCFX_Headless_CoreClose(void);
 uint8_t* PCFX_Headless_CoreRAM(size_t* size);
 uint8_t* PCFX_Headless_CoreSaveRAM(size_t* size);
@@ -118,7 +119,7 @@ static bool resolve_homebrew_path(const char* input, char* out, size_t out_size)
 {
     if(!input || !out || out_size == 0)
         return false;
-    if(file_exists(input))
+    if(CDIF_IsPhysicalPath_C(input) || file_exists(input))
     {
         snprintf(out, out_size, "%s", input);
         return true;
@@ -351,8 +352,8 @@ int pcfx_headless_swap_disc(PCFX_Headless* emu, const char* cd_path)
     if(emu != g_active)
         return set_error(emu, "this build supports one active emulator instance at a time");
     char resolved_path[1024];
-    if(!cd_path || !file_exists(cd_path))
-        return set_error(emu, "swap-disc path is not a regular file: %s", cd_path ? cd_path : "(null)");
+    if(!cd_path || (!CDIF_IsPhysicalPath_C(cd_path) && !file_exists(cd_path)))
+        return set_error(emu, "swap-disc path is not a regular file or physical CD selector: %s", cd_path ? cd_path : "(null)");
     snprintf(resolved_path, sizeof(resolved_path), "%s", cd_path);
     if(!PCFX_SwapCD(resolved_path))
         return set_error(emu, "failed to swap virtual CD to: %s", resolved_path);

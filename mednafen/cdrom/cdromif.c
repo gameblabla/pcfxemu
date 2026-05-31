@@ -11,6 +11,9 @@
 #include "../mednafen-endian.h"
 #include "CDUtility.h"
 #include "cdromif.h"
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+#include "cdrom_phys.h"
+#endif
 #ifdef HAVE_CHD
 #include <libchdr/chd.h>
 #endif
@@ -75,6 +78,10 @@ struct CDIF
     int last_track;
     int32_t total_sectors;
     bool is_chd;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    bool is_physical;
+    CDPhys *physical;
+#endif
 #ifdef HAVE_CHD
     chd_file *chd;
     uint8_t *chd_hunkmem;
@@ -760,6 +767,54 @@ static int make_subpq(CDIF *cdif, int32_t lba, uint8_t *SubPWBuf)
     return track;
 }
 
+
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+bool CDIF_IsPhysicalPath_C(const char *path)
+{
+    return CDPhys_IsPath(path);
+}
+
+static bool parse_physical(CDIF *cdif, const char *path)
+{
+    if(!cdif || !path)
+        return false;
+    memset(cdif, 0, sizeof(*cdif));
+    cdif->physical = CDPhys_Open(path, &cdif->disc_toc);
+    if(!cdif->physical)
+        return false;
+    cdif->is_physical = true;
+    cdif->first_track = cdif->disc_toc.first_track;
+    cdif->last_track = cdif->disc_toc.last_track;
+    cdif->num_tracks = (cdif->last_track >= cdif->first_track) ? (cdif->last_track - cdif->first_track + 1) : 0;
+    cdif->total_sectors = (int32_t)cdif->disc_toc.tracks[100].lba;
+    for(int i = cdif->first_track; i <= cdif->last_track && i <= 99; i++)
+    {
+        CDTrack *t = &cdif->tracks[i];
+        memset(t, 0, sizeof(*t));
+        for(int j = 0; j < 100; j++)
+            t->index[j] = INT32_MAX;
+        t->index[1] = (int32_t)cdif->disc_toc.tracks[i].lba;
+        t->number = i;
+        t->subq_control = cdif->disc_toc.tracks[i].control;
+        t->sector_size = 2352;
+        t->lba = (int32_t)cdif->disc_toc.tracks[i].lba;
+        int next = (i == cdif->last_track) ? 100 : (i + 1);
+        t->sectors = (int32_t)cdif->disc_toc.tracks[next].lba - t->lba;
+        if(t->sectors < 0)
+            t->sectors = 0;
+        t->format = (t->subq_control & SUBQ_CTRLF_DATA) ? TRACK_MODE1_2352 : TRACK_AUDIO;
+        t->di_format = (t->subq_control & SUBQ_CTRLF_DATA) ? DI_FORMAT_MODE1_RAW : DI_FORMAT_AUDIO;
+    }
+    return cdif->num_tracks > 0 && cdif->total_sectors > 0;
+}
+#else
+bool CDIF_IsPhysicalPath_C(const char *path)
+{
+    (void)path;
+    return false;
+}
+#endif
+
 CDIF *CDIF_Open_C(const char *path, bool image_memcache)
 {
     (void)image_memcache;
@@ -767,6 +822,11 @@ CDIF *CDIF_Open_C(const char *path, bool image_memcache)
     CDIF *cdif = (CDIF*)calloc(1, sizeof(CDIF));
     if(!cdif) return NULL;
     bool ok = false;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    if(CDPhys_IsPath(path))
+        ok = parse_physical(cdif, path);
+    else
+#endif
     if(ends_with_ci(path, ".cue") || ends_with_ci(path, ".toc"))
         ok = parse_cue(cdif, path);
 #ifdef HAVE_CHD
@@ -781,6 +841,9 @@ CDIF *CDIF_Open_C(const char *path, bool image_memcache)
         if(cdif->chd) chd_close(cdif->chd);
         free(cdif->chd_hunkmem);
 #endif
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+        if(cdif->physical) CDPhys_Close(cdif->physical);
+#endif
         free(cdif);
         return NULL;
     }
@@ -793,6 +856,9 @@ void CDIF_Close_C(CDIF *cdif)
 #ifdef HAVE_CHD
     if(cdif->chd) chd_close(cdif->chd);
     free(cdif->chd_hunkmem);
+#endif
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    if(cdif->physical) CDPhys_Close(cdif->physical);
 #endif
     free(cdif);
 }
@@ -915,6 +981,27 @@ bool CDIF_ReadRawSector_C(CDIF *cdif, uint8_t *buf, int32_t lba)
 {
     if(!cdif || !buf)
         return false;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    if(cdif->is_physical)
+    {
+        if(lba < CDIF_LBA_READ_MINIMUM || lba > CDIF_LBA_READ_MAXIMUM)
+        {
+            memset(buf, 0, 2352 + 96);
+            return false;
+        }
+        if(lba < 0)
+        {
+            synth_udapp_sector_lba(0xff, &cdif->disc_toc, lba, 0, buf);
+            return true;
+        }
+        if(lba >= cdif->total_sectors)
+        {
+            synth_leadout_sector_lba(0xff, &cdif->disc_toc, lba, buf);
+            return true;
+        }
+        return CDPhys_ReadRawSector(cdif->physical, buf, lba);
+    }
+#endif
 #ifdef HAVE_CHD
     if(cdif->is_chd)
         return read_chd_raw_sector(cdif, buf, lba);
@@ -984,6 +1071,26 @@ bool CDIF_ReadRawSectorPWOnly_C(CDIF *cdif, uint8_t *pwbuf, int32_t lba, bool hi
     (void)hint_fullread;
     if(!cdif || !pwbuf) return false;
     memset(pwbuf, 0, 96);
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    if(cdif->is_physical)
+    {
+        uint8_t tmpbuf[2352 + 96];
+        if(lba < 0)
+        {
+            subpw_synth_udapp_lba(&cdif->disc_toc, lba, 0, pwbuf);
+            return true;
+        }
+        if(lba >= cdif->total_sectors)
+        {
+            subpw_synth_leadout_lba(&cdif->disc_toc, lba, pwbuf);
+            return true;
+        }
+        if(!CDPhys_ReadRawSector(cdif->physical, tmpbuf, lba))
+            return false;
+        memcpy(pwbuf, tmpbuf + 2352, 96);
+        return true;
+    }
+#endif
     if(lba < 0)
     {
         subpw_synth_udapp_lba(&cdif->disc_toc, lba, 0, pwbuf);

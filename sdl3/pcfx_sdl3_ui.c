@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "headless/pcfx_headless.h"
+#include "mednafen/cdrom/cdromif.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -59,6 +60,38 @@ enum MenuTab
 static const char* const k_menu_tabs[MENU_TAB_COUNT] = {
     "Media", "System", "Video", "Audio", "States", "Controls"
 };
+
+
+enum MediaAction
+{
+    MEDIA_ACT_RESUME = 0,
+    MEDIA_ACT_LOAD_IMAGE,
+    MEDIA_ACT_LOAD_PHYS_DEFAULT,
+    MEDIA_ACT_LOAD_PHYS_CHOOSE,
+    MEDIA_ACT_SWAP_IMAGE,
+    MEDIA_ACT_SWAP_PHYS_DEFAULT,
+    MEDIA_ACT_SWAP_PHYS_CHOOSE,
+    MEDIA_ACT_SCREENSHOT,
+    MEDIA_ACT_QUIT
+};
+
+static const int k_media_actions[] = {
+    MEDIA_ACT_RESUME,
+    MEDIA_ACT_LOAD_IMAGE,
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    MEDIA_ACT_LOAD_PHYS_DEFAULT,
+    MEDIA_ACT_LOAD_PHYS_CHOOSE,
+#endif
+    MEDIA_ACT_SWAP_IMAGE,
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    MEDIA_ACT_SWAP_PHYS_DEFAULT,
+    MEDIA_ACT_SWAP_PHYS_CHOOSE,
+#endif
+    MEDIA_ACT_SCREENSHOT,
+    MEDIA_ACT_QUIT
+};
+
+#define MAX_CDROM_DEVICE_CHOICES 32
 
 struct Binding
 {
@@ -224,6 +257,12 @@ struct App
     volatile bool pending_swap;
     char pending_load_path[PATH_MAX];
     char pending_swap_path[PATH_MAX];
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    bool cdrom_picker_active;
+    bool cdrom_picker_swap;
+    int cdrom_device_count;
+    char cdrom_device_paths[MAX_CDROM_DEVICE_CHOICES][PATH_MAX];
+#endif
 };
 
 static uint64_t now_ms(void)
@@ -875,7 +914,7 @@ static void save_screenshot(struct App* app)
 
 static const char* aspect_name(const struct App* app);
 static void render_menu(struct App* app, int ww, int wh);
-static int menu_item_count(int tab);
+static int menu_item_count(const struct App* app, int tab);
 static void activate_menu_item(struct App* app);
 static void clamp_menu_selection(struct App* app);
 static void release_mouse_capture(struct App* app);
@@ -1082,7 +1121,10 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
     }
 
     copy_str(app->game_path, sizeof(app->game_path), selected_path);
-    basename_noext(app->game_id, sizeof(app->game_id), resolved_path);
+    if(CDIF_IsPhysicalPath_C(resolved_path))
+        copy_str(app->game_id, sizeof(app->game_id), "Physical CD-ROM");
+    else
+        basename_noext(app->game_id, sizeof(app->game_id), resolved_path);
     app->display_x = 32;
     app->display_y = 0;
     app->display_w = 256;
@@ -1093,6 +1135,42 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
     set_message(app, "Loaded %s", app->game_id);
     return true;
 }
+
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+static void make_physical_cd_selector(char* out, size_t out_size, const char* device)
+{
+    if(!out || !out_size)
+        return;
+    copy_str(out, out_size, "cdrom:");
+    if(device && device[0])
+    {
+        size_t len = strlen(out);
+        if(len + 1 < out_size)
+            strncat(out, device, out_size - len - 1);
+    }
+}
+
+static void load_physical_cd_device(struct App* app, const char* device)
+{
+    char selector[PATH_MAX];
+    if(!app)
+        return;
+    make_physical_cd_selector(selector, sizeof(selector), device);
+    if(recreate_emulator_for_path(app, selector))
+        set_message(app, device && device[0] ? "Loaded CD-ROM drive %.160s" : "Loaded default CD-ROM drive", device && device[0] ? device : "");
+}
+
+static void swap_physical_cd_device(struct App* app, const char* device)
+{
+    char selector[PATH_MAX];
+    if(!app)
+        return;
+    make_physical_cd_selector(selector, sizeof(selector), device);
+    copy_str(app->pending_swap_path, sizeof(app->pending_swap_path), selector);
+    app->pending_swap = true;
+    set_message(app, device && device[0] ? "Swapping to CD-ROM drive %.160s..." : "Swapping to default CD-ROM drive...", device && device[0] ? device : "");
+}
+#endif
 
 static void perform_pending_load_game(struct App* app)
 {
@@ -1123,7 +1201,10 @@ static void perform_pending_swap_disc(struct App* app)
         return;
     }
     copy_str(app->game_path, sizeof(app->game_path), app->pending_swap_path);
-    basename_noext(app->game_id, sizeof(app->game_id), resolved_path);
+    if(CDIF_IsPhysicalPath_C(resolved_path))
+        copy_str(app->game_id, sizeof(app->game_id), "Physical CD-ROM");
+    else
+        basename_noext(app->game_id, sizeof(app->game_id), resolved_path);
     if(app->audio_stream)
         SDL_ClearAudioStream(app->audio_stream);
     app->next_frame_ms = (double)now_ms() + 1000.0 / PCFX_FPS;
@@ -1169,11 +1250,111 @@ static void apply_controller_type(struct App* app, int type)
         set_message(app, "Controller: Gamepad");
 }
 
-static int menu_item_count(int tab)
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+static bool cdrom_path_exists(const char* path)
 {
+    struct stat st;
+    return path && path[0] && !stat(path, &st);
+}
+
+static bool cdrom_picker_has_path(const struct App* app, const char* path)
+{
+    if(!app || !path)
+        return false;
+    for(int i = 0; i < app->cdrom_device_count; i++)
+        if(!strcmp(app->cdrom_device_paths[i], path))
+            return true;
+    return false;
+}
+
+static void cdrom_picker_add_path(struct App* app, const char* path)
+{
+    if(!app || !path || !path[0])
+        return;
+    if(app->cdrom_device_count >= MAX_CDROM_DEVICE_CHOICES)
+        return;
+    if(cdrom_picker_has_path(app, path))
+        return;
+    copy_str(app->cdrom_device_paths[app->cdrom_device_count], sizeof(app->cdrom_device_paths[app->cdrom_device_count]), path);
+    app->cdrom_device_count++;
+}
+
+static void refresh_cdrom_devices(struct App* app)
+{
+    if(!app)
+        return;
+    app->cdrom_device_count = 0;
+#ifdef __linux__
+    static const char* const named_paths[] = { "/dev/cdrom", "/dev/cdrw", "/dev/dvd", "/dev/dvdrw" };
+    char path[64];
+    for(size_t i = 0; i < ARRAY_SIZE(named_paths); i++)
+        if(cdrom_path_exists(named_paths[i]))
+            cdrom_picker_add_path(app, named_paths[i]);
+    for(int i = 0; i < 8; i++)
+    {
+        snprintf(path, sizeof(path), "/dev/sr%d", i);
+        if(cdrom_path_exists(path))
+            cdrom_picker_add_path(app, path);
+    }
+    for(int i = 0; i < 8; i++)
+    {
+        snprintf(path, sizeof(path), "/dev/scd%d", i);
+        if(cdrom_path_exists(path))
+            cdrom_picker_add_path(app, path);
+    }
+    for(int i = 0; i < 16; i++)
+    {
+        snprintf(path, sizeof(path), "/dev/sg%d", i);
+        if(cdrom_path_exists(path))
+            cdrom_picker_add_path(app, path);
+    }
+#endif
+}
+
+static void open_cdrom_picker(struct App* app, bool swap)
+{
+    if(!app)
+        return;
+    refresh_cdrom_devices(app);
+    app->cdrom_picker_active = true;
+    app->cdrom_picker_swap = swap;
+    app->menu_visible = true;
+    app->paused = true;
+    app->menu_selection[MENU_TAB_MEDIA] = 0;
+    set_message(app, swap ? "Choose replacement CD-ROM drive..." : "Choose CD-ROM drive...");
+}
+
+static void close_cdrom_picker(struct App* app)
+{
+    if(!app)
+        return;
+    app->cdrom_picker_active = false;
+    app->cdrom_picker_swap = false;
+    app->menu_selection[MENU_TAB_MEDIA] = 0;
+    set_message(app, "Media menu");
+}
+
+static int cdrom_picker_item_count(const struct App* app)
+{
+    if(!app)
+        return 0;
+    return 2 + app->cdrom_device_count;
+}
+#endif
+
+static int menu_item_count(const struct App* app, int tab)
+{
+    (void)app;
     switch(tab)
     {
-        case MENU_TAB_MEDIA: return 5;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+        case MENU_TAB_MEDIA:
+            if(app && app->cdrom_picker_active)
+                return cdrom_picker_item_count(app);
+            return (int)ARRAY_SIZE(k_media_actions);
+#else
+        case MENU_TAB_MEDIA: return (int)ARRAY_SIZE(k_media_actions);
+#endif
         case MENU_TAB_SYSTEM: return 9;
         case MENU_TAB_VIDEO: return 4;
         case MENU_TAB_AUDIO: return 3;
@@ -1193,7 +1374,7 @@ static void clamp_menu_selection(struct App* app)
         app->menu_tab = MENU_TAB_COUNT - 1;
     for(int t = 0; t < MENU_TAB_COUNT; t++)
     {
-        int count = menu_item_count(t);
+        int count = menu_item_count(app, t);
         if(app->menu_selection[t] < 0)
             app->menu_selection[t] = 0;
         if(count <= 0)
@@ -1218,13 +1399,34 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
     switch(tab)
     {
         case MENU_TAB_MEDIA:
-            switch(index)
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+            if(app && app->cdrom_picker_active)
             {
-                case 0: label = "Resume"; break;
-                case 1: label = "Load game / homebrew..."; break;
-                case 2: label = "Swap disc..."; break;
-                case 3: label = "Save screenshot"; break;
-                case 4: label = "Quit emulator"; break;
+                if(index == 0)
+                    label = "Back to Media menu";
+                else if(index == 1)
+                    label = app->cdrom_picker_swap ? "Swap to CD-ROM drive (Default)" : "Load CD-ROM drive (Default)";
+                else if(index - 2 < app->cdrom_device_count)
+                    snprintf(out, out_size, "CD-ROM drive: %.128s", app->cdrom_device_paths[index - 2]);
+                else
+                    label = "No detected CD-ROM device";
+                break;
+            }
+#endif
+            if(index >= 0 && index < (int)ARRAY_SIZE(k_media_actions))
+            {
+                switch(k_media_actions[index])
+                {
+                    case MEDIA_ACT_RESUME: label = "Resume"; break;
+                    case MEDIA_ACT_LOAD_IMAGE: label = "Load game / homebrew..."; break;
+                    case MEDIA_ACT_LOAD_PHYS_DEFAULT: label = "Load CD-ROM drive (Default)"; break;
+                    case MEDIA_ACT_LOAD_PHYS_CHOOSE: label = "Load CD-ROM drive..."; break;
+                    case MEDIA_ACT_SWAP_IMAGE: label = "Swap disc image..."; break;
+                    case MEDIA_ACT_SWAP_PHYS_DEFAULT: label = "Swap to CD-ROM drive (Default)"; break;
+                    case MEDIA_ACT_SWAP_PHYS_CHOOSE: label = "Swap to CD-ROM drive..."; break;
+                    case MEDIA_ACT_SCREENSHOT: label = "Save screenshot"; break;
+                    case MEDIA_ACT_QUIT: label = "Quit emulator"; break;
+                }
             }
             break;
         case MENU_TAB_SYSTEM:
@@ -1330,25 +1532,72 @@ static void activate_menu_item(struct App* app)
     switch(app->menu_tab)
     {
         case MENU_TAB_MEDIA:
-            switch(idx)
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+            if(app->cdrom_picker_active)
             {
-                case 0:
-                    app->menu_visible = false;
-                    app->paused = false;
-                    set_message(app, "Running");
-                    break;
-                case 1:
-                    open_load_game_dialog(app);
-                    break;
-                case 2:
-                    open_swap_disc_dialog(app);
-                    break;
-                case 3:
-                    save_screenshot(app);
-                    break;
-                case 4:
-                    app->running = false;
-                    break;
+                if(idx == 0)
+                    close_cdrom_picker(app);
+                else if(idx == 1)
+                {
+                    bool swap = app->cdrom_picker_swap;
+                    close_cdrom_picker(app);
+                    if(swap)
+                        swap_physical_cd_device(app, NULL);
+                    else
+                        load_physical_cd_device(app, NULL);
+                }
+                else if(idx - 2 < app->cdrom_device_count)
+                {
+                    char device[PATH_MAX];
+                    bool swap = app->cdrom_picker_swap;
+                    copy_str(device, sizeof(device), app->cdrom_device_paths[idx - 2]);
+                    close_cdrom_picker(app);
+                    if(swap)
+                        swap_physical_cd_device(app, device);
+                    else
+                        load_physical_cd_device(app, device);
+                }
+                break;
+            }
+#endif
+            if(idx >= 0 && idx < (int)ARRAY_SIZE(k_media_actions))
+            {
+                switch(k_media_actions[idx])
+                {
+                    case MEDIA_ACT_RESUME:
+                        app->menu_visible = false;
+                        app->paused = false;
+                        set_message(app, "Running");
+                        break;
+                    case MEDIA_ACT_LOAD_IMAGE:
+                        open_load_game_dialog(app);
+                        break;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+                    case MEDIA_ACT_LOAD_PHYS_DEFAULT:
+                        load_physical_cd_device(app, NULL);
+                        break;
+                    case MEDIA_ACT_LOAD_PHYS_CHOOSE:
+                        open_cdrom_picker(app, false);
+                        break;
+#endif
+                    case MEDIA_ACT_SWAP_IMAGE:
+                        open_swap_disc_dialog(app);
+                        break;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+                    case MEDIA_ACT_SWAP_PHYS_DEFAULT:
+                        swap_physical_cd_device(app, NULL);
+                        break;
+                    case MEDIA_ACT_SWAP_PHYS_CHOOSE:
+                        open_cdrom_picker(app, true);
+                        break;
+#endif
+                    case MEDIA_ACT_SCREENSHOT:
+                        save_screenshot(app);
+                        break;
+                    case MEDIA_ACT_QUIT:
+                        app->running = false;
+                        break;
+                }
             }
             break;
         case MENU_TAB_SYSTEM:
@@ -1485,7 +1734,7 @@ static void handle_menu_key(struct App* app, SDL_Scancode s)
     if(!app)
         return;
     clamp_menu_selection(app);
-    count = menu_item_count(app->menu_tab);
+    count = menu_item_count(app, app->menu_tab);
     if(s == SDL_SCANCODE_ESCAPE || s == HK_MENU)
     {
         app->menu_visible = false;
@@ -1562,7 +1811,7 @@ static void menu_hit_test(struct App* app, float mx, float my, int ww, int wh, i
     }
     if(mx >= content.x && mx <= content.x + content.w && my >= content.y && my <= content.y + content.h)
     {
-        int count = menu_item_count(app->menu_tab);
+        int count = menu_item_count(app, app->menu_tab);
         for(int i = 0; i < count; i++)
         {
             SDL_FRect r = { content.x + 14.0f, content.y + 54.0f + (float)i * 44.0f, content.w - 28.0f, 34.0f };
@@ -1618,7 +1867,7 @@ static void render_menu(struct App* app, int ww, int wh)
     SDL_SetRenderDrawColor(app->renderer, 137, 153, 172, 255);
     SDL_RenderDebugText(app->renderer, content.x + 16.0f, content.y + 32.0f, "Click a row to activate. Left/right changes tabs from keyboard or controller.");
 
-    int count = menu_item_count(app->menu_tab);
+    int count = menu_item_count(app, app->menu_tab);
     for(int i = 0; i < count; i++)
     {
         SDL_FRect r = { content.x + 14.0f, content.y + 54.0f + (float)i * 44.0f, content.w - 28.0f, 34.0f };
@@ -1825,7 +2074,14 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--disable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen] [--native-aspect] [--stretch] [--nearest] [--scanlines] [--mouse] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST] game.cue|game.chd|game.zip|homebrew_dir|program.EX\n\n"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--disable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen] [--native-aspect] [--stretch] [--nearest] [--scanlines] [--mouse] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+            " [--physical-cd[=DEVICE]]"
+#endif
+            " game.cue|game.chd|game.zip|homebrew_dir|program.EX\n\n"
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+            "Physical CD-ROM: --physical-cd opens the default drive; --physical-cd=/dev/sr0 opens an explicit Linux drive.\n"
+#endif
             "Keyboard P1: arrows, Z/X/C, A/S/D, Enter, Right Shift. P2: IJKL, numpad 1-8. Hotkeys: Esc/F1 menu, F5 save, F7 load, F6/F8 slot, F9 screenshot, F10 3D status, F11 fullscreen, F12 swap disc.\n",
             argv0);
 }
@@ -1915,6 +2171,19 @@ int main(int argc, char** argv)
             app.bios_patch_flags = parse_bios_patch_flags(argv[++i]);
         else if(!strncmp(argv[i], "--bios-patches=", 15))
             app.bios_patch_flags = parse_bios_patch_flags(argv[i] + 15);
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+        else if(!strcmp(argv[i], "--physical-cd"))
+        {
+            if(i + 1 < argc && strncmp(argv[i + 1], "--", 2))
+            {
+                snprintf(app.game_path, sizeof(app.game_path), "cdrom:%s", argv[++i]);
+            }
+            else
+                copy_str(app.game_path, sizeof(app.game_path), "cdrom:");
+        }
+        else if(!strncmp(argv[i], "--physical-cd=", 14))
+            snprintf(app.game_path, sizeof(app.game_path), "cdrom:%s", argv[i] + 14);
+#endif
         else if(!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
         {
             print_usage(argv[0]);
@@ -1951,7 +2220,12 @@ int main(int argc, char** argv)
     }
 
     if(app.game_path[0])
-        basename_noext(app.game_id, sizeof(app.game_id), app.game_path);
+    {
+        if(CDIF_IsPhysicalPath_C(app.game_path))
+            copy_str(app.game_id, sizeof(app.game_id), "Physical CD-ROM");
+        else
+            basename_noext(app.game_id, sizeof(app.game_id), app.game_path);
+    }
     make_dir(app.save_dir);
     path_join(app.state_dir, sizeof(app.state_dir), app.save_dir, "states");
     make_dir(app.state_dir);
@@ -2040,7 +2314,10 @@ int main(int argc, char** argv)
             SDL_Quit();
             return 1;
         }
-        basename_noext(app.game_id, sizeof(app.game_id), initial_media_path);
+        if(CDIF_IsPhysicalPath_C(initial_media_path))
+            copy_str(app.game_id, sizeof(app.game_id), "Physical CD-ROM");
+        else
+            basename_noext(app.game_id, sizeof(app.game_id), initial_media_path);
     }
     else if(!pcfx_headless_boot_bios(app.emu))
     {

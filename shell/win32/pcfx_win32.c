@@ -27,6 +27,7 @@
 #include "sound_output.h"
 #include "sound_output_win32.h"
 #include "resource.h"
+#include "mednafen/cdrom/cdromif.h"
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
@@ -50,6 +51,7 @@
 
 #define ID_FILE_LOAD             100
 #define ID_FILE_BOOT_BIOS        101
+#define ID_FILE_LOAD_PHYSICAL    104
 #define ID_FILE_CLOSE            102
 #define ID_FILE_EXIT             103
 #define ID_SYSTEM_RESET          200
@@ -450,6 +452,11 @@ static void set_frontend_root_from_bios_search(void)
 
 static void set_game_name_from_path(const char* path)
 {
+    if(CDIF_IsPhysicalPath_C(path))
+    {
+        safe_copy(GameName_emu, sizeof(GameName_emu), "Physical CD-ROM");
+        return;
+    }
     const char* base = path_basename_win32(path);
     safe_copy(GameName_emu, sizeof(GameName_emu), base);
 }
@@ -895,6 +902,9 @@ static HMENU build_menu(void)
     HMENU help = CreatePopupMenu();
 
     AppendMenuA(file, MF_STRING, ID_FILE_LOAD, "&Load Disc / EXE...\tCtrl+O");
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+    AppendMenuA(file, MF_STRING, ID_FILE_LOAD_PHYSICAL, "Load &Physical CD-ROM");
+#endif
     AppendMenuA(file, MF_STRING, ID_FILE_BOOT_BIOS, "&Boot BIOS");
     AppendMenuA(file, MF_SEPARATOR, 0, NULL);
     AppendMenuA(file, MF_STRING, ID_FILE_CLOSE, "&Close");
@@ -1385,7 +1395,7 @@ static int load_game_path(HWND hwnd, const char* path)
     set_game_name_from_path(path);
     if(!Load_Game_Memory((char*)path))
     {
-        pcfx_message_box(hwnd, "The file could not be loaded. Check the image path, BIOS mode, and BIOS file.", "PCFXEmu - Load failed", MB_ICONERROR | MB_OK);
+        pcfx_message_box(hwnd, "The media could not be loaded. Check the image path or physical CD drive, BIOS mode, and BIOS file.", "PCFXEmu - Load failed", MB_ICONERROR | MB_OK);
         return 0;
     }
     Load_Configuration();
@@ -1393,7 +1403,7 @@ static int load_game_path(HWND hwnd, const char* path)
     open_audio_once(hwnd);
     update_audio_mute_state();
     exit_vb = 0;
-    SetWindowTextA(hwnd, path_basename_win32(path));
+    SetWindowTextA(hwnd, CDIF_IsPhysicalPath_C(path) ? "PCFXEmu - Physical CD-ROM" : path_basename_win32(path));
     g_next_frame.QuadPart = 0;
     return 1;
 }
@@ -1455,6 +1465,13 @@ static void browse_load(HWND hwnd)
     if(selected)
         load_game_path(hwnd, path);
 }
+
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+static void load_physical_cd(HWND hwnd)
+{
+    load_game_path(hwnd, "cdrom:");
+}
+#endif
 
 static void close_game(void)
 {
@@ -2052,6 +2069,9 @@ static void handle_command(HWND hwnd, int id)
     switch(id)
     {
         case ID_FILE_LOAD: browse_load(hwnd); break;
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+        case ID_FILE_LOAD_PHYSICAL: load_physical_cd(hwnd); break;
+#endif
         case ID_FILE_BOOT_BIOS: boot_bios(hwnd); break;
         case ID_FILE_CLOSE: close_game(); break;
         case ID_FILE_EXIT: PostMessageA(hwnd, WM_CLOSE, 0, 0); break;
@@ -2386,6 +2406,31 @@ static void parse_command_line_options(CommandLineOptions* opt)
             opt->fullscreen_mode_set = 1;
             opt->fullscreen_mode = PCFX_WIN32_FULLSCREEN_BORDERLESS;
         }
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+        else if((value = option_value(arg, "physical-cd")) != NULL ||
+                (value = option_value(arg, "cdrom")) != NULL)
+        {
+            snprintf(opt->load_path, sizeof(opt->load_path), "cdrom:%s", value);
+            positional = 1;
+        }
+        else if(option_match(arg, "physical-cd") || option_match(arg, "cdrom"))
+        {
+            if(i + 1 < argc)
+            {
+                char next_arg[2048];
+                if(wide_to_ansi_arg(argvw[i + 1], next_arg, sizeof(next_arg)) && next_arg[0] != '-' && next_arg[0] != '/')
+                {
+                    snprintf(opt->load_path, sizeof(opt->load_path), "cdrom:%s", next_arg);
+                    i++;
+                }
+                else
+                    safe_copy(opt->load_path, sizeof(opt->load_path), "cdrom:");
+            }
+            else
+                safe_copy(opt->load_path, sizeof(opt->load_path), "cdrom:");
+            positional = 1;
+        }
+#endif
         else if((value = option_value(arg, "load")) != NULL)
         {
             safe_copy(opt->load_path, sizeof(opt->load_path), value);

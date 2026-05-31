@@ -1910,6 +1910,8 @@ static uint8_t MDFNI_LoadGame(const char *name)
    if(!name || !name[0])
       return MDFNI_LoadBIOSOnly();
    const size_t len = strlen(name);
+   if(CDIF_IsPhysicalPath_C(name))
+      return (MDFNI_LoadCD(name));
    if(len > 4 && (!strcasecmp(name + len - 4, ".cue") || !strcasecmp(name + len - 4, ".ccd") ||
 #ifdef HAVE_CHD
    !strcasecmp(name + len - 4, ".chd") ||
