@@ -21,6 +21,7 @@
 #include <stdarg.h>
 #include "scsicd.h"
 #include "cdromif.h"
+#include "seektime_pcfx.h"
 
 #if defined(__SSE2__)
 #include <xmmintrin.h>
@@ -232,6 +233,15 @@ static uint32 read_sec_start;
 static uint32 read_sec;
 static uint32 read_sec_end;
 
+static uint32 pcfx_head_pos;
+static int32 PCFXSeekTimer;
+static int32 PCFXAudioDelay;
+static uint32 PCFXSeekTarget;
+static uint8 PCFXDelayedStatus;
+static uint8 PCFXDelayedMessage;
+static bool PCFXHasDelayedStatus;
+static bool PCFXHasPendingHeadPos;
+
 static int32 CDReadTimer;
 static uint32 SectorAddr;
 static uint32 SectorCount;
@@ -276,6 +286,14 @@ static void VirtualReset(void)
 
 	cdda.CDDADivAcc = (int64)System_Clock * 65536 / 44100;
 	CDReadTimer = 0;
+	PCFXSeekTimer = 0;
+	PCFXAudioDelay = 0;
+	PCFXSeekTarget = 0;
+	PCFXDelayedStatus = 0;
+	PCFXDelayedMessage = 0;
+	PCFXHasDelayedStatus = false;
+	PCFXHasPendingHeadPos = false;
+	pcfx_head_pos = 0;
 
 	pce_lastsapsp_timestamp = monotonic_timestamp;
 
@@ -477,8 +495,103 @@ static void ChangePhase(const unsigned int new_phase)
 	CurrentPhase = new_phase;
 }
 
+static void SendStatusAndMessage(uint8 status, uint8 message);
+
+static bool PCFX_ShouldEmulateSeek(void)
+{
+	return WhichSystem == SCSICD_PCFX &&
+	       CD_DATA_TRANSFER_RATE == (153600U * 2U) &&
+	       Cur_CDIF &&
+	       !CDIF_IsPhysical_C(Cur_CDIF);
+}
+
+static int32 PCFX_MSToClocks(float ms)
+{
+	if(ms <= 0.0f)
+		return 0;
+
+	const double clocks = ((double)System_Clock * (double)ms) / 1000.0;
+	if(clocks >= 2147483647.0)
+		return 2147483647;
+	return (int32)(clocks + 0.5);
+}
+
+static int32 PCFX_SectorClocks(void)
+{
+	return (int32)(((uint64)2048 * System_Clock + (CD_DATA_TRANSFER_RATE / 2)) / CD_DATA_TRANSFER_RATE);
+}
+
+static void PCFX_ClearSeekDelay(void)
+{
+	PCFXSeekTimer = 0;
+	PCFXAudioDelay = 0;
+	PCFXHasDelayedStatus = false;
+	PCFXHasPendingHeadPos = false;
+}
+
+static void PCFX_DelayStatusAndMessage(uint8 status, uint8 message, int32 delay_clocks, uint32 target_lba)
+{
+	PCFXDelayedStatus = status;
+	PCFXDelayedMessage = message;
+	PCFXSeekTimer = delay_clocks;
+	PCFXSeekTarget = target_lba;
+	PCFXHasDelayedStatus = true;
+	PCFXHasPendingHeadPos = true;
+
+	if(PCFXSeekTimer <= 0)
+	{
+		pcfx_head_pos = PCFXSeekTarget;
+		PCFXHasPendingHeadPos = false;
+	}
+}
+
+static void PCFX_SetAudioSeekDelay(uint32 lba, uint8 status, uint8 message)
+{
+	if(PCFX_ShouldEmulateSeek())
+	{
+		const int32 seek_clocks = PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)lba));
+		PCFXAudioDelay = PCFX_MSToClocks(120.0f);
+
+		if(seek_clocks > 0)
+			PCFX_DelayStatusAndMessage(status, message, seek_clocks, lba);
+		else
+		{
+			pcfx_head_pos = lba;
+			SendStatusAndMessage(status, message);
+		}
+	}
+	else
+	{
+		PCFX_ClearSeekDelay();
+		SendStatusAndMessage(status, message);
+	}
+}
+
+static void PCFX_SetSeekStatusDelay(uint32 lba, uint8 status, uint8 message)
+{
+	if(PCFX_ShouldEmulateSeek())
+	{
+		const int32 seek_clocks = PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)lba));
+		PCFXAudioDelay = 0;
+		if(seek_clocks > 0)
+			PCFX_DelayStatusAndMessage(status, message, seek_clocks, lba);
+		else
+		{
+			pcfx_head_pos = lba;
+			SendStatusAndMessage(status, message);
+		}
+	}
+	else
+	{
+		PCFX_ClearSeekDelay();
+		SendStatusAndMessage(status, message);
+	}
+}
+
 static void SendStatusAndMessage(uint8 status, uint8 message)
 {
+	PCFXHasDelayedStatus = false;
+
 	// This should never ever happen, but that doesn't mean it won't. ;)
 	if(din->in_count == 0)  SCSI_FIFO_Flush(din);
 
@@ -504,6 +617,8 @@ static void DoSimpleDataIn(const uint8 *data_in, uint32 len)
 void SCSICD_SetDisc(bool new_tray_open, CDIF *cdif, bool no_emu_side_effects)
 {
 	Cur_CDIF = cdif;
+	PCFX_ClearSeekDelay();
+	pcfx_head_pos = 0;
 
 	// Closing the tray.
 	if(TrayOpen && !new_tray_open)
@@ -541,6 +656,7 @@ void SCSICD_SetDisc(bool new_tray_open, CDIF *cdif, bool no_emu_side_effects)
 
 static void CommandCCError_Impl(int key, int asc, int ascq)
 {
+	PCFX_ClearSeekDelay();
 	cd.key_pending = key;
 	cd.asc_pending = asc;
 	cd.ascq_pending = ascq;
@@ -1493,7 +1609,7 @@ static void DoPABase_Impl(const uint32 lba, const uint32 length, unsigned int st
   }
  }
 
- SendStatusAndMessage(STATUS_GOOD, 0x00);
+ PCFX_SetAudioSeekDelay(lba, STATUS_GOOD, 0x00);
 }
 
 
@@ -1711,7 +1827,7 @@ static void DoPAMSF(const uint8 *cdb)
 	cdda.CDDAStatus = CDDASTATUS_PLAYING;
 	cdda.PlayMode = PLAYMODE_NORMAL;
 
-	SendStatusAndMessage(STATUS_GOOD, 0x00);
+	PCFX_SetAudioSeekDelay((uint32)lba_start, STATUS_GOOD, 0x00);
 }
 
 
@@ -1769,7 +1885,7 @@ static void DoPATRBase(const uint32 lba, const uint32 length)
 		cdda.CDDAStatus = CDDASTATUS_PLAYING;
 		cdda.PlayMode = PLAYMODE_NORMAL;
 	}
-	SendStatusAndMessage(STATUS_GOOD, 0x00);
+	PCFX_SetAudioSeekDelay(lba, STATUS_GOOD, 0x00);
 }
 
 
@@ -1873,7 +1989,9 @@ static void DoREADBase(uint32 sa, uint32 sc)
 	if(SectorCount)
 	{
 		CDIF_HintReadSector_C(Cur_CDIF, sa);	//, sa + sc);
-		CDReadTimer = (uint64)1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE;
+		CDReadTimer = PCFX_SectorClocks();
+		if(PCFX_ShouldEmulateSeek())
+			CDReadTimer += PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)sa));
 	}
 	else
 	{
@@ -1968,7 +2086,7 @@ static void DoSEEKBase(uint32 lba)
 		return;
 	} 
 	cdda.CDDAStatus = CDDASTATUS_STOPPED;
-	SendStatusAndMessage(STATUS_GOOD, 0x00);
+	PCFX_SetSeekStatusDelay(lba, STATUS_GOOD, 0x00);
 }
 
 
@@ -2340,8 +2458,46 @@ static inline int32 scale_cdda_delta(int32 v)
 	return (v >= 0) ? ((v + 8) / 16) : ((v - 8) / 16);
 }
 
+static inline void RunPCFXDelayedStatus(int32 run_time)
+{
+	if(PCFXSeekTimer > 0)
+	{
+		PCFXSeekTimer -= run_time;
+		if(PCFXSeekTimer < 0)
+			PCFXSeekTimer = 0;
+	}
+
+	if(PCFXSeekTimer == 0 && PCFXHasPendingHeadPos)
+	{
+		pcfx_head_pos = PCFXSeekTarget;
+		PCFXHasPendingHeadPos = false;
+	}
+
+	if(PCFXSeekTimer == 0 && PCFXHasDelayedStatus)
+	{
+		const uint8 status = PCFXDelayedStatus;
+		const uint8 message = PCFXDelayedMessage;
+
+		PCFXHasDelayedStatus = false;
+		SendStatusAndMessage(status, message);
+	}
+}
+
 static inline void RunCDDA(uint32 system_timestamp, int32 run_time)
 {
+	if(PCFXSeekTimer > 0)
+		return;
+
+	if(PCFXAudioDelay > 0)
+	{
+		PCFXAudioDelay -= run_time;
+		if(PCFXAudioDelay < 0)
+			PCFXAudioDelay = 0;
+	}
+
+	if(PCFXAudioDelay > 0)
+		return;
+
 	if(cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING)
 	{
 		int32 sample[2];
@@ -2419,6 +2575,9 @@ static inline void RunCDDA(uint32 system_timestamp, int32 run_time)
 				}
 				else
 					read_sec++;
+
+				if(PCFX_ShouldEmulateSeek())
+					pcfx_head_pos = read_sec;
 			} // End    if(CDDAReadPos == 588)
 
 			// If the last valid sub-Q data decoded indicate that the corresponding sector is a data sector, don't output the
@@ -2516,6 +2675,8 @@ static inline void RunCDRead(int32 run_time)
 					CDIRQCallback(SCSICD_IRQ_DATA_TRANSFER_READY);
 
 					SectorAddr++;
+					if(PCFX_ShouldEmulateSeek())
+						pcfx_head_pos = SectorAddr;
 					SectorCount--;
 
 					if(CurrentPhase != PHASE_DATA_IN)
@@ -2545,6 +2706,7 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 
 	lastts = system_timestamp;
 
+	RunPCFXDelayedStatus(run_time);
 	RunCDRead(run_time);
 	RunCDDA(system_timestamp, run_time);
 
@@ -2664,8 +2826,10 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 				//  (Previously, ATN emulation was a bit broken, which resulted in the wrong data on the data bus in this code path in at least "Battle Heat", but it's fixed now and 0x06 is on the data bus).
 				SCSI_FIFO_Flush(din);
 				cd.data_out_pos = cd.data_out_size = 0;
+				SectorCount = 0;
 
 				CDReadTimer = 0;
+				PCFX_ClearSeekDelay();
 				cdda.CDDAStatus = CDDASTATUS_STOPPED;
 				ChangePhase(PHASE_BUS_FREE);
 			}
@@ -2736,6 +2900,12 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 
 	if(CDReadTimer > 0 && CDReadTimer < next_time)
 		next_time = CDReadTimer;
+
+	if(PCFXSeekTimer > 0 && PCFXSeekTimer < next_time)
+		next_time = PCFXSeekTimer;
+
+	if(PCFXAudioDelay > 0 && PCFXAudioDelay < next_time)
+		next_time = PCFXAudioDelay;
 
 	if(cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING)
 	{
@@ -2860,6 +3030,14 @@ int SCSICD_StateAction(StateMem* sm, const unsigned load, const bool data_only, 
 	  SFVAR(read_sec_end),
 
 	  SFVAR(CDReadTimer),
+	  SFVAR(pcfx_head_pos),
+	  SFVAR(PCFXSeekTimer),
+	  SFVAR(PCFXAudioDelay),
+	  SFVAR(PCFXSeekTarget),
+	  SFVAR(PCFXDelayedStatus),
+	  SFVAR(PCFXDelayedMessage),
+	  SFVAR(PCFXHasDelayedStatus),
+	  SFVAR(PCFXHasPendingHeadPos),
 	  SFVAR(SectorAddr),
 	  SFVAR(SectorCount),
 

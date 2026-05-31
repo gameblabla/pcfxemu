@@ -27,6 +27,7 @@ typedef struct CDIF CDIF;
 
 
 bool CDIF_IsPhysicalPath_C(const char *path);
+bool CDIF_IsPhysical_C(const CDIF *cdif);
 CDIF *CDIF_Open_C(const char *path, bool image_memcache);
 void CDIF_Close_C(CDIF *cdif);
 void CDIF_ReadTOC_C(CDIF *cdif, TOC *read_target);

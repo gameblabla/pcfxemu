@@ -774,6 +774,11 @@ bool CDIF_IsPhysicalPath_C(const char *path)
     return CDPhys_IsPath(path);
 }
 
+bool CDIF_IsPhysical_C(const CDIF *cdif)
+{
+    return cdif && cdif->is_physical;
+}
+
 static bool parse_physical(CDIF *cdif, const char *path)
 {
     if(!cdif || !path)
@@ -811,6 +816,12 @@ static bool parse_physical(CDIF *cdif, const char *path)
 bool CDIF_IsPhysicalPath_C(const char *path)
 {
     (void)path;
+    return false;
+}
+
+bool CDIF_IsPhysical_C(const CDIF *cdif)
+{
+    (void)cdif;
     return false;
 }
 #endif

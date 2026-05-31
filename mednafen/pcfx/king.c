@@ -2602,8 +2602,18 @@ static inline void VDC_PIXELMIX(bool SPRCOMBO_ON, bool BGCOMBO_ON)
 
     for(uint_fast16_t x = 0; x < width; x++)
     {
-     const uint32 zort[2] = { vdc_linebuffers[0][x], vdc_linebuffers[1][x] };
+     uint32 zort[2] = { vdc_linebuffers[0][x], vdc_linebuffers[1][x] };
      uint32 tmp_pixel;
+
+     /* Keep disabled PC-FX VDC BG/SPR layers out of the VDC-A/VDC-B pre-mixer.
+        This mirrors the SGX overscan-priority fix's important side effect: a
+        non-visible VDC pixel must not participate in the mixed pixel decision. */
+     for(unsigned int chip = 0; chip < 2; chip++)
+     {
+      const uint32 layer = (zort[chip] & 0x100) ? LAYER_VDC_SPR : LAYER_VDC_BG;
+      if((zort[chip] & 0xF) && !vce_rendercache.LayerPriority[layer])
+       zort[chip] = 0;
+     }
    
      /* SPR combination */
      if(SPRCOMBO_ON && (zort[1] & 0x18F) > 0x180)
