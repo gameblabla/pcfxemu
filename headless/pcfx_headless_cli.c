@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 struct Command
 {
@@ -42,8 +43,8 @@ static void usage(const char* argv0)
         "Usage: %s [options] [game.cue|game.chd|game.toc|game.bin|game.iso|playlist.m3u|program.ex]\n"
         "\n"
         "Options:\n"
-        "  --bios-dir DIR          Directory or BIOS file; accepts pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfxga.rom (default: .)\n"
-        "  --save-dir DIR          Directory for save/state side effects (default: bios dir)\n"
+        "  --bios-dir DIR          Directory or BIOS file; accepts pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfxga.rom (auto-searches $HOME/.pcfxemu)\n"
+        "  --save-dir DIR          Save root directory (default: $HOME/.pcfxemu; SRAM/NVRAM goes in DIR/sram)\n"
         "  --frames N              Run exactly N emulated frames (default: 1)\n"
         "  --commands FILE         Apply controller command list before each matching frame\n"
         "  --auto-run              Pulse RUN/START during early boot; useful for PC-FXGA BIOS CD prompts\n"
@@ -82,6 +83,125 @@ static void uppercase_copy(char* dst, size_t dst_size, const char* src)
             dst[i] = (char)toupper((unsigned char)src[i]);
     }
     dst[i] = 0;
+}
+
+static bool path_is_regular_file(const char* path)
+{
+    struct stat st;
+    return path && path[0] && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static void path_join_cli(char* out, size_t out_size, const char* a, const char* b)
+{
+    size_t alen;
+    if(!out || !out_size)
+        return;
+    if(!a || !a[0])
+    {
+        snprintf(out, out_size, "%s", b ? b : "");
+        return;
+    }
+    alen = strlen(a);
+    if(a[alen - 1] == '/' || a[alen - 1] == '\\')
+        snprintf(out, out_size, "%s%s", a, b ? b : "");
+    else
+        snprintf(out, out_size, "%s/%s", a, b ? b : "");
+}
+
+static bool pcfx_bios_exists_cli(const char* dir_or_file)
+{
+    static const char* names[] = {
+        "pcfx.rom", "pcfxbios.bin", "pcfxv101.bin", "pcfx_bios.bin",
+        "pcfxga.rom", "pcfxga.bin", "PCFX.ROM", "PCFXBIOS.BIN",
+        "PCFXV101.BIN", "PCFXGA.ROM", "PCFXGA.BIN"
+    };
+    char path[1024];
+    if(path_is_regular_file(dir_or_file))
+        return true;
+    for(size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+    {
+        path_join_cli(path, sizeof(path), dir_or_file, names[i]);
+        if(path_is_regular_file(path))
+            return true;
+    }
+    return false;
+}
+
+static void parent_dir_cli(char* out, size_t out_size, const char* p)
+{
+    const char* slash;
+    if(!out || !out_size)
+        return;
+    if(!p || !p[0])
+    {
+        snprintf(out, out_size, ".");
+        return;
+    }
+    slash = strrchr(p, '/');
+#ifdef _WIN32
+    {
+        const char* bslash = strrchr(p, '\\');
+        if(!slash || (bslash && bslash > slash))
+            slash = bslash;
+    }
+#endif
+    if(!slash)
+    {
+        snprintf(out, out_size, ".");
+        return;
+    }
+    if(slash == p)
+    {
+        snprintf(out, out_size, "/");
+        return;
+    }
+    size_t len = (size_t)(slash - p);
+    if(len >= out_size) len = out_size - 1;
+    memcpy(out, p, len);
+    out[len] = 0;
+}
+
+static void home_pcfxemu_cli(char* out, size_t out_size)
+{
+    const char* home = getenv("HOME");
+    if(home && home[0])
+        path_join_cli(out, out_size, home, ".pcfxemu");
+    else
+        snprintf(out, out_size, ".pcfxemu");
+}
+
+static const char* default_save_root_cli(char* storage, size_t storage_size)
+{
+    home_pcfxemu_cli(storage, storage_size);
+    return storage;
+}
+
+static const char* autodetect_bios_dir_cli(const char* requested, const char* game, char* storage, size_t storage_size)
+{
+    char game_dir[1024];
+    char home_dir[1024];
+    char home_bios_dir[1024];
+    const char* env_bios = getenv("PCFX_BIOS_DIR");
+
+    if(requested && strcmp(requested, "."))
+        return requested;
+    if(requested && pcfx_bios_exists_cli(requested))
+        return requested;
+    if(env_bios && env_bios[0] && pcfx_bios_exists_cli(env_bios))
+        return env_bios;
+    if(game && game[0])
+    {
+        parent_dir_cli(game_dir, sizeof(game_dir), game);
+        if(pcfx_bios_exists_cli(game_dir))
+            return snprintf(storage, storage_size, "%s", game_dir), storage;
+    }
+    home_pcfxemu_cli(home_dir, sizeof(home_dir));
+    path_join_cli(home_bios_dir, sizeof(home_bios_dir), home_dir, "bios");
+    if(pcfx_bios_exists_cli(home_bios_dir))
+        return snprintf(storage, storage_size, "%s", home_bios_dir), storage;
+    if(pcfx_bios_exists_cli(home_dir))
+        return snprintf(storage, storage_size, "%s", home_dir), storage;
+    return requested ? requested : ".";
 }
 
 static bool parse_button_atom(const char* token, uint16_t* bit)
@@ -322,6 +442,7 @@ static const char* need_arg(int* i, int argc, char** argv, const char* opt)
 int main(int argc, char** argv)
 {
     const char* bios_dir = ".";
+    bool bios_dir_explicit = false;
     const char* save_dir = NULL;
     const char* screenshot = NULL;
     const char* y4m = NULL;
@@ -349,7 +470,11 @@ int main(int argc, char** argv)
             free(dumps.data);
             return 0;
         }
-        else if(!strcmp(a, "--bios-dir")) bios_dir = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--bios-dir"))
+        {
+            bios_dir = need_arg(&i, argc, argv, a);
+            bios_dir_explicit = true;
+        }
         else if(!strcmp(a, "--save-dir")) save_dir = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--frames")) frames = strtoull(need_arg(&i, argc, argv, a), NULL, 0);
         else if(!strcmp(a, "--commands")) command_file = need_arg(&i, argc, argv, a);
@@ -421,10 +546,19 @@ int main(int argc, char** argv)
     if(commands.count)
         qsort(commands.data, commands.count, sizeof(commands.data[0]), command_cmp);
 
+    char autodetected_bios_dir[1024];
+    char default_save_root[1024];
+    autodetected_bios_dir[0] = 0;
+    default_save_root[0] = 0;
+    if(!bios_dir_explicit)
+        bios_dir = autodetect_bios_dir_cli(bios_dir, game, autodetected_bios_dir, sizeof(autodetected_bios_dir));
+    if(!save_dir)
+        save_dir = default_save_root_cli(default_save_root, sizeof(default_save_root));
+
     PCFX_HeadlessConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
     cfg.bios_dir = bios_dir;
-    cfg.save_dir = save_dir ? save_dir : bios_dir;
+    cfg.save_dir = save_dir;
     cfg.sound_rate = 44100;
     cfg.fast_video = fast_video ? 1 : 0;
     cfg.disable_3d_hardware = disable_3d_hardware ? 1 : 0;
@@ -443,6 +577,9 @@ int main(int argc, char** argv)
     if(!pcfx_headless_load_cd(emu, game))
     {
         fprintf(stderr, "Load failed: %s\n", pcfx_headless_last_error(emu));
+        fprintf(stderr, "BIOS path in use: %s\n", bios_dir ? bios_dir : ".");
+        fprintf(stderr, "Accepted standard PC-FX BIOS names: pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfx_bios.bin\n");
+        fprintf(stderr, "Put a BIOS in ~/.pcfxemu or ~/.pcfxemu/bios, set PCFX_BIOS_DIR, or run with --bios-dir /path/to/bios-dir-or-file.\n");
         goto out;
     }
 

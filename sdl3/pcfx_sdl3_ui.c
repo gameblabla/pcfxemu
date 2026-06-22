@@ -449,6 +449,168 @@ static void home_pcfxemu_dir(char* out, size_t out_size)
         path_join(out, out_size, home, ".pcfxemu");
 }
 
+static void sdl3_config_path(char* out, size_t out_size, const char* home_dir)
+{
+    path_join(out, out_size, home_dir && home_dir[0] ? home_dir : ".", "sdl3.cfg");
+}
+
+static char* trim_ascii(char* s)
+{
+    char* end;
+    if(!s)
+        return s;
+    while(*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n')
+        s++;
+    end = s + strlen(s);
+    while(end > s && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\r' || end[-1] == '\n'))
+        *--end = '\0';
+    return s;
+}
+
+static bool parse_bool_value(const char* v, bool fallback)
+{
+    if(!v)
+        return fallback;
+    if(!strcasecmp(v, "1") || !strcasecmp(v, "true") || !strcasecmp(v, "yes") || !strcasecmp(v, "on"))
+        return true;
+    if(!strcasecmp(v, "0") || !strcasecmp(v, "false") || !strcasecmp(v, "no") || !strcasecmp(v, "off"))
+        return false;
+    return fallback;
+}
+
+static int parse_int_clamped(const char* v, int fallback, int lo, int hi)
+{
+    char* end = NULL;
+    long x;
+    if(!v)
+        return fallback;
+    x = strtol(v, &end, 0);
+    if(end == v)
+        return fallback;
+    if(x < lo) x = lo;
+    if(x > hi) x = hi;
+    return (int)x;
+}
+
+static uint32_t parse_u32_value(const char* v, uint32_t fallback)
+{
+    char* end = NULL;
+    unsigned long x;
+    if(!v)
+        return fallback;
+    x = strtoul(v, &end, 0);
+    if(end == v)
+        return fallback;
+    return (uint32_t)x;
+}
+
+static void load_sdl3_config(struct App* app, const char* home_dir)
+{
+    char path[PATH_MAX];
+    char line[1024];
+    FILE* fp;
+    int idx;
+
+    if(!app)
+        return;
+    sdl3_config_path(path, sizeof(path), home_dir);
+    fp = fopen(path, "rb");
+    if(!fp)
+        return;
+
+    while(fgets(line, sizeof(line), fp))
+    {
+        char* key;
+        char* val;
+        char* eq;
+        key = trim_ascii(line);
+        if(!key[0] || key[0] == '#' || key[0] == ';')
+            continue;
+        eq = strchr(key, '=');
+        if(!eq)
+            continue;
+        *eq = '\0';
+        val = trim_ascii(eq + 1);
+        key = trim_ascii(key);
+
+        if(!strcmp(key, "bios_dir"))
+            copy_str(app->bios_dir, sizeof(app->bios_dir), val);
+        else if(!strcmp(key, "save_dir"))
+            copy_str(app->save_dir, sizeof(app->save_dir), val);
+        else if(!strcmp(key, "fullscreen"))
+            app->fullscreen = parse_bool_value(val, app->fullscreen);
+        else if(!strcmp(key, "bilinear"))
+            app->bilinear = parse_bool_value(val, app->bilinear);
+        else if(!strcmp(key, "scanlines"))
+            app->scanlines = parse_bool_value(val, app->scanlines);
+        else if(!strcmp(key, "enable_3d_hardware"))
+            app->enable_3d_hardware = parse_bool_value(val, app->enable_3d_hardware);
+        else if(!strcmp(key, "fast_video"))
+            app->fast_video = parse_bool_value(val, app->fast_video);
+        else if(!strcmp(key, "adpcm_suppress_reset_clicks"))
+            app->adpcm_suppress_reset_clicks = parse_bool_value(val, app->adpcm_suppress_reset_clicks);
+        else if(!strcmp(key, "system_mode"))
+            app->system_mode = parse_int_clamped(val, app->system_mode, PCFX_UI_MODE_PCFX, PCFX_UI_MODE_AUTO);
+        else if(!strcmp(key, "aspect"))
+            app->aspect = parse_int_clamped(val, app->aspect, 0, 2);
+        else if(!strcmp(key, "state_slot"))
+            app->state_slot = parse_int_clamped(val, app->state_slot, 0, 9);
+        else if(!strcmp(key, "controller_type"))
+            app->controller_type = parse_int_clamped(val, app->controller_type, 0, 1);
+        else if(!strcmp(key, "cd_speed"))
+            app->cd_speed = normalize_cd_speed(parse_int_clamped(val, app->cd_speed, 1, 16));
+        else if(!strcmp(key, "adpcm_buggy_codec_mode"))
+            app->adpcm_buggy_codec_mode = parse_int_clamped(val, app->adpcm_buggy_codec_mode, PCFX_ADPCM_BUGGY_AUTO, PCFX_ADPCM_BUGGY_ON);
+        else if(!strcmp(key, "bios_patch_flags"))
+            app->bios_patch_flags = parse_u32_value(val, app->bios_patch_flags);
+        else if(sscanf(key, "p1_key_%d", &idx) == 1 && idx >= 0 && idx < (int)ARRAY_SIZE(k_bindings))
+            app->keymap[0][idx] = (SDL_Scancode)parse_int_clamped(val, app->keymap[0][idx], 0, SDL_SCANCODE_COUNT - 1);
+        else if(sscanf(key, "p2_key_%d", &idx) == 1 && idx >= 0 && idx < (int)ARRAY_SIZE(k_bindings))
+            app->keymap[1][idx] = (SDL_Scancode)parse_int_clamped(val, app->keymap[1][idx], 0, SDL_SCANCODE_COUNT - 1);
+    }
+    fclose(fp);
+}
+
+static bool save_sdl3_config(const struct App* app, const char* home_dir)
+{
+    char path[PATH_MAX];
+    FILE* fp;
+    size_t i;
+
+    if(!app)
+        return false;
+    if(home_dir && home_dir[0])
+        make_dir(home_dir);
+    sdl3_config_path(path, sizeof(path), home_dir);
+    fp = fopen(path, "wb");
+    if(!fp)
+        return false;
+
+    fprintf(fp, "# pcfxemu SDL3 frontend configuration\n");
+    fprintf(fp, "version=1\n");
+    fprintf(fp, "bios_dir=%s\n", app->bios_dir);
+    fprintf(fp, "save_dir=%s\n", app->save_dir);
+    fprintf(fp, "fullscreen=%d\n", app->fullscreen ? 1 : 0);
+    fprintf(fp, "bilinear=%d\n", app->bilinear ? 1 : 0);
+    fprintf(fp, "scanlines=%d\n", app->scanlines ? 1 : 0);
+    fprintf(fp, "enable_3d_hardware=%d\n", app->enable_3d_hardware ? 1 : 0);
+    fprintf(fp, "fast_video=%d\n", app->fast_video ? 1 : 0);
+    fprintf(fp, "system_mode=%d\n", app->system_mode);
+    fprintf(fp, "aspect=%d\n", app->aspect);
+    fprintf(fp, "state_slot=%d\n", app->state_slot);
+    fprintf(fp, "controller_type=%d\n", app->controller_type);
+    fprintf(fp, "cd_speed=%d\n", normalize_cd_speed(app->cd_speed));
+    fprintf(fp, "adpcm_buggy_codec_mode=%d\n", app->adpcm_buggy_codec_mode);
+    fprintf(fp, "adpcm_suppress_reset_clicks=%d\n", app->adpcm_suppress_reset_clicks ? 1 : 0);
+    fprintf(fp, "bios_patch_flags=0x%08x\n", app->bios_patch_flags);
+    for(i = 0; i < ARRAY_SIZE(k_bindings); i++)
+        fprintf(fp, "p1_key_%02zu=%d\n", i, (int)app->keymap[0][i]);
+    for(i = 0; i < ARRAY_SIZE(k_bindings); i++)
+        fprintf(fp, "p2_key_%02zu=%d\n", i, (int)app->keymap[1][i]);
+    fclose(fp);
+    return true;
+}
+
 static void parent_dir_of(char* out, size_t out_size, const char* p)
 {
     const char* slash;
@@ -2074,7 +2236,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video] [--disable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen] [--native-aspect] [--stretch] [--nearest] [--scanlines] [--mouse] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2089,7 +2251,6 @@ static void print_usage(const char* argv0)
 int main(int argc, char** argv)
 {
     struct App app;
-    bool disable_3d_hardware = false;
     bool bios_dir_explicit = false;
     bool save_dir_explicit = false;
     char home_dir[PATH_MAX];
@@ -2099,7 +2260,7 @@ int main(int argc, char** argv)
 
     memset(&app, 0, sizeof(app));
     init_default_keymaps(&app);
-    copy_str(app.bios_dir, sizeof(app.bios_dir), ".");
+    copy_str(app.bios_dir, sizeof(app.bios_dir), "");
     app.running = true;
     app.bilinear = true;
     app.enable_3d_hardware = true;
@@ -2115,6 +2276,10 @@ int main(int argc, char** argv)
     app.display_w = 256;
     app.display_h = EMU_H;
 
+    home_pcfxemu_dir(home_dir, sizeof(home_dir));
+    make_dir(home_dir);
+    load_sdl3_config(&app, home_dir);
+
     for(i = 1; i < argc; i++)
     {
         if(!strcmp(argv[i], "--bios-dir") && i + 1 < argc)
@@ -2129,8 +2294,12 @@ int main(int argc, char** argv)
         }
         else if(!strcmp(argv[i], "--fast-video"))
             app.fast_video = true;
+        else if(!strcmp(argv[i], "--no-fast-video"))
+            app.fast_video = false;
         else if(!strcmp(argv[i], "--disable-3d-hardware"))
-            disable_3d_hardware = true;
+            app.enable_3d_hardware = false;
+        else if(!strcmp(argv[i], "--enable-3d-hardware"))
+            app.enable_3d_hardware = true;
         else if(!strcmp(argv[i], "--auto"))
             app.system_mode = PCFX_UI_MODE_AUTO;
         else if(!strcmp(argv[i], "--pcfx"))
@@ -2139,16 +2308,24 @@ int main(int argc, char** argv)
             app.system_mode = PCFX_UI_MODE_FXGA;
         else if(!strcmp(argv[i], "--fullscreen"))
             app.fullscreen = true;
+        else if(!strcmp(argv[i], "--windowed"))
+            app.fullscreen = false;
         else if(!strcmp(argv[i], "--native-aspect"))
             app.aspect = 1;
         else if(!strcmp(argv[i], "--stretch"))
             app.aspect = 2;
         else if(!strcmp(argv[i], "--nearest"))
             app.bilinear = false;
+        else if(!strcmp(argv[i], "--linear"))
+            app.bilinear = true;
         else if(!strcmp(argv[i], "--scanlines"))
             app.scanlines = true;
+        else if(!strcmp(argv[i], "--no-scanlines"))
+            app.scanlines = false;
         else if(!strcmp(argv[i], "--mouse"))
             app.controller_type = 1;
+        else if(!strcmp(argv[i], "--gamepad"))
+            app.controller_type = 0;
         else if(!strcmp(argv[i], "--cd-speed") && i + 1 < argc)
             app.cd_speed = normalize_cd_speed(atoi(argv[++i]));
         else if(!strncmp(argv[i], "--cd-speed=", 11))
@@ -2169,6 +2346,8 @@ int main(int argc, char** argv)
             app.adpcm_suppress_reset_clicks = false;
         else if(!strcmp(argv[i], "--bios-patches") && i + 1 < argc)
             app.bios_patch_flags = parse_bios_patch_flags(argv[++i]);
+        else if(!strcmp(argv[i], "--no-bios-patches"))
+            app.bios_patch_flags = 0;
         else if(!strncmp(argv[i], "--bios-patches=", 15))
             app.bios_patch_flags = parse_bios_patch_flags(argv[i] + 15);
 #ifdef PCFX_ENABLE_PHYSICAL_CD
@@ -2201,18 +2380,34 @@ int main(int argc, char** argv)
 
     home_pcfxemu_dir(home_dir, sizeof(home_dir));
     make_dir(home_dir);
-    if(!save_dir_explicit)
+    if(!save_dir_explicit && !app.save_dir[0])
         copy_str(app.save_dir, sizeof(app.save_dir), home_dir);
-    if(!bios_dir_explicit)
+    if(!bios_dir_explicit && app.bios_dir[0] && !pcfx_bios_exists_in_dir(app.bios_dir))
+    {
+        /* A stale saved bios_dir such as "." must not suppress normal
+         * auto-discovery.  This is the common failure after moving games or
+         * first launching without a BIOS in the working directory.
+         */
+        app.bios_dir[0] = '\0';
+    }
+    if(!bios_dir_explicit && !app.bios_dir[0])
     {
         char game_dir[PATH_MAX];
+        char home_bios_dir[PATH_MAX];
+        const char* env_bios = getenv("PCFX_BIOS_DIR");
         game_dir[0] = 0;
+        home_bios_dir[0] = 0;
         if(app.game_path[0])
             parent_dir_of(game_dir, sizeof(game_dir), app.game_path);
-        if(pcfx_bios_exists_in_dir("."))
+        path_join(home_bios_dir, sizeof(home_bios_dir), home_dir, "bios");
+        if(env_bios && env_bios[0] && pcfx_bios_exists_in_dir(env_bios))
+            copy_str(app.bios_dir, sizeof(app.bios_dir), env_bios);
+        else if(pcfx_bios_exists_in_dir("."))
             copy_str(app.bios_dir, sizeof(app.bios_dir), ".");
         else if(game_dir[0] && pcfx_bios_exists_in_dir(game_dir))
             copy_str(app.bios_dir, sizeof(app.bios_dir), game_dir);
+        else if(pcfx_bios_exists_in_dir(home_bios_dir))
+            copy_str(app.bios_dir, sizeof(app.bios_dir), home_bios_dir);
         else if(pcfx_bios_exists_in_dir(home_dir))
             copy_str(app.bios_dir, sizeof(app.bios_dir), home_dir);
         else
@@ -2281,13 +2476,12 @@ int main(int argc, char** argv)
     cfg.save_dir = app.save_dir;
     cfg.sound_rate = 44100;
     cfg.fast_video = app.fast_video ? 1 : 0;
-    cfg.disable_3d_hardware = disable_3d_hardware ? 1 : 0;
+    cfg.disable_3d_hardware = app.enable_3d_hardware ? 0 : 1;
     cfg.prefer_fxga_bios = app.system_mode;
     cfg.bios_patch_flags = app.bios_patch_flags;
     cfg.cd_speed = normalize_cd_speed(app.cd_speed);
     cfg.adpcm_buggy_codec_mode = app.adpcm_buggy_codec_mode;
     cfg.adpcm_suppress_reset_clicks = app.adpcm_suppress_reset_clicks ? 1 : 0;
-    app.enable_3d_hardware = !disable_3d_hardware;
     app.emu = pcfx_headless_create(&cfg);
     if(!app.emu)
     {
@@ -2310,6 +2504,9 @@ int main(int argc, char** argv)
         if(!pcfx_headless_load_cd(app.emu, initial_media_path))
         {
             fprintf(stderr, "load failed: %s\n", pcfx_headless_last_error(app.emu));
+            fprintf(stderr, "BIOS path in use: %s\n", app.bios_dir[0] ? app.bios_dir : ".");
+            fprintf(stderr, "Accepted standard PC-FX BIOS names: pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfx_bios.bin\n");
+            fprintf(stderr, "Put a BIOS in ~/.pcfxemu or ~/.pcfxemu/bios, set PCFX_BIOS_DIR, or run with --bios-dir /path/to/bios-dir-or-file.\n");
             pcfx_headless_destroy(app.emu);
             SDL_Quit();
             return 1;
@@ -2398,6 +2595,8 @@ int main(int argc, char** argv)
         render_game(&app);
         SDL_Delay(1);
     }
+
+    save_sdl3_config(&app, home_dir);
 
     release_mouse_capture(&app);
     if(app.gamepad)

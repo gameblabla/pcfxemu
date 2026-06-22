@@ -30,6 +30,8 @@ const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_p
 void pcfx_headless_video_get_display_rect(int* x, int* y, int* width, int* height);
 
 extern void Emu_Init(void);
+extern void Load_Configuration(void);
+extern void Clean(void);
 void PCFX_SetHuC6273Enabled(bool enabled);
 bool PCFX_GetHuC6273Enabled(void);
 void PCFX_SetPreferFXGABIOS(bool enabled);
@@ -305,6 +307,8 @@ void pcfx_headless_destroy(PCFX_Headless* emu)
     pcfx_headless_close_wav(emu);
     if(emu->initialized)
     {
+        if(emu->loaded)
+            Clean();
         PCFX_Headless_CoreClose();
         Audio_Close();
         Video_Close();
@@ -323,6 +327,7 @@ int pcfx_headless_boot_bios(PCFX_Headless* emu)
     make_game_name("PC-FXGA BIOS");
     if(!Load_BIOS_Memory())
         return set_error(emu, "failed to boot BIOS from --bios-dir: %s", home_path);
+    Load_Configuration();
     emu->loaded = true;
     return 1;
 }
@@ -341,6 +346,7 @@ int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path)
     make_game_name(resolved_path);
     if(!Load_Game_Memory(resolved_path))
         return set_error(emu, "failed to load game or BIOS from --bios-dir: %s", home_path);
+    Load_Configuration();
     emu->loaded = true;
     return 1;
 }

@@ -740,6 +740,25 @@ static struct MDFNFILE* PCFX_OpenBIOS(bool media_wants_fxga)
  const bool media_prefers_fxga = ((EmuFlags & CDGE_FLAG_FXGA) || media_wants_fxga);
  const char* base = pcfx_base_directory[0] ? pcfx_base_directory : ".";
  struct MDFNFILE* fp = NULL;
+ PCFXBIOSKind direct_kind = PCFX_BIOS_UNKNOWN;
+
+ /* Accept --bios-dir as either a directory or a direct BIOS file path.
+  * Older frontend help said DIR|BIOS, but the core only searched
+  * <base>/<known-name>, so --bios-dir /path/pcfx.rom silently failed.
+  */
+ fp = PCFX_TryOpenBIOS(base, &direct_kind);
+ if(fp)
+ {
+  if(!auto_mode && !PCFX_BIOSKindUsableForMode(direct_kind, force_fxga))
+  {
+   file_close(fp);
+   CurrentBIOSKind = PCFX_BIOS_UNKNOWN;
+   CurrentBIOSPath[0] = 0;
+   CurrentBIOSMD5[0] = 0;
+   return NULL;
+  }
+  return fp;
+ }
 
  if(force_fxga)
  {
