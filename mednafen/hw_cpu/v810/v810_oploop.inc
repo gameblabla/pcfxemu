@@ -42,6 +42,16 @@
     #define V810_PROF_BRANCH(t)
     #endif
 
+    /* Flag-use pipeline stall: +2 cycles when this (flag-reading) instruction
+     * immediately follows a flag-writing one. See v810_cpu.c op_writes_flags[]. */
+    #ifndef V810_NO_FLAG_STALL
+    #define V810_FLAG_STALL()   { if(v810_flagset) ADDCLOCK(2); }
+    #define V810_FLAG_TRACK()   { v810_flagset = op_writes_flags[opcode & 0xFF]; }
+    #else
+    #define V810_FLAG_STALL()
+    #define V810_FLAG_TRACK()
+    #endif
+
     #define CHECK_HALTED();	{ if(Halted && timestamp < next_event_ts) { timestamp = next_event_ts; } }
 
     while(Running)
@@ -297,6 +307,7 @@
 
 	BEGIN_OP(SETF);
 		ADDCLOCK(1);
+		V810_FLAG_STALL();	// SETF reads the condition flags
 
 		P_REG[arg2] = 0;
 
@@ -399,6 +410,7 @@
 
 	BEGIN_OP(STSR);		// Loads a PR with the value in specified Sys Reg
              ADDCLOCK(1);	// ?
+             if((arg1 & 0x1F) == PSW) V810_FLAG_STALL();	// reading PSW flags
              P_REG[arg2 & 0x1F] = GetSREG(arg1 & 0x1F);
 	END_OP();
 
@@ -426,6 +438,7 @@
 
 
 	#define COND_BRANCH(cond)			\
+		V810_FLAG_STALL();			\
 		if(cond) 				\
 		{ 					\
 		 V810_PROF_BRANCH(1);			\
@@ -464,7 +477,13 @@
 	END_OP();
 
 	BEGIN_OP(BR);
-          	COND_BRANCH(TRUE);
+		// Unconditional: does not read a flag, so no flag-use stall (unlike Bcc).
+		V810_PROF_BRANCH(1);
+		ADDCLOCK(3);
+		RB_PCRELCHANGE(sign_9(arg1) & 0xFFFFFFFE);
+		if(RB_AccurateMode)
+		 BRANCH_ALIGN_CHECK(PC);
+		RB_ADDBT(old_PC, RB_GETPC(), 0);
 	END_OP();
 
 	BEGIN_OP(BLT);
@@ -1079,6 +1098,7 @@
 	OpFinished:	;
 	lastop = opcode;
 	OpFinishedSkipLO: ;
+	V810_FLAG_TRACK();	// record whether THIS instruction wrote PSW flags, for the next one
      }	// end  while(timestamp_rl < next_event_ts)
      next_event_ts = event_handler(timestamp_rl);
      //printf("Next: %d, Cur: %d\n", next_event_ts, timestamp);

@@ -257,6 +257,34 @@ void V810_CacheRestore(v810_timestamp_t *timestamp, const uint32 SA)
 }
 
 
+/* --- V810 flag-use pipeline stall (measured on real hardware, dshadoff/FPGA 2025) ---
+ * A flag-READING instruction (conditional branch, STSR from PSW, SETF) that immediately
+ * follows a flag-WRITING instruction eats a +2-cycle decode stall. Mednafen's base model
+ * omits this (it counts the cache-hit, no-conflict optimum). Register-register data
+ * dependencies do NOT stall (also confirmed); only flag use and load/store address
+ * generation do. Enabled by default; -DV810_NO_FLAG_STALL reverts to the old model. */
+#ifndef V810_NO_FLAG_STALL
+static int v810_flagset;   /* did the immediately-preceding instruction write PSW flags? */
+static const uint8 op_writes_flags[256] = {
+  0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+  0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1,
+  0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+#endif
+
 static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 {
  const int CI = (addr >> 3) & 0x7F;
@@ -375,6 +403,9 @@ void V810_Reset()
 	ilevel = -1;
 
 	lastop = 0;
+#ifndef V810_NO_FLAG_STALL
+	v810_flagset = 0;
+#endif
 
 	in_bstr = FALSE;
 
