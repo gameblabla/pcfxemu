@@ -195,6 +195,8 @@ static void DrawBG_Fast(uint32 *target, int n)
  const uint32 cg_offset = king->BGCGAddr[n] * 1024;
  const uint32 bat_and_cg_page = (king->PageSetting & 0x0010) ? 1 : 0;
 
+ KP_BG(bat_and_cg_page, bat_offset, cg_offset, bgmode);
+
  const uint32 YOffset = (YScroll + (fx_vce.raster_counter - 22)) & 0xFFFF;
  const uint32 layer_or = (LAYER_BG0 + n) << 28;
  const int ysmall = YOffset & 0x7;

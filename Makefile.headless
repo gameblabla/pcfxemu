@@ -25,6 +25,11 @@ endif
 ifeq ($(FAST_VIDEO), YES)
 DEFINES += -DPCFX_FAST_VIDEO_DEFAULT=1
 endif
+
+# PROFILE=1 enables the V810 performance profiler (v810_profile.[ch]); off by default.
+ifeq ($(PROFILE),1)
+DEFINES += -DV810_PROFILE
+endif
 CFLAGS ?= -O2 -g3 -fno-common -Wall -Wextra -Wunused-value
 CSTD ?= -std=gnu11
 CFLAGS += $(INCLUDES) $(DEFINES)

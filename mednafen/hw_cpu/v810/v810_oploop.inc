@@ -34,6 +34,14 @@
 
     #define ADDCLOCK(__n) { timestamp += __n; }
 
+    #ifdef V810_PROFILE
+    #define V810_PROF_OPCODE(o) v810_prof_opcode(o)
+    #define V810_PROF_BRANCH(t) v810_prof_branch(t)
+    #else
+    #define V810_PROF_OPCODE(o)
+    #define V810_PROF_BRANCH(t)
+    #endif
+
     #define CHECK_HALTED();	{ if(Halted && timestamp < next_event_ts) { timestamp = next_event_ts; } }
 
     while(Running)
@@ -80,6 +88,8 @@
 	 }
 
        	 opcode = (tmpop >> 9) | IPendingCache;
+
+	 V810_PROF_OPCODE(opcode);
 
 	 //printf("%02x\n", opcode >> 1);
 
@@ -418,6 +428,7 @@
 	#define COND_BRANCH(cond)			\
 		if(cond) 				\
 		{ 					\
+		 V810_PROF_BRANCH(1);			\
 		 ADDCLOCK(3);				\
 		 RB_PCRELCHANGE(sign_9(arg1) & 0xFFFFFFFE);	\
 		 if(RB_AccurateMode)			\
@@ -426,6 +437,7 @@
 		}					\
 		else					\
 		{					\
+		 V810_PROF_BRANCH(0);			\
 		 ADDCLOCK(1);				\
 		 RB_INCPCBY2();				\
 		}

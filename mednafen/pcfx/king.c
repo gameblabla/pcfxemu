@@ -503,6 +503,220 @@ typedef struct
 
 static king_t *king = NULL;
 
+/* ==================================================================
+ * KING (HuC6272) profiler — enabled with -DV810_PROFILE.
+ * Register names/numbers mirror the 1995 Game Maker devkit DEV72.H.
+ * Measures: KING register R/W traffic (by official name), KRAM
+ * bandwidth per engine (CPU port / SCSI-DMA / ADPCM / RAINBOW), and a
+ * 4K-word KRAM contention map that auto-flags regions the CPU writes
+ * while an engine reads them (the classic "sky/ADPCM garble" bug).
+ * ================================================================== */
+#ifdef V810_PROFILE
+#include <stdio.h>
+#define KP_NBUCK  256                      /* 262144 words / 1024 = 256 buckets per page */
+#define KP_BSHIFT 10                        /* 1024-word buckets */
+/* engines: 0=CPU-wr 1=CPU-rd 2=SCSI-DMA-wr 3=ADPCM-rd 4=RAINBOW-rd 5=BG-rd(estimated) */
+#define KP_NENG 6
+static const char *const kp_eng_name[KP_NENG] =
+	{ "CPU-write", "CPU-read", "SCSI-DMA-wr", "ADPCM-read", "RAINBOW-read", "BG-read(est)" };
+static const int kp_eng_is_read[KP_NENG] = { 0, 1, 0, 1, 1, 1 };
+static unsigned long long kp_regw[128], kp_regr[128];
+static unsigned long long kp_eng_cnt[KP_NENG];               /* total words per engine */
+static unsigned long long kp_buck[KP_NENG][2][KP_NBUCK];     /* [engine][page][bucket] */
+static uint32_t kp_lo[KP_NENG][2], kp_hi[KP_NENG][2];        /* word-address range hit */
+static int kp_rng_init;
+
+static inline void kp_hitw(int eng, int pg, uint32_t ad, unsigned w)
+{
+	pg &= 1; ad &= 0x3FFFF;
+	kp_eng_cnt[eng] += w;
+	kp_buck[eng][pg][(ad >> KP_BSHIFT) & (KP_NBUCK - 1)] += w;
+	if(!kp_rng_init) { for(int e = 0; e < KP_NENG; e++) for(int p = 0; p < 2; p++)
+		{ kp_lo[e][p] = 0xFFFFFFFF; kp_hi[e][p] = 0; } kp_rng_init = 1; }
+	if(ad < kp_lo[eng][pg]) kp_lo[eng][pg] = ad;
+	if(ad > kp_hi[eng][pg]) kp_hi[eng][pg] = ad;
+}
+static inline void kp_hit(int eng, int pg, uint32_t ad) { kp_hitw(eng, pg, ad, 1); }
+
+/* BG reads KRAM per-scanline-layer at per-pixel granularity in the blit inner loops;
+ * hooking every CG word would bloat the hot path, so we record the layer's BAT+CG
+ * footprint once per rendered scanline with a bpp-derived word estimate. */
+static inline void kp_bg_scanline(int pg, uint32_t bat_off, uint32_t cg_off, unsigned bgmode)
+{
+	unsigned bpp7 = bgmode & 0x7;
+	unsigned cgw_per_col = (bpp7 >= 4) ? 4 : (bpp7 >= 2 ? 2 : 1);   /* words per 8px tile row */
+	kp_hitw(5, pg, bat_off, 34);                 /* ~one BAT row of 34 columns */
+	kp_hitw(5, pg, cg_off, 34 * cgw_per_col);    /* ~34 tile-row fetches */
+}
+
+/* --- EXACT same-field collision detector ---
+ * Per-word generation stamps (no per-frame clear): a word is "touched this field"
+ * iff its stamp == kx_gen. If the CPU writes a word an engine (ADPCM/RAINBOW) reads
+ * in the SAME field, or vice-versa, that is a real read/write hazard on shared KRAM.
+ * CPU-read (self) and BG (estimated, not per-word) are excluded. ~2 MB of stamps. */
+static uint16_t kx_wr[2][262144];   /* field-stamp of last CPU write per word */
+static uint16_t kx_rd[2][262144];   /* field-stamp of last engine read per word */
+static uint8_t  kx_rdeng[2][262144]; /* which engine last read (3=ADPCM,4=RAINBOW) */
+static uint16_t kx_gen = 1;
+static unsigned long long kx_cpu_then_read, kx_read_then_cpu;
+static uint32_t kx_sample_addr[8]; static int kx_sample_eng[8], kx_sample_pg[8]; static int kx_nsample;
+
+static inline void kx_note_sample(int pg, uint32_t ad, int eng)
+{
+	if(kx_nsample < 8) { kx_sample_pg[kx_nsample] = pg; kx_sample_addr[kx_nsample] = ad;
+		kx_sample_eng[kx_nsample] = eng; kx_nsample++; }
+}
+static inline void kx_write(int pg, uint32_t ad)         /* CPU writes word */
+{
+	pg &= 1; ad &= 0x3FFFF;
+	if(kx_rd[pg][ad] == kx_gen) { kx_cpu_then_read++; kx_note_sample(pg, ad, kx_rdeng[pg][ad]); }
+	kx_wr[pg][ad] = kx_gen;
+}
+static inline void kx_read(int pg, uint32_t ad, int eng) /* ADPCM/RAINBOW reads word */
+{
+	pg &= 1; ad &= 0x3FFFF;
+	if(kx_wr[pg][ad] == kx_gen) { kx_read_then_cpu++; kx_note_sample(pg, ad, eng); }
+	kx_rd[pg][ad] = kx_gen; kx_rdeng[pg][ad] = (uint8_t)eng;
+}
+
+void king_prof_newfield(void)   /* called once per field from core.c */
+{
+	if(++kx_gen == 0) { memset(kx_wr, 0, sizeof(kx_wr)); memset(kx_rd, 0, sizeof(kx_rd)); kx_gen = 1; }
+}
+
+static const char *king_reg_name(unsigned r)
+{
+	switch(r & 0x7F) {
+	case 0x00: return "SCSI_ODATA/CDATA"; case 0x01: return "SCSI_ICMD";
+	case 0x02: return "SCSI_MODE";   case 0x03: return "SCSI_TCMD";
+	case 0x04: return "SCSI_SELECT/CBSTAT"; case 0x05: return "SCSI_DMASEND/BUSSTAT";
+	case 0x06: return "SCSI_TDMASEND/IDATA"; case 0x07: return "SCSI_DMARCV/IRQRESET";
+	case 0x08: return "CDROM_SUBCTRL/DATA"; case 0x09: return "SCSI_DMASTART";
+	case 0x0a: return "SCSI_DMACNT";  case 0x0b: return "SCSI_DMACR";
+	case 0x0c: return "KRAM_ARR(rdadr)"; case 0x0d: return "KRAM_AWR(wradr)";
+	case 0x0e: return "KRAM_DATA";    case 0x0f: return "KRAM_PAGE";
+	case 0x10: return "BG_MODE";      case 0x12: return "BG_PRI";
+	case 0x13: return "BG_MPAR";      case 0x14: return "BG_MPDR";
+	case 0x15: return "BG_MPCR";      case 0x16: return "BG_SSCR";
+	case 0x20: return "BG0_BAT";      case 0x21: return "BG0_CG";
+	case 0x22: return "BG0_SBAT";     case 0x23: return "BG0_SCG";
+	case 0x24: return "BG1_BAT";      case 0x25: return "BG1_CG";
+	case 0x28: return "BG2_BAT";      case 0x29: return "BG2_CG";
+	case 0x2a: return "BG3_BAT";      case 0x2b: return "BG3_CG";
+	case 0x2c: return "BG0_SIZE";     case 0x2d: return "BG1_SIZE";
+	case 0x2e: return "BG2_SIZE";     case 0x2f: return "BG3_SIZE";
+	case 0x30: return "BG0_BSX";      case 0x31: return "BG0_BSY";
+	case 0x32: return "BG1_BSX";      case 0x33: return "BG1_BSY";
+	case 0x34: return "BG2_BSX";      case 0x35: return "BG2_BSY";
+	case 0x36: return "BG3_BSX";      case 0x37: return "BG3_BSY";
+	case 0x38: return "BG_AFINA";     case 0x39: return "BG_AFINB";
+	case 0x3a: return "BG_AFINC";     case 0x3b: return "BG_AFIND";
+	case 0x3c: return "BG_AFINX";     case 0x3d: return "BG_AFINY";
+	case 0x40: return "KR_CR(rainbow)"; case 0x41: return "KR_TSA";
+	case 0x42: return "KR_TSR";       case 0x43: return "KR_LEN";
+	case 0x44: return "RASTER_COUNT"; case 0x50: return "KS_MODE(adpcm)";
+	case 0x51: return "KS_CR0";       case 0x52: return "KS_CR1";
+	case 0x53: return "KS_STAT";      case 0x58: return "KS_START0";
+	case 0x59: return "KS_END0";      case 0x5a: return "KS_HALF0";
+	case 0x5c: return "KS_START1";    case 0x5d: return "KS_END1";
+	case 0x5e: return "KS_HALF1";     case 0x61: return "KRAM_MODE";
+	default:   return "?";
+	}
+}
+
+#define KP_REGW(r)           do { kp_regw[(r) & 0x7F]++; } while(0)
+#define KP_REGR(r)           do { kp_regr[(r) & 0x7F]++; } while(0)
+#define KP_CPU_WR(pg,ad)     do { kp_hit(0, pg, ad); kx_write(pg, ad); } while(0)
+#define KP_CPU_RD(pg,ad)     kp_hit(1, pg, ad)
+#define KP_DMA_WR(pg,ad)     kp_hit(2, pg, ad)
+#define KP_ADPCM_RD(pg,ad)   do { kp_hit(3, pg, ad); kx_read(pg, ad, 3); } while(0)
+#define KP_RAINBOW_RD(pg,ad) do { kp_hit(4, pg, ad); kx_read(pg, ad, 4); } while(0)
+#define KP_BG(pg,bat,cg,mode) kp_bg_scanline(pg, bat, cg, mode)
+
+void king_prof_report(unsigned long long frames)
+{
+	double f = frames ? (double)frames : 1.0;
+	fprintf(stderr, "\n================  KING (HuC6272) PROFILE  ================\n");
+	fprintf(stderr, "KRAM bandwidth / field (16-bit words):\n");
+	for(int e = 0; e < KP_NENG; e++)
+		fprintf(stderr, "  %-13s %8.0f\n", kp_eng_name[e], kp_eng_cnt[e] / f);
+	fprintf(stderr, "  (CPU-write is DOOM's framebuffer stores via out.h -> KRAM_DATA reg 0x0e)\n");
+
+	fprintf(stderr, "\nKING registers touched / field (by name; top 16 by traffic):\n");
+	{
+		int idx[128], n = 0;
+		for(int i = 0; i < 128; i++) if(kp_regw[i] || kp_regr[i]) idx[n++] = i;
+		for(int a = 0; a < n; a++) for(int b = a + 1; b < n; b++)
+			if(kp_regw[idx[b]] + kp_regr[idx[b]] > kp_regw[idx[a]] + kp_regr[idx[a]]) {
+				int t = idx[a]; idx[a] = idx[b]; idx[b] = t; }
+		int lim = n < 16 ? n : 16;
+		for(int a = 0; a < lim; a++) {
+			int i = idx[a];
+			fprintf(stderr, "  0x%02x %-20s  W=%-8.0f R=%-8.0f\n",
+				i, king_reg_name(i), kp_regw[i] / f, kp_regr[i] / f);
+		}
+	}
+
+	fprintf(stderr, "\nKRAM per-engine footprint (word-address range touched; CPU-write spans the whole\n");
+	fprintf(stderr, "page because the framebuffer is page-wide, so use the region map below, not the span):\n");
+	for(int pg = 0; pg < 2; pg++)
+		for(int e = 0; e < KP_NENG; e++)
+			if(kp_lo[e][pg] <= kp_hi[e][pg])
+				fprintf(stderr, "  page%d %-13s 0x%05x..0x%05x  (span %u words)\n",
+					pg, kp_eng_name[e], kp_lo[e][pg], kp_hi[e][pg],
+					(unsigned)(kp_hi[e][pg] - kp_lo[e][pg] + 1));
+
+	/* PITFALL VIEW: engines read KRAM; if the CPU also writes the SAME 1024-word region
+	 * (per field, materially), the framebuffer and that engine share memory -> verify it
+	 * is an intended double-buffer swap and not a live overwrite (the sky/ADPCM garble bug). */
+	fprintf(stderr, "\nKRAM contention (only %d-word regions an engine READS; cpu_wr in the same region\n", 1 << KP_BSHIFT);
+	fprintf(stderr, "= framebuffer shares it -> verify intended). '!!' = both busy (>8/field each):\n");
+	fprintf(stderr, "  %-4s %-7s %8s %8s %8s %8s %8s\n", "page", "wordad", "cpu_wr", "dma_wr", "adpcm_rd", "rnbow_rd", "bg_rd");
+	{
+		int shared = 0;
+		for(int pg = 0; pg < 2; pg++)
+			for(int b = 0; b < KP_NBUCK; b++) {
+				double w = kp_buck[0][pg][b] / f, d = kp_buck[2][pg][b] / f,
+				       a = kp_buck[3][pg][b] / f, rb = kp_buck[4][pg][b] / f,
+				       bg = kp_buck[5][pg][b] / f;
+				if(a < 0.5 && rb < 0.5 && d < 0.5 && bg < 0.5) continue;   /* only engine-read regions */
+				int clash = (w > 8) && (a > 8 || rb > 8 || d > 8 || bg > 8);
+				if(w > 8 && (a > 0.5 || rb > 0.5 || d > 0.5 || bg > 0.5)) shared++;
+				fprintf(stderr, "  %-4d 0x%05x %8.0f %8.0f %8.0f %8.0f %8.0f %s\n",
+					pg, (unsigned)(b << KP_BSHIFT), w, d, a, rb, bg,
+					clash ? " !! shared+busy" : "");
+			}
+		fprintf(stderr, "%d region(s) written by CPU AND read by an engine — confirm each is a\n", shared);
+		fprintf(stderr, "deliberate buffer hand-off, not a same-frame overwrite.\n");
+	}
+
+	fprintf(stderr, "\nEXACT same-field collisions (per-word; CPU write vs ADPCM/RAINBOW read of the\n");
+	fprintf(stderr, "SAME KRAM word within one field — a genuine read/write hazard, not coarse):\n");
+	fprintf(stderr, "  CPU-write-then-engine-read : %llu total (%.2f/field)\n",
+		kx_read_then_cpu, kx_read_then_cpu / f);
+	fprintf(stderr, "  engine-read-then-CPU-write : %llu total (%.2f/field)\n",
+		kx_cpu_then_read, kx_cpu_then_read / f);
+	if(kx_nsample) {
+		fprintf(stderr, "  first offending words:\n");
+		for(int i = 0; i < kx_nsample; i++)
+			fprintf(stderr, "    page%d 0x%05x  vs %s\n", kx_sample_pg[i], kx_sample_addr[i],
+				kx_sample_eng[i] == 4 ? "RAINBOW" : kx_sample_eng[i] == 3 ? "ADPCM" : "engine");
+	} else
+		fprintf(stderr, "  NONE — CPU and the audio/video engines never touch the same KRAM word\n"
+			"  in the same field. The coarse-region sharing above is safe double-buffering.\n");
+	fprintf(stderr, "=========================================================\n");
+}
+#else
+#define KP_REGW(r)
+#define KP_REGR(r)
+#define KP_CPU_WR(pg,ad)
+#define KP_CPU_RD(pg,ad)
+#define KP_DMA_WR(pg,ad)
+#define KP_ADPCM_RD(pg,ad)
+#define KP_RAINBOW_RD(pg,ad)
+#define KP_BG(pg,bat,cg,mode)
+#endif /* V810_PROFILE */
+
 static uint8 BGLayerDisable;
 static bool RAINBOWLayerDisable;
 
@@ -518,6 +732,7 @@ uint8 KING_RB_Fetch(void)
 {
  uint8 ret = king->RainbowPagePtr[(king->RAINBOWKRAMReadPos >> 1) & 0x3FFFF] >> ((king->RAINBOWKRAMReadPos & 1) * 8);
 
+ KP_RAINBOW_RD((king->PageSetting & 0x1000) ? 1 : 0, (king->RAINBOWKRAMReadPos >> 1) & 0x3FFFF);
  king->RAINBOWKRAMReadPos = ((king->RAINBOWKRAMReadPos + 1) & 0x3FFFF) | (king->RAINBOWKRAMReadPos & 0x40000);
 
  return(ret);
@@ -529,6 +744,7 @@ static void DoRealDMA(uint8 db)
   king->DMALatch = db;
  else
  {
+  KP_DMA_WR(king->PageSetting & 1, king->DMATransferAddr & 0x3FFFF);
   king->DMAPagePtr[king->DMATransferAddr & 0x3FFFF] = king->DMALatch | (db << 8);
   king->DMATransferAddr = ((king->DMATransferAddr + 1) & 0x1FFFF) | (king->DMATransferAddr & 0x20000);
   king->DMATransferSize = (king->DMATransferSize - 2) & 0x3FFFF;
@@ -940,9 +1156,9 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 	      }
 	      break; // status...
 
-  case 0x604: switch(king->AR)
+  case 0x604: KP_REGR(king->AR); switch(king->AR)
 	      {
-		default: 
+		default:
 			KINGDBG("Unknown 16-bit register read: %02x\n", king->AR);
 			break;
 
@@ -1069,6 +1285,7 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
                          unsigned int page = (king->KRAMRA & 0x80000000) ? 1 : 0;
                          int32 inc_amount = ((int32)((king->KRAMRA & (0x3FF << 18)) << 4)) >> 22; // Convert from 10-bit signed 2's complement 
 
+                         KP_CPU_RD(page, king->KRAMRA & 0x3FFFF);
                          ret = king->KRAM[page][king->KRAMRA & 0x3FFFF];
 
 	
@@ -1201,6 +1418,8 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
   {
    //ADPCMDBG("Write: %02x(%d), %04x", king->AR, msh, V);
   }
+
+  KP_REGW(king->AR);
 
 	      switch(king->AR)
 	      {
@@ -1336,6 +1555,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			   unsigned int page = (king->KRAMWA & 0x80000000) ? 1 : 0;
 			   int32 inc_amount = ((int32)((king->KRAMWA & (0x3FF << 18)) << 4)) >> 22; // Convert from 10-bit signed 2's complement
 
+			   KP_CPU_WR(page, king->KRAMWA & 0x3FFFF);
 			   king->KRAM[page][king->KRAMWA & 0x3FFFF] = V;
 			   king->KRAMWA = (king->KRAMWA &~ 0x1FFFF) | ((king->KRAMWA + inc_amount) & 0x1FFFF);
 			  }
@@ -1523,6 +1743,7 @@ uint16 KING_GetADPCMHalfWord(int ch)
  int page = (king->PageSetting & 0x0100) ? 1 : 0;
  uint16 ret = king->KRAM[page][king->ADPCMPlayAddress[ch] & 0x3FFFF];
 
+ KP_ADPCM_RD(page, king->ADPCMPlayAddress[ch] & 0x3FFFF);
  king->ADPCMPlayAddress[ch] = (king->ADPCMPlayAddress[ch] & 0x20000) | ((king->ADPCMPlayAddress[ch] + 1) & 0x1FFFF);
 
  if(!(king->ADPCMPlayAddress[ch] & 0x1FFFF))
@@ -1823,6 +2044,8 @@ static void DrawBG(uint32 *target, int n)
  const uint32 cg_sub_offset = n ? cg_offset : (king->BG0SubCGAddr * 1024);
  const uint16 *cg_base = &king->KRAM[bat_and_cg_page][cg_offset & 0x20000];
  const uint16 *cg_sub_base = &king->KRAM[bat_and_cg_page][cg_sub_offset & 0x20000];
+
+ KP_BG(bat_and_cg_page, bat_offset, cg_offset, bgmode);
 
  const int bat_bitsize_mask = (n ? 0x3FF : 0x7FF) >> 3;
 

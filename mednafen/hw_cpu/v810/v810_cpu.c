@@ -55,6 +55,7 @@ found freely through public domain sources.
 
 #include "v810_opt.h"
 #include "v810_cpu.h"
+#include "v810_profile.h"
 
 #include "../../state_helpers.h"
 
@@ -265,6 +266,10 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
  {
   if(!Cache[CI].data_valid[SBI])
   {
+#ifdef V810_PROFILE
+   v810_prof_cache(V810_PROF_MISS_SUB, addr);
+   v810p_ram_ifetch = 1;
+#endif
    (*timestamp) += 2;       // or higher?  Penalty for cache miss seems to be higher than having cache disabled.
    if(MemReadBus32[addr >> 24])
     Cache[CI].data[SBI] = MemRead32(timestamp, addr & ~0x3);
@@ -279,11 +284,21 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 
     Cache[CI].data[SBI] = tmp;
    }
+#ifdef V810_PROFILE
+   v810p_ram_ifetch = 0;
+#endif
    Cache[CI].data_valid[SBI] = TRUE;
   }
+#ifdef V810_PROFILE
+  else v810_prof_cache(V810_PROF_HIT, addr);
+#endif
  }
  else
  {
+#ifdef V810_PROFILE
+  v810_prof_cache(V810_PROF_MISS_TAG, addr);
+  v810p_ram_ifetch = 1;
+#endif
   Cache[CI].tag = addr >> 10;
 
   (*timestamp) += 2;	// or higher?  Penalty for cache miss seems to be higher than having cache disabled.
@@ -301,6 +316,9 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
    Cache[CI].data[SBI] = tmp;
   }
   //Cache[CI].data[SBI] = MemRead32(timestamp, addr & ~0x3);
+#ifdef V810_PROFILE
+  v810p_ram_ifetch = 0;
+#endif
   Cache[CI].data_valid[SBI] = TRUE;
   Cache[CI].data_valid[SBI ^ 1] = FALSE;
  }
@@ -612,7 +630,11 @@ void V810_Run_Accurate(int32 MDFN_FASTCALL (*event_handler)(const v810_timestamp
 {
 	const bool RB_AccurateMode = true;
 	#define RB_ADDBT(n,o,p)
+#ifdef V810_PROFILE
+	#define RB_CPUHOOK(n) v810_prof_instr((n), timestamp_rl)
+#else
 	#define RB_CPUHOOK(n)
+#endif
 
 	
 #define SetPREG V810_SetPREG

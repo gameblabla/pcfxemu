@@ -358,15 +358,38 @@ static uint8 ExBusReset; // I/O Register at 0x0700
 
 //static bool BRAMDisabled;	// Cached at game load, don't remove this caching behavior or save game loss may result(if we ever get a GUI).
 
+#ifdef V810_PROFILE
+extern int v810p_ram_ifetch, v810p_last_ifetch;
+extern unsigned long long v810p_dram_acc_code, v810p_dram_acc_data;
+extern unsigned long long v810p_dram_pen_code, v810p_dram_pen_data;
+extern unsigned long long v810p_dram_code_after_data, v810p_dram_code_after_code;
+extern void v810_prof_report(unsigned long long frames);
+#define RAMLP_PROFILE	\
+  if(v810p_ram_ifetch) v810p_dram_acc_code++; else v810p_dram_acc_data++;
+#define RAMLP_PROFILE_PEN	\
+   if(v810p_ram_ifetch) {						\
+     v810p_dram_pen_code++;						\
+     if(v810p_last_ifetch) v810p_dram_code_after_code++; else v810p_dram_code_after_data++;	\
+   } else v810p_dram_pen_data++;
+#define RAMLP_PROFILE_TAIL	v810p_last_ifetch = v810p_ram_ifetch;
+#else
+#define RAMLP_PROFILE
+#define RAMLP_PROFILE_PEN
+#define RAMLP_PROFILE_TAIL
+#endif
+
 // Checks to see if this main-RAM-area access
 // is in the same DRAM page as the last access.
 #define RAMLPCHECK	\
 {					\
+  RAMLP_PROFILE				\
   if((A & RAM_PageNOTMask) != RAM_LPA)	\
   {					\
    (*timestamp) += 3;			\
    RAM_LPA = A & RAM_PageNOTMask;	\
+   RAMLP_PROFILE_PEN			\
   }					\
+  RAMLP_PROFILE_TAIL			\
 }
 
 static v810_timestamp_t next_pad_ts, next_timer_ts, next_adpcm_ts, next_king_ts;
@@ -601,8 +624,16 @@ static void PCFX_Reset(void)
  ForceEventUpdates(timestamp);
 }
 
+#ifdef V810_PROFILE
+static void v810_prof_atexit(void);
+#endif
+
 static void PCFX_Power(void)
 {
+#ifdef V810_PROFILE
+ static int prof_reg = 0;
+ if(!prof_reg) { prof_reg = 1; atexit(v810_prof_atexit); }
+#endif
  PCFX_Reset();
 }
 
@@ -2002,6 +2033,12 @@ static void update_input(void)
 
 static uint64_t video_frames, audio_frames;
 
+#ifdef V810_PROFILE
+extern void king_prof_report(unsigned long long frames);
+extern void king_prof_newfield(void);
+static void v810_prof_atexit(void) { v810_prof_report(video_frames); king_prof_report(video_frames); }
+#endif
+
 #if defined(FRAMESKIP) || defined(FORCE_FRAMESKIP)
 
 #ifndef FORCE_FRAMESKIP
@@ -2119,7 +2156,9 @@ void Emulation_Run()
 #elif !defined(FORCE_FRAMESKIP)
 	video_frames++;
 #endif
-
+#ifdef V810_PROFILE
+	king_prof_newfield();
+#endif
 	Audio_Write((int16_t*) spec.SoundBuf, spec.SoundBufSize);
 }
 
