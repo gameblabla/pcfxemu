@@ -31,6 +31,7 @@ extern unsigned long long v810p_cyc, v810p_dropcyc;
 extern unsigned long long v810p_op_cnt[256], v810p_op_cyc[256];
 extern unsigned long long v810p_ch_hit, v810p_ch_miss_sub, v810p_ch_miss_tag;
 extern unsigned long long v810p_br_taken, v810p_br_nottaken;
+extern unsigned long long v810p_flag_stall, v810p_flag_noflag;  /* flag-reader: stalled vs not */
 extern uint32_t v810p_pc_cnt[V810_PROF_NBUCKET];
 extern uint64_t v810p_pc_cyc[V810_PROF_NBUCKET];
 extern uint32_t v810p_pc_miss[V810_PROF_NBUCKET];
@@ -102,6 +103,13 @@ static inline void v810_prof_cache(int kind, uint32_t addr)
 static inline void v810_prof_branch(int taken)
 {
 	if(taken) v810p_br_taken++; else v810p_br_nottaken++;
+}
+
+/* Called at every flag-reading instruction (Bcc/SETF/STSR-PSW): hit=1 if it paid the
+ * +2 flag-use stall (previous op wrote flags), hit=0 if it dodged it. */
+static inline void v810_prof_flagstall(int hit)
+{
+	if(hit) v810p_flag_stall++; else v810p_flag_noflag++;
 }
 
 #endif /* V810_PROFILE */

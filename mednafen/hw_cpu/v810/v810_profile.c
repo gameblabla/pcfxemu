@@ -11,6 +11,7 @@ unsigned long long v810p_cyc, v810p_dropcyc;
 unsigned long long v810p_op_cnt[256], v810p_op_cyc[256];
 unsigned long long v810p_ch_hit, v810p_ch_miss_sub, v810p_ch_miss_tag;
 unsigned long long v810p_br_taken, v810p_br_nottaken;
+unsigned long long v810p_flag_stall, v810p_flag_noflag;
 uint32_t v810p_pc_cnt[V810_PROF_NBUCKET];
 uint64_t v810p_pc_cyc[V810_PROF_NBUCKET];
 uint32_t v810p_pc_miss[V810_PROF_NBUCKET];
@@ -108,6 +109,21 @@ void v810_prof_report(unsigned long long frames)
 		v810p_br_nottaken, pct(v810p_br_nottaken, br_tot), br_tot / f);
 	fprintf(stderr, "branch cycles/field=%.0f (taken 3, not 1)\n",
 		(v810p_br_taken * 3.0 + v810p_br_nottaken * 1.0) / f);
+
+	/* ---- flag-use pipeline stalls ---- */
+	{
+		unsigned long long readers = v810p_flag_stall + v810p_flag_noflag;
+		fprintf(stderr, "\n-- flag-use stalls (+2 when a Bcc/SETF/STSR follows a flag-writing op) --\n");
+		if(!readers)
+			fprintf(stderr, "(model off: built with -DV810_NO_FLAG_STALL)\n");
+		else
+			fprintf(stderr, "flag-readers/field=%.0f  stalled=%.0f (%.1f%%)  dodged=%.0f\n"
+				"stall cost=%.0f cyc/field (%.2f%% of a field) — hoisting a flag-neutral op\n"
+				"between compare and branch reclaims 2 cyc each\n",
+				readers / f, v810p_flag_stall / f, pct(v810p_flag_stall, readers),
+				v810p_flag_noflag / f, v810p_flag_stall * 2.0 / f,
+				100.0 * (v810p_flag_stall * 2.0 / f) / CYC_PER_FIELD);
+	}
 
 	/* ---- slow ops ---- */
 	fprintf(stderr, "\n-- slow ops --\n");

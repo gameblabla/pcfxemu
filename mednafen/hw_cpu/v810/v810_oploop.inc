@@ -37,15 +37,17 @@
     #ifdef V810_PROFILE
     #define V810_PROF_OPCODE(o) v810_prof_opcode(o)
     #define V810_PROF_BRANCH(t) v810_prof_branch(t)
+    #define V810_PROF_FLAGSTALL(hit) v810_prof_flagstall(hit)
     #else
     #define V810_PROF_OPCODE(o)
     #define V810_PROF_BRANCH(t)
+    #define V810_PROF_FLAGSTALL(hit)
     #endif
 
     /* Flag-use pipeline stall: +2 cycles when this (flag-reading) instruction
      * immediately follows a flag-writing one. See v810_cpu.c op_writes_flags[]. */
     #ifndef V810_NO_FLAG_STALL
-    #define V810_FLAG_STALL()   { if(v810_flagset) ADDCLOCK(2); }
+    #define V810_FLAG_STALL()   { if(v810_flagset) { ADDCLOCK(2); V810_PROF_FLAGSTALL(1); } else { V810_PROF_FLAGSTALL(0); } }
     #define V810_FLAG_TRACK()   { v810_flagset = op_writes_flags[opcode & 0xFF]; }
     #else
     #define V810_FLAG_STALL()
