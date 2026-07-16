@@ -338,6 +338,13 @@ static uint32 LastLine[256];
 static bool FirstDecode;
 static bool GarbageData;
 
+/* QoQ FMV splice seams can exhaust the marker-search budget.  Hardware holds
+ * the prior YUV strip in this case, instead of displaying a garbage strip. */
+static bool HoldOnGarbage = true;
+static bool HoldStrip[2] = { false, false };
+static int32 LastGoodFormat = -1;
+static uint32 LastStripCache[16][256];
+
 static void Cleanup(void)
 {
  for(int i = 0; i < 2; i++)
@@ -370,6 +377,9 @@ bool RAINBOW_Accurate_Init(bool arg_ChromaIP)
  GarbageData = false;
  FirstDecode = true;
  RasterReadPos = 0;
+ HoldStrip[0] = HoldStrip[1] = false;
+ LastGoodFormat = -1;
+ memset(LastStripCache, 0, sizeof(LastStripCache));
 
  return true;
 }
@@ -445,6 +455,7 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
    {
     FirstDecode = true;
     GarbageData = false;
+    HoldStrip[0] = HoldStrip[1] = false;
    }
 
    if(GarbageData)
@@ -491,12 +502,21 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
    if(icount <= 0)
    {
     FXDBG("Garbage data.");
+    if(HoldOnGarbage && LastGoodFormat == 1)
+    {
+     HoldStrip[which_buffer] = true;
+     DecodeFormat[which_buffer] = 1;
+     goto BufferNoDecode;
+    }
     GarbageData = true;
     //printf("Dooom: %d\n");
     DecodeFormat[which_buffer] = 0;
     memset(DecodeBuffer[which_buffer], 0, 0x2000);
     goto BufferNoDecode;
    }
+
+   HoldStrip[which_buffer] = false;
+   LastGoodFormat = (block_type == 0xf8 || block_type == 0xff) ? 1 : 0;
 
    if(block_type == 0xf8 || block_type == 0xff)
     DecodeFormat[which_buffer] = 1;
@@ -739,6 +759,12 @@ int RAINBOW_Accurate_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *pa
   else if(DecodeFormat[DecodeBufferWhichRead] == 1)	// YUV
   {
    uint32 *in_ptr = (uint32*)&DecodeBuffer[DecodeBufferWhichRead][RasterReadPos * 256 * 4];
+   const bool holding = HoldOnGarbage && HoldStrip[DecodeBufferWhichRead];
+
+   if(holding)
+    in_ptr = LastStripCache[RasterReadPos & 0xF];
+   else
+    memcpy(LastStripCache[RasterReadPos & 0xF], in_ptr, 256 * sizeof(uint32));
 
    if(Control & 0x2)	// Endless scroll mode:
    {
@@ -760,7 +786,8 @@ int RAINBOW_Accurate_FetchRaster(uint32 *linebuffer, uint32 layer_or, uint32 *pa
      tmpss = (tmpss + 1) & 0x1FF;
     }
    }
-   MDFN_FastU32MemsetM8(in_ptr, 0, 256);
+   if(!holding)
+    MDFN_FastU32MemsetM8(in_ptr, 0, 256);
   }
   else if(DecodeFormat[DecodeBufferWhichRead] == 0)	// Palette
   {
