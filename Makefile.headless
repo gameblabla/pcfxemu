@@ -41,19 +41,46 @@ ifeq ($(CHD),YES)
 SRCDIR += ./deps/libchdr/src ./deps/lzma-19.00/src
 endif
 
+# Objects live in a per-configuration build directory so that builds with
+# different compile flags (e.g. VIDEO_FORMAT=RGB565 vs RGBA8888) or from a
+# different frontend Makefile never share, and thus never mix, object files.
+# Mixing objects compiled under different pixel formats is what produced the
+# wrong-colour ("green text") headless regression.
+BUILD_DIR ?= build/headless-$(VIDEO_FORMAT)
+
 VPATH = $(SRCDIR)
 SRC_C = $(foreach dir,$(SRCDIR),$(wildcard $(dir)/*.c))
 OBJ_C = $(notdir $(patsubst %.c,%.o,$(SRC_C)))
-OBJS		= $(OBJ_C)
+OBJS		= $(addprefix $(BUILD_DIR)/,$(OBJ_C))
+DEPS		= $(OBJS:.o=.d)
+
+# Full set of tool + flag strings.  The objects depend on a stamp of this, so
+# any change to the compiler or the compile/link flags forces a full rebuild
+# even though the .c/.h files themselves are untouched (plain make only checks
+# timestamps, not flag changes -- that is the other half of the mixed-build bug).
+BUILD_FLAGS := $(CC) $(CFLAGS) $(CSTD) $(LDFLAGS)
+FLAGS_STAMP := $(BUILD_DIR)/.build_flags
 
 $(PRGNAME): $(OBJS)
 	$(CC) $(CFLAGS) $(CSTD) -o $@ $^ $(LDFLAGS)
 
-$(OBJ_C): %.o: %.c
-	$(CC) $(CFLAGS) $(CSTD) -c -o $@ $<
+$(BUILD_DIR)/%.o: %.c $(FLAGS_STAMP) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(CSTD) -MMD -MP -c -o $@ $<
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+# Rewrite the stamp only when the flags actually change, so its timestamp (and
+# therefore the rebuild it triggers) moves only on a real configuration change.
+.PHONY: FORCE
+$(FLAGS_STAMP): FORCE | $(BUILD_DIR)
+	@printf '%s\n' '$(BUILD_FLAGS)' | cmp -s - $@ || printf '%s\n' '$(BUILD_FLAGS)' > $@
+
+-include $(DEPS)
 
 .PHONY: clean clean-headless
 clean: clean-headless
 
 clean-headless:
-	rm -f $(PRGNAME) $(OBJS)
+	rm -f $(PRGNAME)
+	rm -rf $(BUILD_DIR)

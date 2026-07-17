@@ -6,6 +6,7 @@
 #include "menu.h"
 #include "config.h"
 #include "shared.h"
+#include "input_emu.h"
 
 uint8_t *keystate;
 extern uint8_t exit_vb;

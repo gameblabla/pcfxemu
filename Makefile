@@ -59,17 +59,39 @@ ifeq ($(CHD), YES)
 SRCDIR		+= ./deps/libchdr/src ./deps/lzma-19.00/src
 endif
 
+# Objects live in a per-configuration build directory so builds for a
+# different port/backend or with different flags never share, and thus never
+# mix, incompatibly-compiled object files.
+BUILD_DIR ?= build/$(PORT)
+
 VPATH		= $(SRCDIR)
 SRC_C		= $(foreach dir, $(SRCDIR), $(wildcard $(dir)/*.c))
 OBJ_C		= $(notdir $(patsubst %.c, %.o, $(SRC_C)))
-OBJS		= $(OBJ_C)
+OBJS		= $(addprefix $(BUILD_DIR)/,$(OBJ_C))
+DEPS		= $(OBJS:.o=.d)
+
+# Objects depend on a stamp of the tool + compile/link flags, so any flag
+# change forces a full rebuild even when the sources are untouched (plain make
+# only compares timestamps, never flag values).
+BUILD_FLAGS := $(CC) $(CFLAGS) $(CSTD) $(LDFLAGS)
+FLAGS_STAMP := $(BUILD_DIR)/.build_flags
 
 # Rules to make executable
 $(PRGNAME): $(OBJS)
 	$(CC) $(CFLAGS) $(CSTD) -o $(PRGNAME) $^ $(LDFLAGS)
 
-$(OBJ_C) : %.o : %.c
-	$(CC) $(CFLAGS) $(CSTD) -c -o $@ $<
+$(BUILD_DIR)/%.o : %.c $(FLAGS_STAMP) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(CSTD) -MMD -MP -c -o $@ $<
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+.PHONY: FORCE
+$(FLAGS_STAMP): FORCE | $(BUILD_DIR)
+	@printf '%s\n' '$(BUILD_FLAGS)' | cmp -s - $@ || printf '%s\n' '$(BUILD_FLAGS)' > $@
+
+-include $(DEPS)
 
 clean:
-	rm -f $(PRGNAME)$(EXESUFFIX) *.o
+	rm -f $(PRGNAME)$(EXESUFFIX)
+	rm -rf $(BUILD_DIR)
