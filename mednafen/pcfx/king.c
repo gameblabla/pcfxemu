@@ -1396,6 +1396,153 @@ static inline void SCSI_Reg3_Write(uint8 V, bool delay_run)
  }
 }
 
+/* --- CPU->KRAM write/microprogram-fetch bus contention ------------------
+ *
+ * Real hardware measurements (024_king_mprog_bench, examples/libpcfx),
+ * burst-writing BENCH_WORDS=30720 halfwords to KRAM via a tight
+ * out.h/add/bne loop, timed with the free-running timer (tick = CPUclk/15,
+ * ~0.698us at the PC-FX's 21.477272MHz V810 clock, i.e. 1 tick = 15
+ * V810 cycles). First-pass headless measurements (matching upstream
+ * mednafen's "+2 cycles" write-port base cost) undershot every real
+ * number, INCLUDING the 0-busy-slot case, by a consistent ~3.19
+ * cycles/word -- i.e. real KRAM writes have a flat per-word cost beyond
+ * what the existing V810/port-write timing model already charges, on top
+ * of which busy microprogram slots add further, slot-count-dependent
+ * cost. Real ticks for the 30720-word bench, and the resulting extra
+ * cycles/word this model targets (flat baseline + slot-dependent part):
+ *
+ *   MPROGData busy slots (of 16)   ticks   flat   +slot-dependent
+ *   0  (all NOP)                   24968   3.187  +0.000
+ *   1  (single CG or BATCG fetch)  26086,  3.187  +0.546 (two opcode kinds
+ *                                  26088                  agree)
+ *   2  (two CG/BAT fetches)        29957,  3.187  +2.436 (BAT+CG separate
+ *                                  29959                  and BG0+BG1 CG
+ *                                                          agree)
+ *   16 (every slot busy)           76005   3.187  +24.920
+ *
+ * This is a real, measured *throughput* effect -- contended CPU writes to
+ * KRAM take longer while the display's own microprogram-scheduled fetches
+ * are competing for the bus; they still land correctly, just slower. It
+ * is NOT a data-loss/corruption effect (see libpcfx/examples/025's
+ * README for the investigation that established this).
+ *
+ * The slot-dependent part above is for "narrow" (<=4bpp) BG fetches. 8bpp
+ * ("wide") fetches were also measured (2/4/8 busy slots, BG0 in
+ * KING_BGMODE_256_PAL) and do NOT fit the narrow busy-count curve -- e.g.
+ * 2 busy 8bpp CG slots cost about as much as 1 busy narrow slot, and cost
+ * barely rises at all from 4 to 8 busy slots (a real saturation/plateau,
+ * not modeled further here -- there's no data past 8 busy wide slots).
+ * The 2-busy reading in particular is noisy (real-hardware bars made the
+ * digits hard to read; the ROM author's best guess is used):
+ *
+ *   wide (8bpp) busy slots   ticks   slot-dependent extra cycles/word
+ *   2   (CGx2)               26033   0.520 (uncertain reading)
+ *   4   (CGx4)                29966   2.441
+ *   8   (CGx8)                30263   2.586
+ *
+ * Both curves share the same flat 0-busy baseline (no fetch of any width
+ * is happening at 0 busy slots, so width is moot there) and are
+ * selected per-write by whether any currently-busy MPROGData slot targets
+ * a BG in BGMODE_256 (8bpp) or wider -- 16bpp/16M were never measured and
+ * are assumed to use the wide curve too (more data per fetch, so at least
+ * as costly, not less). Both curves are linearly interpolated between
+ * their measured anchors; busy counts beyond the last anchor hold that
+ * anchor's value rather than extrapolating further. This is a
+ * calibrated fit to the anchors above, not a validated cycle-accurate
+ * model of KING bus arbitration -- slot *adjacency* (not just count)
+ * clearly also matters on real hardware and isn't captured here.
+ *
+ * Known gap: the bench's $61 (KRAM_MODE) sweep reuses the same busy=1
+ * narrow microprogram as the "BG0 CG" row, so this model (keyed only on
+ * busy slot count/width) necessarily scores them identically -- but on
+ * real hardware the $61 sweep measured ~26033-26036 ticks versus "BG0
+ * CG"'s ~26086-26088, a ~53-tick gap between two configurations that are
+ * supposedly the same as far as microprogram contention goes. Cause
+ * unknown (possibly a real, undocumented cost of writing KRAM_MODE
+ * itself, or some other difference between the two bench phases); not
+ * modeled here for lack of data to isolate it. */
+static uint32 kram_contention_frac_x256;
+
+#define KRAM_CONTENTION_FLAT_X256 816 /* 3.1875 cycles/word, busy=0 baseline */
+
+/* Slot-dependent part only (flat baseline above is added separately). */
+static const int32 kram_contention_narrow_x256[3] = { 0, 140, 624 }; /* busy=0,1,2 */
+#define KRAM_CONTENTION_NARROW_16BUSY_X256 6380
+#define KRAM_CONTENTION_NARROW_2BUSY_X256  624
+#define KRAM_CONTENTION_NARROW_SLOPE_X256  ((KRAM_CONTENTION_NARROW_16BUSY_X256 - KRAM_CONTENTION_NARROW_2BUSY_X256) / 14) /* busy=3..15 */
+
+static const int32 kram_contention_wide_x256[9] = /* index = busy slots, 0..8 */
+{
+ 0, 67, 133, 379, 625, 634, 644, 653, 662
+};
+
+static inline int KING_CountBusyMprogSlots(void)
+{
+ int i, n = 0;
+ for(i = 0; i < 16; i++)
+ {
+  if(!(king->MPROGData[i] & 0x100))
+   n++;
+ }
+ return n;
+}
+
+/* True if any currently-busy (non-NOP) microprogram slot targets a BG
+ * whose current colour mode is 8bpp (BGMODE_256) or wider. */
+static inline bool KING_AnyBusySlotIsWide(void)
+{
+ int i;
+ for(i = 0; i < 16; i++)
+ {
+  uint16 mpd = king->MPROGData[i];
+  if(!(mpd & 0x100))
+  {
+   int bg = (mpd >> 6) & 0x3;
+   int mode = (king->bgmode >> (bg * 4)) & 0xF;
+   if((mode & 0x7) >= BGMODE_256)
+    return TRUE;
+  }
+ }
+ return FALSE;
+}
+
+/* Called for every write to KING's KRAM-data port (register 0x0E, i.e. the
+ * "0x604"-style port write with the AR already selected to 0x0E). Returns
+ * extra V810 cycles to charge on top of the existing fixed I/O write cost,
+ * accumulating sub-cycle fractions across calls so the average matches the
+ * measured per-word rate rather than rounding every call down to zero. */
+uint32 KING_KRAMWriteContentionCycles(uint32 A)
+{
+ int busy;
+ int32 extra_x256;
+
+ if(!(A & 0x4) || king->AR != 0x0E || !(king->MPROGControl & 0x1))
+  return 0;
+
+ busy = KING_CountBusyMprogSlots();
+
+ if(busy == 0)
+  extra_x256 = 0;
+ else if(KING_AnyBusySlotIsWide())
+  extra_x256 = kram_contention_wide_x256[(busy > 8) ? 8 : busy];
+ else if(busy <= 2)
+  extra_x256 = kram_contention_narrow_x256[busy];
+ else if(busy >= 16)
+  extra_x256 = KRAM_CONTENTION_NARROW_16BUSY_X256;
+ else
+  extra_x256 = KRAM_CONTENTION_NARROW_2BUSY_X256 + (busy - 2) * KRAM_CONTENTION_NARROW_SLOPE_X256;
+
+ extra_x256 += KRAM_CONTENTION_FLAT_X256;
+
+ kram_contention_frac_x256 += (uint32)extra_x256;
+
+ {
+  uint32 whole = kram_contention_frac_x256 >> 8;
+  kram_contention_frac_x256 &= 0xFF;
+  return whole;
+ }
+}
+
 void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 {
  int msh = A & 0x2;

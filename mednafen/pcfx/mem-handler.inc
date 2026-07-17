@@ -211,23 +211,24 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
  }
  else if(A >= 0xB0000000 && A <= 0xB3FFFFFF)
  {
-  (*timestamp) += 4;
+  (*timestamp) += 2;
   FXVCE_Write16(0x4, V);
  }
  else if(A >= 0xB4000000 && A <= 0xB7FFFFFF)
  {
-  (*timestamp) += 4;
+  (*timestamp) += 2;
   VDC_Write16(fx_vdc_chips[0], 1, V);
  }
  else if(A >= 0xB8000000 && A <= 0xBBFFFFFF)
  {
-  (*timestamp) += 4;
+  (*timestamp) += 2;
   VDC_Write16(fx_vdc_chips[1], 1, V);
  }
  else if(A >= 0xBC000000 && A <= 0xBFFFFFFF)
  {
-  (*timestamp) += 4;
+  (*timestamp) += 2;
   KING_Write16((*timestamp), 0x604, V);
+  (*timestamp) += KING_KRAMWriteContentionCycles(0x604);
  }
  else if(A >= 0x80000000 && A <= 0x807FFFFF)
  {
