@@ -429,6 +429,7 @@ typedef struct
 	uint8 BGBATAddr[4];
 	uint8 BGCGAddr[4];
         uint8 BG0SubBATAddr, BG0SubCGAddr;
+	bool BG0FetchRehomed;
 
 	uint16 BGXScroll[4];
 	uint16 BGYScroll[4];
@@ -1831,8 +1832,8 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 
 		// Background Modes
-		case 0x10: REGSETHW(king->bgmode, V, msh);
-			   break;
+		case 0x10: { const uint8 om=king->bgmode&0xF; REGSETHW(king->bgmode, V, msh);
+			   { const uint8 nm=king->bgmode&0xF; if(nm!=om&&(nm&0x7)&&(om&0x7)) king->BG0FetchRehomed=FALSE; } break; }
 
 
 		// Background priorities and affine transform master enable.
@@ -1868,7 +1869,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 		case 0x16: REGSETHW(king->BGScrollMode, V, msh); king->BGScrollMode &= 0xF; break;
 
 		case 0x20: REGSETHW(king->BGBATAddr[0], V, msh); break;
-		case 0x21: REGSETHW(king->BGCGAddr[0], V, msh); break;
+		case 0x21: REGSETHW(king->BGCGAddr[0], V, msh); king->BG0FetchRehomed=TRUE; break;
 		case 0x22: REGSETHW(king->BG0SubBATAddr, V, msh); break;
 	  	case 0x23: REGSETHW(king->BG0SubCGAddr, V, msh); break;
 
@@ -2149,7 +2150,8 @@ void KING_Reset(const v810_timestamp_t timestamp)
  king->dma_receive_active = FALSE;
  king->dma_send_active = FALSE;
  king->dma_cycle_counter = 0x7FFFFFFF;
- king->DMARetirePending = FALSE;	/* no DMA in flight, so nothing awaiting its trailing item */
+ king->DMARetirePending = FALSE;
+ king->BG0FetchRehomed = TRUE;
 
 
  RecalcKRAMPagePtrs();
@@ -2304,6 +2306,38 @@ static void DrawBG(uint32 *target, int n)
  const uint16 *bat_sub_base = &king->KRAM[bat_and_cg_page][bat_sub_offset & 0x20000];
 
  const uint32 cg_offset = king->BGCGAddr[n] * 1024;
+ /* BG0 direct-bitmap display fetch pointer left un-homed by a bit-depth switch
+  * (see BG0FetchRehomed): the pointer was not returned to the CG base, so it is
+  * one visible screen of fetched words ahead of where the scanline formula says.
+  * The stock microprogram fetches too few CG words per line to refill the whole
+  * line, so the display alternates freshly-fetched cells (correct data) with
+  * cells still holding the stale, un-homed fetch -- the orange "jailbar" pattern
+  * (024_king_mprog_bench).  bg0_stale_off is that un-homed displacement in words;
+  * 0 means the pointer is homed (normal, no artifact). */
+ uint32 bg0_stale_off = 0;
+ uint32 bg0_fresh_cells = 32;   /* how many of the 32 cells/line get fresh data */
+ if(n == 0 && !king->BG0FetchRehomed){
+  const uint16 m0 = king->bgmode & 0x7; uint32 wpl;
+  switch(m0){ case 1: wpl=32; break; case 2: wpl=64; break; case 3: wpl=128; break; default: wpl=256; break; }
+  bg0_stale_off = wpl * 240u;
+
+  /* How many CG words the microprogram actually fetches for BG0 per 16-slot
+   * rotation.  The rotation repeats ~16 times across a 256px line (one 16-slot
+   * pass per 16 display pixels), so it refills ~16 cells per active CG slot; if
+   * that is fewer than the 32 cells a 2bpp line needs, the shortfall is the set
+   * of cells left holding the un-homed fetch (the orange jailbars).  A schedule
+   * with >=2 BG0 CG slots keeps up and shows no artifact. */
+  if(king->MPROGControl & 0x1){
+   int kcg = 0, i;
+   for(i = 0; i < 16; i++){
+    const uint16 mpd = king->MPROGData[i];
+    if(((mpd >> 6) & 0x3) == 0 && !(mpd & 0x100) && !(mpd & 0x010)) kcg++;
+   }
+   bg0_fresh_cells = (uint32)kcg * 16u;
+   if(bg0_fresh_cells > 32u) bg0_fresh_cells = 32u;
+   if(bg0_fresh_cells == 0u) bg0_fresh_cells = 32u; /* nothing fetched: don't model */
+  }
+ }
  const uint32 cg_sub_offset = n ? cg_offset : (king->BG0SubCGAddr * 1024);
  const uint16 *cg_base = &king->KRAM[bat_and_cg_page][cg_offset & 0x20000];
  const uint16 *cg_sub_base = &king->KRAM[bat_and_cg_page][cg_sub_offset & 0x20000];
@@ -2645,7 +2679,30 @@ static void DrawBG(uint32 *target, int n)
         sexy_y_pos >>= 3;
 	sexy_y_sub_pos >>= 3;
 
-	DRAWBG8x1_MAC(1, 4, (pbn << 2));
+	if(bg0_stale_off && bg0_fresh_cells < 32u && !(bgmode & 0x8))
+	{
+	 /* Un-homed BG0 direct bitmap whose microprogram under-fetches: only
+	  * bg0_fresh_cells of the 32 cells get a fresh, correctly-addressed word;
+	  * the rest still hold the un-homed fetch pointer's stale word.  The fresh
+	  * cells are spread evenly across the line, so the display shows the real
+	  * text in those columns and the stale (orange) data in the gaps -- the
+	  * "jailbar" pattern.  Fresh cells read the scanline address; stale cells
+	  * read it plus the un-homed displacement. */
+	 uint32 bx = bat_x, cell = 0;
+	 for(uint_fast16_t x = 0; x < 256 + 8; x += 8, cell++)
+	 {
+	  if(bx < bat_width)
+	  {
+	   const bool fresh = ((cell * bg0_fresh_cells) & 31u) < bg0_fresh_cells;
+	   const uint32 off = fresh ? 0u : bg0_stale_off;
+	   const uint16 *cgptr = &cg_base[(cg_offset + off + (bx * 1) + sexy_y_pos) & 0x1FFFF];
+	   DRAWBG8x1_4(target + x, cgptr, palette_ptr, layer_or);
+	  }
+	  bx = (bx + 1) & bat_bitsize_mask;
+	 }
+	}
+	else
+	 DRAWBG8x1_MAC(1, 4, (pbn << 2));
 	break;
 
    case 0x02: // 16 color, 1/2 byte per pixel
@@ -3587,6 +3644,7 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
 
   SFARRAYN(king->BGBATAddr, 4, "BGBATAddr"),
   SFARRAYN(king->BGCGAddr, 4, "BGCGAddr"),
+  SFVARN(king->BG0FetchRehomed, "BG0FetchRehomed"),
   SFVARN(king->BG0SubBATAddr, "BG0SubBATAddr"),
   SFVARN(king->BG0SubCGAddr, "BG0SubCGAddr"),
 

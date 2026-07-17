@@ -15,6 +15,7 @@ static inline void CDBG_REASON(const char *format, ...)
 //printf("BG%d Reason: " format "\n", n, ## __VA_ARGS__);
 static bool CanDrawBG_Fast(int n)
 {
+ if(n==0 && !king->BG0FetchRehomed) return(FALSE); /* un-homed fetch: slow path models the stale read */
  static const int cg_per_mode[0x8] =
  {
   0, // Invalid mode
