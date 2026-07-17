@@ -758,13 +758,24 @@ uint8 KING_RB_Fetch(void)
  return(ret);
 }
 
-/* Is the KING real-DMA "trailing item" erratum being modelled?  This is an
- * unproven hypothesis about real silicon (docs/king-dma-erratum.md), and turning
- * it on deliberately wedges software that programs an exact-length transfer, so
- * it is opt-in:
+/* Is the KING real-DMA "trailing item" erratum being modelled?
  *
- *   PCFX_KING_DMA_ERRATUM=1   model it (reproduces the doom-pcfx boot hang)
- *   unset / =0                retire on the programmed count (previous behaviour)
+ * This models real PC-FX hardware: the KING real-DMA-to-KRAM engine retires one
+ * REQ/ACK handshake PAST the programmed transfer count, and an exact-length
+ * transfer (the request equals the whole sector the drive delivers, so nothing
+ * is left in DATA IN to drive that trailing handshake) never retires -- the
+ * count register never reaches zero.  A driver that polls the count for
+ * completion therefore wedges.  doom-pcfx's boot-time ADPCM bank load is exactly
+ * this case, and hangs on real hardware with its progress bar frozen at the
+ * first step; see docs/king-dma-erratum.md.
+ *
+ * It is ON by default so the emulator reproduces that hardware behaviour without
+ * any special setup.  Set the environment variable to 0 to disable it (retire
+ * on the programmed count, i.e. the pre-hardware-accuracy behaviour) for
+ * debugging or for software that was written around the retired-on-count model:
+ *
+ *   unset / PCFX_KING_DMA_ERRATUM=1   model the hardware quirk (default)
+ *   PCFX_KING_DMA_ERRATUM=0           retire on the programmed count
  */
 static bool king_dma_erratum_enabled(void)
 {
@@ -773,9 +784,30 @@ static bool king_dma_erratum_enabled(void)
  if(cached < 0)
  {
   const char *e = getenv("PCFX_KING_DMA_ERRATUM");
-  cached = (e && *e && *e != '0') ? 1 : 0;
+  cached = (e && *e && *e == '0') ? 0 : 1;
  }
  return cached ? TRUE : FALSE;
+}
+
+/* While a real-DMA is wedged (it retired one item short and is waiting for a
+ * trailing REQ/ACK that never comes -- see king_dma_erratum_enabled()), the KING
+ * holds the CPU's I/O bus: every access to a KING register stalls until the DMA
+ * can service it, which it never can.  A driver polling the DMA/SCSI registers
+ * for completion therefore makes essentially no forward progress -- it is frozen
+ * on its poll, not merely reading a stuck value it can spin past and time out on.
+ * That is why doom-pcfx's boot bar stays frozen at its first step on real
+ * hardware instead of running its read-retry loop out to an error indicator.
+ *
+ * Charging a large per-access stall models that hold.  The exact hold duration
+ * is unobservable and irrelevant; it only has to dwarf any poll loop's own
+ * iteration budget so the loop cannot count itself out within any realistic run.
+ * Gated on DMARetirePending, which is only ever set with the erratum enabled, so
+ * ordinary (retiring) DMAs are completely unaffected. */
+#define KING_DMA_WEDGE_STALL_CYCLES 65536 /* 1<<16 */
+
+uint32 KING_DMAWedgeStallCycles(void)
+{
+ return king->DMARetirePending ? KING_DMA_WEDGE_STALL_CYCLES : 0;
 }
 
 static void DoRealDMA(uint8 db)

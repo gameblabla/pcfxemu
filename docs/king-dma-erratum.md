@@ -1,8 +1,15 @@
-# KING SCSI real-DMA "trailing item" erratum (hypothesis)
+# KING SCSI real-DMA "trailing item" erratum
 
-**Status: unproven hypothesis, opt-in.** Enabled with `PCFX_KING_DMA_ERRATUM=1`
-in the environment; off by default, in which case the emulator behaves exactly
-as it did before this was added.
+**Status: modelled by default (hardware-accuracy).** This reproduces the real
+PC-FX behaviour that hangs `doom-pcfx` at boot, so it is on by default. Set
+`PCFX_KING_DMA_ERRATUM=0` in the environment to disable it (retire on the
+programmed count -- the pre-accuracy behaviour) for debugging or for software
+written around the retired-on-count model.
+
+Verified against the broken `doom-pcfx` (no libpcfx CD-driver workaround): with
+the model on (default) the boot progress bar freezes at its first step and never
+advances -- identical frames across tens of thousands of emulated frames, exactly
+as on real hardware -- while `PCFX_KING_DMA_ERRATUM=0` boots it to the DOOM title.
 
 ## The symptom being modelled
 
@@ -51,28 +58,45 @@ Consequences, and why they split the world into "works (glitchy)" vs "wedges":
 the exact-length case — hence the wedge, while liberis games that read partial
 sectors into RAM only ever hit the glitchy-but-works case.
 
-### Why the wedge is visible to the driver
+### Why the wedge freezes the CPU (not just the count)
 
-libpcfx's `eris_scsi_check_dma()` (libpcfx/src/scsi.S) ultimately tests
-**`DMATransferSize` (reg 0x0A) == 0** for completion — reg 0x0B returns the
-one-shot IRQ-acknowledge latch, not a live status the poll can rely on. So the
-model must express the erratum *in the count*: it holds `DMATransferSize` at 2
-(one item short of zero) until the trailing handshake arrives. In the wedge case
-that handshake never comes, the count stays at 2, `eris_scsi_check_dma()` never
-reports done, `eris_cd_read_kram()` exhausts its 8 retries, and
-`adpcm_load_bank()` calls `I_Error()` -> `pcfx_fatal_blink()`, which loops
-forever alternating the load-bar fill/frame colour. That infinite blink is both
-the observed **hang** and the observed **flashing**.
+libpcfx's `eris_scsi_check_dma()` (libpcfx/src/scsi.S) tests **`DMATransferSize`
+(reg 0x0A) / `DMAStatus` (reg 0x0B)** for completion. Pinning the count alone is
+*not* enough to reproduce the real-hardware symptom: every poll loop in the CD
+driver (the DMA-done spin, `eris_scsi_eat_data_in`, `cd_wait_status`) is bounded,
+so with only a stuck count the driver would spin those out, fail the read, run
+its 8 retries, and reach `I_Error()`/`pcfx_fatal_blink()` — i.e. the boot bar
+would *advance* to a full flashing bar. On real hardware the bar instead stays
+frozen at its **first step**: the read never returns at all.
+
+The missing piece is that while the DMA is wedged, the KING holds the CPU's I/O
+bus — every access to a KING register stalls until the DMA can service it, which
+it never can. The CPU therefore makes no forward progress on its very first poll;
+it never even counts its spin loop out. That is what pins the boot bar at the
+first step forever.
 
 ## Implementation
 
-`mednafen/pcfx/king.c`, `DoRealDMA()` and the `DMARetirePending` field. When the
-count would reach zero and the erratum is enabled, the engine sets
-`DMARetirePending`, pins `DMATransferSize` at 2, and keeps the DMA-receive pump
-ACKing. If another DATA-IN byte is available it retires normally on the next
-handshake (leftover case); if the target has dropped to STATUS the pump stops and
-the count stays pinned (wedge case). Reprogramming reg 0x0A clears the pending
-flag so a retried transfer can't retire early on its first byte.
+`mednafen/pcfx/king.c`:
+
+* `DoRealDMA()` + the `DMARetirePending` field. When the count would reach zero
+  and the erratum is enabled, the engine sets `DMARetirePending`, pins
+  `DMATransferSize` at 2, and keeps the DMA-receive pump ACKing. If another
+  DATA-IN byte is available it retires normally on the next handshake (leftover
+  case); if the target has dropped to STATUS the pump stops and the count stays
+  pinned (wedge case). Reprogramming reg 0x0A clears the pending flag so a
+  retried transfer can't retire early on its first byte.
+
+* `KING_DMAWedgeStallCycles()` — while `DMARetirePending` is set, KING register
+  reads (`io-handler.inc`, ports 0x600–0x6FF) are charged a large per-access
+  stall, modelling the bus hold above. The exact figure is unobservable; it only
+  has to dwarf any poll loop's own iteration budget so the loop can't count
+  itself out within any realistic run. Gated on `DMARetirePending`, which is only
+  ever set with the erratum enabled, so ordinary (retiring) DMAs are unaffected.
+
+Verified: with the model on (default) the boot bar is byte-for-byte identical
+across tens of thousands of emulated frames (frozen at the first step); with
+`PCFX_KING_DMA_ERRATUM=0` doom-pcfx boots to the title.
 
 ## How to confirm / falsify this
 
@@ -89,13 +113,15 @@ from a datasheet or a logic-analyzer capture. To settle it on real hardware:
 ## Reproduce it here
 
 ```
-# wedges at the PCM-bank load, then flashes forever (matches hardware):
-PCFX_KING_DMA_ERRATUM=1 pcfx-headless --bios-dir <bios> --pcfx \
-    --commands run.cmd --frames 12000 --screenshot on.ppm doom_pcfx.cue
-
-# default (unset): boots to the DOOM title as before.
+# default: wedges at the PCM-bank load; the boot bar freezes and never advances
+# (matches hardware).  Run a large --frames to confirm it never recovers.
 pcfx-headless --bios-dir <bios> --pcfx \
-    --commands run.cmd --frames 12000 --screenshot off.ppm doom_pcfx.cue
+    --commands run.cmd --frames 24000 --screenshot on.png doom_pcfx.cue
+
+# PCFX_KING_DMA_ERRATUM=0: retires on the programmed count, so it boots to the
+# DOOM title (the pre-accuracy behaviour).
+PCFX_KING_DMA_ERRATUM=0 pcfx-headless --bios-dir <bios> --pcfx \
+    --commands run.cmd --frames 24000 --screenshot off.png doom_pcfx.cue
 ```
 
 `--auto-run` does not reliably clear the PC-FX BIOS save-device menu for this
