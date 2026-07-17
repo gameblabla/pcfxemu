@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <strings.h>
 #include <stdbool.h>
+#include <zlib.h>
 
 
 #include "shared.h"
@@ -27,6 +28,7 @@ const void* pcfx_headless_video_pixels(int* width, int* height, int* pitch_pixel
 int pcfx_headless_video_bytes_per_pixel(void);
 int pcfx_headless_video_pixel_format(void);
 const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
+const uint8_t* pcfx_headless_video_rgba8888(int* width, int* height, int* pitch_pixels);
 void pcfx_headless_video_get_display_rect(int* x, int* y, int* width, int* height);
 
 extern void Emu_Init(void);
@@ -579,6 +581,111 @@ int pcfx_headless_save_screenshot_ppm(PCFX_Headless* emu, const char* path)
     }
     const bool ok = !ferror(fp);
     fclose(fp);
+    if(!ok)
+        return set_error(emu, "failed while writing screenshot: %s", path);
+    return 1;
+}
+
+static void png_put_u32(uint8_t* p, uint32_t v)
+{
+    p[0] = (uint8_t)(v >> 24);
+    p[1] = (uint8_t)(v >> 16);
+    p[2] = (uint8_t)(v >> 8);
+    p[3] = (uint8_t)v;
+}
+
+/* Write one PNG chunk (length, type, data, CRC32-of-type-and-data). */
+static int png_write_chunk(FILE* fp, const char type[4], const uint8_t* data, size_t len)
+{
+    uint8_t hdr[4];
+    png_put_u32(hdr, (uint32_t)len);
+    if(fwrite(hdr, 1, 4, fp) != 4) return 0;
+    if(fwrite(type, 1, 4, fp) != 4) return 0;
+    if(len && fwrite(data, 1, len, fp) != len) return 0;
+
+    uLong crc = crc32(0L, Z_NULL, 0);
+    crc = crc32(crc, (const Bytef*)type, 4);
+    if(len) crc = crc32(crc, (const Bytef*)data, (uInt)len);
+    uint8_t crcbe[4];
+    png_put_u32(crcbe, (uint32_t)crc);
+    return fwrite(crcbe, 1, 4, fp) == 4;
+}
+
+/* Save the visible display area as an 8-bit RGBA PNG.  Colour is taken through
+ * the format-agnostic RGBA accessor, so it is correct for every build format
+ * (RGB565, RGBA8888, ...) and every graphics mode (PC-FX BIOS, Doom, ...); the
+ * display rect crops out of the 512-wide framebuffer so the pitch is honoured. */
+int pcfx_headless_save_screenshot_png(PCFX_Headless* emu, const char* path)
+{
+    if(!emu || !path)
+        return 0;
+    int w = 0, h = 0, pitch = 0;
+    const uint8_t* rgba = pcfx_headless_video_rgba8888(&w, &h, &pitch);
+    if(!rgba)
+        return set_error(emu, "no video buffer available");
+    int rx = 0, ry = 0, rw = w, rh = h;
+    pcfx_headless_video_get_display_rect(&rx, &ry, &rw, &rh);
+    if(rx < 0 || ry < 0 || rw <= 0 || rh <= 0 || rx + rw > w || ry + rh > h)
+    {
+        rx = 0; ry = 0; rw = w; rh = h;
+    }
+
+    /* Raw image for zlib: each scanline is a filter byte (0 = None) followed by
+     * rw RGBA pixels, cropped from the pitch-wide source. */
+    const size_t raw_stride = (size_t)rw * 4u + 1u;
+    const size_t raw_size = raw_stride * (size_t)rh;
+    uint8_t* raw = (uint8_t*)malloc(raw_size);
+    if(!raw)
+        return set_error(emu, "out of memory writing screenshot");
+    for(int yy = 0; yy < rh; yy++)
+    {
+        uint8_t* row = raw + (size_t)yy * raw_stride;
+        row[0] = 0;
+        memcpy(row + 1, rgba + ((size_t)(ry + yy) * (size_t)pitch + (size_t)rx) * 4u, (size_t)rw * 4u);
+    }
+
+    uLongf comp_len = compressBound((uLong)raw_size);
+    uint8_t* comp = (uint8_t*)malloc(comp_len);
+    if(!comp)
+    {
+        free(raw);
+        return set_error(emu, "out of memory writing screenshot");
+    }
+    if(compress2(comp, &comp_len, raw, (uLong)raw_size, Z_BEST_SPEED) != Z_OK)
+    {
+        free(raw);
+        free(comp);
+        return set_error(emu, "screenshot compression failed");
+    }
+    free(raw);
+
+    FILE* fp = fopen(path, "wb");
+    if(!fp)
+    {
+        free(comp);
+        return set_error(emu, "failed to open screenshot for write: %s", path);
+    }
+
+    static const uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+    int ok = fwrite(sig, 1, 8, fp) == 8;
+
+    uint8_t ihdr[13];
+    png_put_u32(ihdr + 0, (uint32_t)rw);
+    png_put_u32(ihdr + 4, (uint32_t)rh);
+    ihdr[8] = 8;   /* bit depth */
+    ihdr[9] = 6;   /* colour type: truecolour with alpha (RGBA) */
+    ihdr[10] = 0;  /* compression: deflate */
+    ihdr[11] = 0;  /* filter method */
+    ihdr[12] = 0;  /* interlace: none */
+    ok = ok && png_write_chunk(fp, "IHDR", ihdr, sizeof(ihdr));
+    ok = ok && png_write_chunk(fp, "IDAT", comp, (size_t)comp_len);
+    ok = ok && png_write_chunk(fp, "IEND", NULL, 0);
+
+    free(comp);
+    if(ferror(fp))
+        ok = 0;
+    if(fclose(fp) != 0)
+        ok = 0;
     if(!ok)
         return set_error(emu, "failed while writing screenshot: %s", path);
     return 1;

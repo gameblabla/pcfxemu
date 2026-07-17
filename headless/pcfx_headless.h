@@ -99,6 +99,9 @@ int pcfx_headless_get_adpcm_suppress_reset_clicks(PCFX_Headless* emu);
 int pcfx_headless_get_adpcm_effective_buggy_codec(PCFX_Headless* emu);
 
 int pcfx_headless_save_screenshot_ppm(PCFX_Headless* emu, const char* path);
+/* Save the visible display as an 8-bit RGBA PNG (preferred; correct colour and
+ * pitch for every build format and graphics mode). */
+int pcfx_headless_save_screenshot_png(PCFX_Headless* emu, const char* path);
 int pcfx_headless_open_y4m(PCFX_Headless* emu, const char* path);
 int pcfx_headless_close_y4m(PCFX_Headless* emu);
 int pcfx_headless_open_wav(PCFX_Headless* emu, const char* path);

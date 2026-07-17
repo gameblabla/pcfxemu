@@ -30,6 +30,9 @@ const MDFN_Pixel* pcfx_headless_video_pixels(int* width, int* height, int* pitch
 int pcfx_headless_video_bytes_per_pixel(void);
 int pcfx_headless_video_pixel_format(void);
 const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
+/* Full framebuffer as tightly-packed 8-bit R,G,B,A bytes (4 per pixel), correct
+ * for any compiled pixel format.  pitch_pixels is in pixels; stride is 4x that. */
+const uint8_t* pcfx_headless_video_rgba8888(int* width, int* height, int* pitch_pixels);
 void pcfx_headless_video_get_display_rect(int* x, int* y, int* w, int* h);
 
 #ifdef __cplusplus

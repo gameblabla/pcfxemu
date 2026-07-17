@@ -1066,9 +1066,9 @@ static void save_screenshot(struct App* app)
 {
     char name[192];
     char path[PATH_MAX];
-    snprintf(name, sizeof(name), "%s_shot_%llu.ppm", app->game_id, (unsigned long long)pcfx_headless_frame_count(app->emu));
+    snprintf(name, sizeof(name), "%s_shot_%llu.png", app->game_id, (unsigned long long)pcfx_headless_frame_count(app->emu));
     path_join(path, sizeof(path), app->save_dir, name);
-    if(pcfx_headless_save_screenshot_ppm(app->emu, path))
+    if(pcfx_headless_save_screenshot_png(app->emu, path))
         set_message(app, "Screenshot saved: %s", name);
     else
         set_message(app, "Screenshot failed: %s", pcfx_headless_last_error(app->emu));

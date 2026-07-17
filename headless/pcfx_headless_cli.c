@@ -49,7 +49,7 @@ static void usage(const char* argv0)
         "  --commands FILE         Apply controller command list before each matching frame\n"
         "  --auto-run              Pulse RUN/START during early boot; useful for PC-FXGA BIOS CD prompts\n"
         "  --pad BUTTONS           Initial pad state, e.g. START+A or 0x0081\n"
-        "  --screenshot FILE.ppm   Save final RGB screenshot as binary PPM\n"
+        "  --screenshot FILE.png   Save final screenshot as 8-bit RGBA PNG\n"
         "  --y4m FILE.y4m          Capture every executed frame as YUV4MPEG2 C444\n"
         "  --wav FILE.wav          Capture stereo signed 16-bit PCM audio\n"
         "  --dump REGION FILE      Dump memory region: ram, saveram, or state\n"
@@ -612,7 +612,7 @@ int main(int argc, char** argv)
         }
     }
 
-    if(screenshot && !pcfx_headless_save_screenshot_ppm(emu, screenshot))
+    if(screenshot && !pcfx_headless_save_screenshot_png(emu, screenshot))
     {
         fprintf(stderr, "Screenshot failed: %s\n", pcfx_headless_last_error(emu));
         goto out;

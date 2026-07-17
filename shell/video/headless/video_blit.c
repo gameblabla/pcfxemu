@@ -127,3 +127,48 @@ const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_p
     return rgb565_shadow;
 #endif
 }
+
+/* Expand one native framebuffer pixel to 8-bit R, G, B, whatever the compiled
+ * pixel format is.  Keeping this in one place (next to the surface.h macros the
+ * core packs colours with) is what makes the PNG/RGBA export correct for every
+ * build format and every graphics mode -- there is no second, format-specific
+ * unpack path to drift out of sync. */
+static void pixel_to_rgb888(MDFN_Pixel p, uint8_t* r, uint8_t* g, uint8_t* b)
+{
+#if defined(MDFN_PIXEL_FORMAT_RGB565)
+    const unsigned R = (p >> 11) & 0x1F, G = (p >> 5) & 0x3F, B = p & 0x1F;
+    *r = (uint8_t)((R * 255u + 15u) / 31u);
+    *g = (uint8_t)((G * 255u + 31u) / 63u);
+    *b = (uint8_t)((B * 255u + 15u) / 31u);
+#elif defined(MDFN_PIXEL_FORMAT_RGB555)
+    const unsigned R = (p >> 10) & 0x1F, G = (p >> 5) & 0x1F, B = p & 0x1F;
+    *r = (uint8_t)((R * 255u + 15u) / 31u);
+    *g = (uint8_t)((G * 255u + 15u) / 31u);
+    *b = (uint8_t)((B * 255u + 15u) / 31u);
+#else /* 32bpp: RGBA8888 / ARGB8888 / XRGB8888 all expose RED/GREEN/BLUE_SHIFT */
+    *r = (uint8_t)((p >> RED_SHIFT) & 0xFFu);
+    *g = (uint8_t)((p >> GREEN_SHIFT) & 0xFFu);
+    *b = (uint8_t)((p >> BLUE_SHIFT) & 0xFFu);
+#endif
+}
+
+static uint8_t rgba8_shadow[512 * 240 * 4];
+
+const uint8_t* pcfx_headless_video_rgba8888(int* width, int* height, int* pitch_pixels)
+{
+    int w = 0, h = 0, p = 0;
+    const MDFN_Pixel *src = pcfx_headless_video_pixels(&w, &h, &p);
+    for(int y = 0; y < h; y++)
+    {
+        for(int x = 0; x < w; x++)
+        {
+            uint8_t *d = &rgba8_shadow[(y * p + x) * 4];
+            pixel_to_rgb888(src[y * p + x], &d[0], &d[1], &d[2]);
+            d[3] = 0xFF;
+        }
+    }
+    if(width) *width = w;
+    if(height) *height = h;
+    if(pitch_pixels) *pitch_pixels = p;
+    return rgba8_shadow;
+}
