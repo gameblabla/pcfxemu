@@ -470,6 +470,26 @@ typedef struct
 	uint16 DMAStatus;	// Register 0x0B
 	uint8 DMALatch;
 
+	/* HYPOTHESIS, not documented silicon behaviour -- see docs/king-dma-erratum.md
+	 * for the evidence, the reasoning and how to falsify it.  Enabled by the
+	 * PCFX_KING_DMA_ERRATUM env var (see king_dma_erratum_enabled()).
+	 *
+	 * Model: the real-DMA engine does not retire when the programmed transfer
+	 * count reaches zero; it retires one REQ/ACK handshake later, and that
+	 * trailing item is discarded rather than written to KRAM.  Consequences:
+	 *
+	 *   - A request SHORTER than the sector the drive actually delivers leaves
+	 *     leftover bytes in DATA IN, so the trailing handshake happens and the
+	 *     DMA retires (data intact, since the extra byte is discarded).
+	 *   - A request of EXACTLY the delivered length leaves nothing over: the
+	 *     target drops to STATUS, the pump below stops (it only runs in DATA
+	 *     IN), the trailing handshake never arrives, and the DMA never retires.
+	 *     The transfer count (reg 0x0A) then never reaches zero -- and that is
+	 *     what libpcfx's eris_scsi_check_dma() polls -- so the driver wedges.
+	 *
+	 * TRUE between "count would hit zero" and "trailing item consumed". */
+	bool DMARetirePending;
+
 
 	uint16 MPROGControl;    // register 0x15
 	uint16 MPROGControlCache;
@@ -738,8 +758,43 @@ uint8 KING_RB_Fetch(void)
  return(ret);
 }
 
+/* Is the KING real-DMA "trailing item" erratum being modelled?  This is an
+ * unproven hypothesis about real silicon (docs/king-dma-erratum.md), and turning
+ * it on deliberately wedges software that programs an exact-length transfer, so
+ * it is opt-in:
+ *
+ *   PCFX_KING_DMA_ERRATUM=1   model it (reproduces the doom-pcfx boot hang)
+ *   unset / =0                retire on the programmed count (previous behaviour)
+ */
+static bool king_dma_erratum_enabled(void)
+{
+ static int cached = -1;
+
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFX_KING_DMA_ERRATUM");
+  cached = (e && *e && *e != '0') ? 1 : 0;
+ }
+ return cached ? TRUE : FALSE;
+}
+
 static void DoRealDMA(uint8 db)
 {
+ /* The trailing handshake past the programmed count has arrived: it is consumed
+  * off the bus and discarded (NOT written to KRAM -- every requested word has
+  * landed), and only now does the count fall to zero and the transfer retire.
+  * See DMARetirePending's declaration. */
+ if(king->DMARetirePending)
+ {
+  KINGDBG("DMA Done (retired on the trailing item past the programmed count)\n");
+  king->DMARetirePending = FALSE;
+  king->DMATransferSize = 0;
+  king->DMAInterrupt = TRUE;
+  RedoKINGIRQCheck();
+  king->DMAStatus &= ~1;
+  return;
+ }
+
  if(!king->DMATransferFlipFlop)
   king->DMALatch = db;
  else
@@ -750,6 +805,28 @@ static void DoRealDMA(uint8 db)
   king->DMATransferSize = (king->DMATransferSize - 2) & 0x3FFFF;
   if(!king->DMATransferSize)
   {
+   if(king_dma_erratum_enabled())
+   {
+    /* Every requested word has landed in KRAM, but the engine holds the count
+     * one item short of zero until one more handshake occurs.  That last count
+     * step is the only thing a driver can observe (reg 0x0A), so hold it at 2
+     * and leave DMAStatus bit 0 set, keeping the pump above ACKing:
+     *
+     *  - leftovers still in DATA IN -> the trailing item arrives at once, the
+     *    branch at the top drops the count to 0 and retires.  Data is intact.
+     *  - the request exactly consumed what the target had -> it drops to
+     *    STATUS, the pump stops (it only runs in DATA IN), the trailing item
+     *    never comes, and the count is stuck at 2 forever.  A driver polling
+     *    reg 0x0A for zero -- which is what liberis/libpcfx's
+     *    eris_scsi_check_dma() ultimately does -- then never sees completion.
+     *    That is the hardware wedge being reproduced. */
+    KINGDBG("DMA count held one item short; awaiting the trailing item\n");
+    king->DMARetirePending = TRUE;
+    king->DMATransferSize = 2;
+    king->DMATransferFlipFlop ^= 1;
+    return;
+   }
+
    KINGDBG("DMA Done\n");
    king->DMAInterrupt = TRUE;
    RedoKINGIRQCheck();
@@ -1684,7 +1761,13 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			   break;
 
                 case 0x09: REGSETHW(king->DMATransferAddr, V, msh); king->DMATransferAddr &= 0x3FFFF; break;
-                case 0x0A: REGSETHW(king->DMATransferSize, V, msh); king->DMATransferSize &= 0x3FFFE; king->DMATransferFlipFlop = 0; break;
+                case 0x0A: REGSETHW(king->DMATransferSize, V, msh); king->DMATransferSize &= 0x3FFFE; king->DMATransferFlipFlop = 0;
+			   /* Programming a new length starts a new transfer: drop any
+			    * trailing-item wait left over from a previous one (e.g. an
+			    * abandoned, wedged transfer that a driver is retrying), so it
+			    * cannot retire this one early on its first byte. */
+			   king->DMARetirePending = FALSE;
+			   break;
 		case 0x0B: REGSETHW(king->DMAStatus, V, msh);
 			   king->DMAStatus &= 0x3;
 			   king->DMAInterrupt = 0;
@@ -2034,6 +2117,7 @@ void KING_Reset(const v810_timestamp_t timestamp)
  king->dma_receive_active = FALSE;
  king->dma_send_active = FALSE;
  king->dma_cycle_counter = 0x7FFFFFFF;
+ king->DMARetirePending = FALSE;	/* no DMA in flight, so nothing awaiting its trailing item */
 
 
  RecalcKRAMPagePtrs();
@@ -3509,6 +3593,7 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->DMAStatus, "DMAStatus"),
   SFVARN(king->DMAInterrupt, "DMAInterrupt"),
   SFVARN(king->DMALatch, "DMALatch"),
+  SFVARN(king->DMARetirePending, "DMARetirePending"),
   SFVARN(king->MPROGControl, "MPROGControl"),
   SFVARN(king->MPROGAddress, "MPROGAddress"),
   SFARRAY16N(king->MPROGData, 16, "MPROGData"),
