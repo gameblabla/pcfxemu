@@ -20,8 +20,14 @@ typedef struct
 
 #define PCFX_NUM_SECTOR_GROUPS 14
 #define PCFX_FRAME_MS          (1000.0f / 60.0f)
-#define PCFX_ROTATION_SCALE_2X 0.50f
-#define PCFX_LONG_SEEK_SCALE   0.70f
+#define PCFX_ROTATION_SCALE_2X       0.50f
+#define PCFX_SHORT_ROTATION_FRACTION  0.65f
+#define PCFX_LONG_ROTATION_FRACTION   0.40f
+#define PCFX_MID_BASE_FRAMES          18.0f
+#define PCFX_LONG_BASE_FRAMES         24.0f
+#define PCFX_LONG_SEEK_SCALE          0.55f
+#define PCFX_LONG_SOFT_LIMIT_MS       650.0f
+#define PCFX_LONG_SOFT_LIMIT_TAIL     0.25f
 
 static const PCFXSectorGroup pcfx_sector_groups[PCFX_NUM_SECTOR_GROUPS] =
 {
@@ -86,6 +92,15 @@ static float pcfx_rotation_ms(int target_group, float revolution_fraction)
     return pcfx_sector_groups[target_group].rotation_ms_1x * PCFX_ROTATION_SCALE_2X * revolution_fraction;
 }
 
+static float pcfx_long_seek_soft_limit(float milliseconds)
+{
+    if(milliseconds <= PCFX_LONG_SOFT_LIMIT_MS)
+        return milliseconds;
+
+    return PCFX_LONG_SOFT_LIMIT_MS +
+           ((milliseconds - PCFX_LONG_SOFT_LIMIT_MS) * PCFX_LONG_SOFT_LIMIT_TAIL);
+}
+
 /*
  * Return synthetic PC-FX image-drive seek latency in milliseconds.
  *
@@ -93,9 +108,13 @@ static float pcfx_rotation_ms(int target_group, float revolution_fraction)
  *   - the zone table and track-distance conversion are inherited from the
  *     measured PCE model because they describe CD spiral geometry;
  *   - short seeks and servo/data-stream settling are kept close to PCE;
- *   - long mechanical travel is reduced by 30% as a conservative stand-in for a
- *     newer/faster 2x-era PC-FX sled mechanism;
- *   - rotational latency is halved for 2x CLV.
+ *   - medium/long mechanical travel is now deliberately less punitive based on
+ *     early Queen of Queens hardware-footage comparison: real hardware still
+ *     shows a transition delay, but the previous 0.70 long-stroke model held
+ *     video changes too long;
+ *   - rotational latency is halved for 2x CLV;
+ *   - very large jumps use a soft limiter instead of a hard cap, preserving
+ *     ordering while avoiding PCE-like full-disc stalls on a 2x image drive.
  */
 float PCFX_CDSeekMS(int start_sector, int target_sector)
 {
@@ -112,23 +131,31 @@ float PCFX_CDSeekMS(int start_sector, int target_sector)
         return 2.0f * PCFX_FRAME_MS;
 
     if(sector_delta < 7)
-        return 9.0f * PCFX_FRAME_MS + pcfx_rotation_ms(target_group, 0.75f);
+        return 8.0f * PCFX_FRAME_MS +
+               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
 
     if(tracks <= 80.0f)
-        return 17.0f * PCFX_FRAME_MS + pcfx_rotation_ms(target_group, 0.75f);
+        return 14.0f * PCFX_FRAME_MS +
+               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
 
     if(tracks <= 160.0f)
-        return 22.0f * PCFX_FRAME_MS + pcfx_rotation_ms(target_group, 0.75f);
+        return PCFX_MID_BASE_FRAMES * PCFX_FRAME_MS +
+               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
 
     if(tracks <= 644.0f)
     {
         const float long_motion_ms = (tracks - 161.0f) * (16.66f / 80.0f) * PCFX_LONG_SEEK_SCALE;
-        return 22.0f * PCFX_FRAME_MS + pcfx_rotation_ms(target_group, 0.75f) + long_motion_ms;
+        const float delay_ms = (PCFX_MID_BASE_FRAMES * PCFX_FRAME_MS) +
+                               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION) +
+                               long_motion_ms;
+        return pcfx_long_seek_soft_limit(delay_ms);
     }
     else
     {
-        const float long_entry_ms = (14.0f * PCFX_FRAME_MS) * PCFX_LONG_SEEK_SCALE;
         const float long_motion_ms = (tracks - 644.0f) * (16.66f / 195.0f) * PCFX_LONG_SEEK_SCALE;
-        return 22.0f * PCFX_FRAME_MS + long_entry_ms + pcfx_rotation_ms(target_group, 0.50f) + long_motion_ms;
+        const float delay_ms = (PCFX_LONG_BASE_FRAMES * PCFX_FRAME_MS) +
+                               pcfx_rotation_ms(target_group, PCFX_LONG_ROTATION_FRACTION) +
+                               long_motion_ms;
+        return pcfx_long_seek_soft_limit(delay_ms);
     }
 }
