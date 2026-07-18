@@ -2690,7 +2690,6 @@ static void DrawBG(uint32 *target, int n)
 	  * ~4px solid jailbar plus ~4px of text in every cell.  A schedule that
 	  * keeps up (fresh_px >= 8) shows no bar. */
 	 const uint32 fresh_px = bg0_fresh_cells / 4u;   /* 16->4px, 32->8px(no bar) */
-	 const uint32 bar_px = 8u - fresh_px;            /* leading solid bar width */
 	 uint32 bx = bat_x;
 	 for(uint_fast16_t x = 0; x < 256 + 8; x += 8)
 	 {
@@ -2703,15 +2702,13 @@ static void DrawBG(uint32 *target, int n)
 	   uint_fast16_t p;
 	   for(p = 0; p < 8; p++)
 	   {
-	    if(p < bar_px)
+	    if(p < fresh_px)
 	    {
-	     if(hi) target[x + p] = palette_ptr[hi] | layer_or;   /* held solid bar */
-	    }
-	    else
-	    {
-	     const uint32 idx = (fw >> ((7 - p) * 2)) & 3;        /* fresh text pixel */
+	     const uint32 idx = (fw >> ((7 - p) * 2)) & 3;   /* fresh pixel */
 	     if(idx) target[x + p] = palette_ptr[idx] | layer_or;
 	    }
+	    else if(hi)                                      /* held solid bar */
+	     target[x + p] = palette_ptr[hi] | layer_or;
 	   }
 	  }
 	  bx = (bx + 1) & bat_bitsize_mask;
