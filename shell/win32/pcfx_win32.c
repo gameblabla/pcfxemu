@@ -10,7 +10,6 @@
 #include <commdlg.h>
 #include <shlobj.h>
 #include <shellapi.h>
-#include <xinput.h>
 #include <direct.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -114,7 +113,7 @@
 #define ID_INPUT_CONFIGURE       400
 #define ID_INPUT_PORT1_PAD       401
 #define ID_INPUT_PORT1_MOUSE     402
-#define ID_INPUT_XINPUT_ENABLED  403
+#define ID_INPUT_GAMEPAD_ENABLED 403
 #define ID_INPUT_HOTKEYS         404
 #define ID_HELP_ABOUT            500
 
@@ -124,12 +123,9 @@
 #define ID_MAP_CANCEL            2002
 
 #define ID_HOTKEY_KEY_OPEN       2100
-#define ID_HOTKEY_PAD_OPEN       2101
-#define ID_HOTKEY_PAD_PLAYER     2102
 #define ID_HOTKEY_OK             2110
 #define ID_HOTKEY_DEFAULTS       2111
 #define ID_HOTKEY_CANCEL         2112
-#define ID_HOTKEY_TIMER_XINPUT   2
 #define WM_PCFX_OPEN_GAME         (WM_APP + 1)
 
 /* menu.c is not linked in the Win32 build, so this frontend owns these symbols. */
@@ -170,9 +166,6 @@ static int g_fullscreen;
 static int g_start_fullscreen;
 static int g_launchbox_mode;
 static uint32_t g_open_hotkey_key = VK_F10;
-static int g_open_hotkey_xinput_player = 0;
-static uint32_t g_open_hotkey_xinput_code = XINPUT_GAMEPAD_RIGHT_THUMB;
-static int g_open_hotkey_pad_prev;
 static int g_open_hotkey_dialog_active;
 static int g_launchbox_exit_combo_prev;
 static LARGE_INTEGER g_launchbox_exit_hold_start;
@@ -495,15 +488,8 @@ static void save_config(void)
     WritePrivateProfileStringA("State", "Slot", tmp, g_ini_path);
     snprintf(tmp, sizeof(tmp), "%d", option.type_controller);
     WritePrivateProfileStringA("Input", "Port1Device", tmp, g_ini_path);
-    snprintf(tmp, sizeof(tmp), "%d", PCFX_Win32_InputGetXInputEnabled());
-    WritePrivateProfileStringA("Input", "XInputEnabled", tmp, g_ini_path);
-    for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
-    {
-        char key[32];
-        snprintf(key, sizeof(key), "P%d_XInputUser", p + 1);
-        snprintf(tmp, sizeof(tmp), "%d", PCFX_Win32_InputGetXInputUser(p));
-        WritePrivateProfileStringA("Input", key, tmp, g_ini_path);
-    }
+    snprintf(tmp, sizeof(tmp), "%d", PCFX_Win32_InputGetGamepadEnabled());
+    WritePrivateProfileStringA("Input", "GamepadEnabled", tmp, g_ini_path);
     snprintf(tmp, sizeof(tmp), "%d", PCFX_Win32_AudioGetBackend());
     WritePrivateProfileStringA("Audio", "Backend", tmp, g_ini_path);
 #ifdef PCFX_ADPCM_COMPAT_OPTIONS
@@ -516,10 +502,6 @@ static void save_config(void)
     WritePrivateProfileStringA("CDROM", "Speed", tmp, g_ini_path);
     snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)g_open_hotkey_key);
     WritePrivateProfileStringA("Hotkeys", "OpenGameKey", tmp, g_ini_path);
-    snprintf(tmp, sizeof(tmp), "%d", g_open_hotkey_xinput_player);
-    WritePrivateProfileStringA("Hotkeys", "OpenGameXInputPlayer", tmp, g_ini_path);
-    snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)g_open_hotkey_xinput_code);
-    WritePrivateProfileStringA("Hotkeys", "OpenGameXInputCode", tmp, g_ini_path);
 
     int scale, mode, smooth;
     PCFX_Win32_GetScaleMode(&scale, &mode, &smooth);
@@ -545,8 +527,6 @@ static void save_config(void)
             snprintf(key, sizeof(key), "P%d_%02d", p + 1, b);
             snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)PCFX_Win32_InputGetMapping(p, b));
             WritePrivateProfileStringA("Keys", key, tmp, g_ini_path);
-            snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)PCFX_Win32_InputGetXInputMapping(p, b));
-            WritePrivateProfileStringA("XInput", key, tmp, g_ini_path);
         }
     }
 }
@@ -566,9 +546,7 @@ static void load_config(void)
     option.type_controller = 0;
     option.fullscreen = 0;
     g_start_fullscreen = 0;
-    PCFX_Win32_InputSetXInputEnabled(1);
-    for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
-        PCFX_Win32_InputSetXInputUser(p, p);
+    PCFX_Win32_InputSetGamepadEnabled(1);
     PCFX_Win32_AudioSetBackend(PCFX_WIN32_AUDIO_WAVEOUT);
 #ifdef PCFX_ADPCM_COMPAT_OPTIONS
     g_adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
@@ -576,8 +554,6 @@ static void load_config(void)
 #endif
     g_cd_speed = 2;
     g_open_hotkey_key = VK_F10;
-    g_open_hotkey_xinput_player = 0;
-    g_open_hotkey_xinput_code = XINPUT_GAMEPAD_RIGHT_THUMB;
     PCFX_Win32_SetScaleMode(2, PCFX_WIN32_SCALE_ASPECT, 0);
     PCFX_Win32_SetVideoBackend(PCFX_WIN32_DEFAULT_VIDEO_BACKEND);
     PCFX_Win32_SetFullscreenMode(PCFX_WIN32_FULLSCREEN_EXCLUSIVE);
@@ -595,13 +571,9 @@ static void load_config(void)
     g_bios_patch_flags &= (PCFX_BIOS_PATCH_SHORTINTRO | PCFX_BIOS_PATCH_ENGLISH | PCFX_BIOS_PATCH_AUTOLAUNCH);
     g_save_slot = read_ini_int_range("State", "Slot", 0, 0, 9);
     option.type_controller = (uint8_t)(read_ini_int_range("Input", "Port1Device", 0, 0, 1) ? 1 : 0);
-    PCFX_Win32_InputSetXInputEnabled(read_ini_int_range("Input", "XInputEnabled", 1, 0, 1));
-    for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
-    {
-        char key[32];
-        snprintf(key, sizeof(key), "P%d_XInputUser", p + 1);
-        PCFX_Win32_InputSetXInputUser(p, read_ini_int_range("Input", key, p, 0, PCFX_WIN32_XINPUT_USERS - 1));
-    }
+    /* Accept the legacy "XInputEnabled" key as a fallback for older configs. */
+    PCFX_Win32_InputSetGamepadEnabled(read_ini_int_range("Input", "GamepadEnabled",
+        read_ini_int_range("Input", "XInputEnabled", 1, 0, 1), 0, 1));
     g_start_fullscreen = read_ini_int_range("Video", "Fullscreen", 0, 0, 1) ? 1 : 0;
     PCFX_Win32_AudioSetBackend(read_ini_int_range("Audio", "Backend", PCFX_WIN32_AUDIO_WAVEOUT,
                                                   PCFX_WIN32_AUDIO_WAVEOUT, PCFX_WIN32_AUDIO_BACKEND_MAX));
@@ -624,8 +596,6 @@ static void load_config(void)
         g_cd_speed = 2;
     }
     g_open_hotkey_key = (uint32_t)read_ini_int_range("Hotkeys", "OpenGameKey", VK_F10, 0, 0xFFFF);
-    g_open_hotkey_xinput_player = read_ini_int_range("Hotkeys", "OpenGameXInputPlayer", 0, 0, PCFX_WIN32_PLAYERS - 1);
-    g_open_hotkey_xinput_code = (uint32_t)read_ini_int_range("Hotkeys", "OpenGameXInputCode", XINPUT_GAMEPAD_RIGHT_THUMB, 0, 0x0001FFFF);
 
     int scale = read_ini_int_range("Video", "Scale", 2, 1, 6);
     int mode = read_ini_int_range("Video", "ScaleMode", PCFX_WIN32_SCALE_ASPECT,
@@ -672,8 +642,6 @@ static void load_config(void)
             snprintf(key, sizeof(key), "P%d_%02d", p + 1, b);
             UINT vk = (UINT)read_ini_int_range("Keys", key, (int)PCFX_Win32_InputGetMapping(p, b), 0, 0xFFFF);
             PCFX_Win32_InputSetMapping(p, b, vk);
-            UINT xcode = (UINT)read_ini_int_range("XInput", key, (int)PCFX_Win32_InputGetXInputMapping(p, b), 0, 0x0001FFFF);
-            PCFX_Win32_InputSetXInputMapping(p, b, xcode);
         }
     }
 
@@ -801,7 +769,7 @@ static void update_menu_checks(void)
     CheckMenuRadioItem(g_menu, ID_INPUT_PORT1_PAD, ID_INPUT_PORT1_MOUSE,
                        option.type_controller ? ID_INPUT_PORT1_MOUSE : ID_INPUT_PORT1_PAD,
                        MF_BYCOMMAND);
-    CheckMenuItem(g_menu, ID_INPUT_XINPUT_ENABLED, MF_BYCOMMAND | (PCFX_Win32_InputGetXInputEnabled() ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(g_menu, ID_INPUT_GAMEPAD_ENABLED, MF_BYCOMMAND | (PCFX_Win32_InputGetGamepadEnabled() ? MF_CHECKED : MF_UNCHECKED));
 }
 
 static void force_video_redraw(HWND hwnd)
@@ -1006,7 +974,7 @@ static HMENU build_menu(void)
 
     AppendMenuA(input, MF_STRING, ID_INPUT_CONFIGURE, "&Configure Controllers...");
     AppendMenuA(input, MF_STRING, ID_INPUT_HOTKEYS, "Configure &Hotkeys...");
-    AppendMenuA(input, MF_STRING, ID_INPUT_XINPUT_ENABLED, "Enable &XInput gamepads");
+    AppendMenuA(input, MF_STRING, ID_INPUT_GAMEPAD_ENABLED, "Enable &gamepad input");
     AppendMenuA(input, MF_SEPARATOR, 0, NULL);
     AppendMenuA(input, MF_STRING, ID_INPUT_PORT1_PAD, "Port 1: &Pad");
     AppendMenuA(input, MF_STRING, ID_INPUT_PORT1_MOUSE, "Port 1: &Mouse");
@@ -1471,7 +1439,6 @@ static void browse_load(HWND hwnd)
     int selected = GetOpenFileNameA(&ofn) ? 1 : 0;
     audio_modal_mute_end();
     g_open_hotkey_dialog_active = 0;
-    g_open_hotkey_pad_prev = 1;
     if(selected)
         load_game_path(hwnd, path);
 }
@@ -1534,7 +1501,7 @@ static void show_about(HWND hwnd)
              "Fullscreen mode: %s\n"
              "Compile-time pixel format: %s\n"
              "Audio backend: %s\n"
-             "Input: two-player keyboard/XInput remapping\n"
+             "Input: two-player keyboard remapping + gamepad\n"
              "LaunchBox mode: %s\n\n"
              "BIOS search paths:\n%s\n%s",
              PCFX_Win32_VideoBackendName(PCFX_Win32_GetVideoBackend()),
@@ -1552,36 +1519,18 @@ typedef struct MapDialogState
     HWND hwnd;
     HWND parent;
     HWND key_buttons[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
-    HWND xinput_buttons[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
     uint32_t key_backup[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
-    uint32_t xinput_backup[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
     int done;
     int cancelled;
     int capture_player;
     int capture_button;
-    int capture_kind; /* 0=keyboard, 1=XInput */
 } MapDialogState;
 
-#define ID_MAP_TIMER_XINPUT 1
-
-static void map_update_key_button(MapDialogState* st, int p, int b)
+static void map_update_button(MapDialogState* st, int p, int b)
 {
     char vkname[64];
     PCFX_Win32_InputVKName(PCFX_Win32_InputGetMapping(p, b), vkname, sizeof(vkname));
     SetWindowTextA(st->key_buttons[p][b], vkname);
-}
-
-static void map_update_xinput_button(MapDialogState* st, int p, int b)
-{
-    char name[64];
-    PCFX_Win32_InputXInputName(PCFX_Win32_InputGetXInputMapping(p, b), name, sizeof(name));
-    SetWindowTextA(st->xinput_buttons[p][b], name);
-}
-
-static void map_update_button(MapDialogState* st, int p, int b)
-{
-    map_update_key_button(st, p, b);
-    map_update_xinput_button(st, p, b);
 }
 
 static void map_update_all(MapDialogState* st)
@@ -1591,21 +1540,11 @@ static void map_update_all(MapDialogState* st)
             map_update_button(st, p, b);
 }
 
-static void map_begin_capture(MapDialogState* st, int kind, int p, int b)
+static void map_begin_capture(MapDialogState* st, int p, int b)
 {
-    st->capture_kind = kind;
     st->capture_player = p;
     st->capture_button = b;
-    if(kind)
-    {
-        SetWindowTextA(st->xinput_buttons[p][b], "Press pad input...");
-        SetTimer(st->hwnd, ID_MAP_TIMER_XINPUT, 25, NULL);
-    }
-    else
-    {
-        SetWindowTextA(st->key_buttons[p][b], "Press a key...");
-        KillTimer(st->hwnd, ID_MAP_TIMER_XINPUT);
-    }
+    SetWindowTextA(st->key_buttons[p][b], "Press a key...");
     SetFocus(st->hwnd);
 }
 
@@ -1613,10 +1552,8 @@ static void map_cancel_capture(MapDialogState* st)
 {
     if(st->capture_player >= 0)
         map_update_button(st, st->capture_player, st->capture_button);
-    KillTimer(st->hwnd, ID_MAP_TIMER_XINPUT);
     st->capture_player = -1;
     st->capture_button = -1;
-    st->capture_kind = 0;
 }
 
 static LRESULT CALLBACK MapWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -1636,19 +1573,15 @@ static LRESULT CALLBACK MapWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             st->hwnd = hwnd;
             st->capture_player = -1;
             st->capture_button = -1;
-            st->capture_kind = 0;
             HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
             CreateWindowA("STATIC",
-                          "Click a keyboard or XInput field, then press the replacement input. Delete clears a field. Escape cancels capture.",
-                          WS_CHILD | WS_VISIBLE, 12, 10, 900, 20, hwnd, NULL, g_hinst, NULL);
-            char padnote[160];
-            snprintf(padnote, sizeof(padnote), "XInput: Player 1 uses controller %d; Player 2 uses controller %d. Toggle XInput from the Input menu.",
-                     PCFX_Win32_InputGetXInputUser(0) + 1, PCFX_Win32_InputGetXInputUser(1) + 1);
-            CreateWindowA("STATIC", padnote, WS_CHILD | WS_VISIBLE, 12, 31, 900, 20, hwnd, NULL, g_hinst, NULL);
+                          "Click a keyboard field, then press the replacement key. Delete clears a field. Escape cancels capture.",
+                          WS_CHILD | WS_VISIBLE, 12, 10, 620, 20, hwnd, NULL, g_hinst, NULL);
+            CreateWindowA("STATIC",
+                          "Gamepads use a fixed default mapping; toggle them from the Input menu.",
+                          WS_CHILD | WS_VISIBLE, 12, 31, 620, 20, hwnd, NULL, g_hinst, NULL);
             CreateWindowA("STATIC", "Player 1 Keyboard", WS_CHILD | WS_VISIBLE, 135, 58, 140, 20, hwnd, NULL, g_hinst, NULL);
-            CreateWindowA("STATIC", "Player 1 XInput",  WS_CHILD | WS_VISIBLE, 310, 58, 140, 20, hwnd, NULL, g_hinst, NULL);
-            CreateWindowA("STATIC", "Player 2 Keyboard", WS_CHILD | WS_VISIBLE, 515, 58, 140, 20, hwnd, NULL, g_hinst, NULL);
-            CreateWindowA("STATIC", "Player 2 XInput",  WS_CHILD | WS_VISIBLE, 690, 58, 140, 20, hwnd, NULL, g_hinst, NULL);
+            CreateWindowA("STATIC", "Player 2 Keyboard", WS_CHILD | WS_VISIBLE, 340, 58, 140, 20, hwnd, NULL, g_hinst, NULL);
             for(int b = 0; b < PCFX_WIN32_BUTTONS; b++)
             {
                 int y = 84 + b * 25;
@@ -1657,57 +1590,33 @@ static LRESULT CALLBACK MapWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 SendMessage(label, WM_SETFONT, (WPARAM)font, TRUE);
                 for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
                 {
-                    int key_x = p ? 515 : 135;
-                    int xi_x  = p ? 690 : 310;
+                    int key_x = p ? 340 : 135;
                     st->key_buttons[p][b] = CreateWindowA("BUTTON", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                                           key_x, y, 160, 23, hwnd,
                                                           (HMENU)(UINT_PTR)(ID_MAP_BASE + p * PCFX_WIN32_BUTTONS + b),
                                                           g_hinst, NULL);
-                    st->xinput_buttons[p][b] = CreateWindowA("BUTTON", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                                             xi_x, y, 160, 23, hwnd,
-                                                             (HMENU)(UINT_PTR)(ID_MAP_BASE + 100 + p * PCFX_WIN32_BUTTONS + b),
-                                                             g_hinst, NULL);
                     SendMessage(st->key_buttons[p][b], WM_SETFONT, (WPARAM)font, TRUE);
-                    SendMessage(st->xinput_buttons[p][b], WM_SETFONT, (WPARAM)font, TRUE);
                 }
             }
             HWND def = CreateWindowA("BUTTON", "Defaults", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                     405, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_DEFAULTS, g_hinst, NULL);
+                                     230, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_DEFAULTS, g_hinst, NULL);
             HWND ok = CreateWindowA("BUTTON", "OK", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                                    505, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_OK, g_hinst, NULL);
+                                    330, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_OK, g_hinst, NULL);
             HWND cancel = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                        605, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_CANCEL, g_hinst, NULL);
+                                        430, 446, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_MAP_CANCEL, g_hinst, NULL);
             SendMessage(def, WM_SETFONT, (WPARAM)font, TRUE);
             SendMessage(ok, WM_SETFONT, (WPARAM)font, TRUE);
             SendMessage(cancel, WM_SETFONT, (WPARAM)font, TRUE);
             map_update_all(st);
             return 0;
         }
-        case WM_TIMER:
-            if(st && wp == ID_MAP_TIMER_XINPUT && st->capture_player >= 0 && st->capture_kind == 1)
-            {
-                uint32_t code = 0;
-                if(PCFX_Win32_InputPollXInputCapture(st->capture_player, &code))
-                {
-                    PCFX_Win32_InputSetXInputMapping(st->capture_player, st->capture_button, code);
-                    map_cancel_capture(st);
-                }
-                return 0;
-            }
-            break;
         case WM_COMMAND:
         {
             int id = LOWORD(wp);
             if(id >= ID_MAP_BASE && id < ID_MAP_BASE + PCFX_WIN32_PLAYERS * PCFX_WIN32_BUTTONS)
             {
                 int n = id - ID_MAP_BASE;
-                map_begin_capture(st, 0, n / PCFX_WIN32_BUTTONS, n % PCFX_WIN32_BUTTONS);
-                return 0;
-            }
-            if(id >= ID_MAP_BASE + 100 && id < ID_MAP_BASE + 100 + PCFX_WIN32_PLAYERS * PCFX_WIN32_BUTTONS)
-            {
-                int n = id - (ID_MAP_BASE + 100);
-                map_begin_capture(st, 1, n / PCFX_WIN32_BUTTONS, n % PCFX_WIN32_BUTTONS);
+                map_begin_capture(st, n / PCFX_WIN32_BUTTONS, n % PCFX_WIN32_BUTTONS);
                 return 0;
             }
             if(id == ID_MAP_DEFAULTS)
@@ -1739,21 +1648,11 @@ static LRESULT CALLBACK MapWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     map_cancel_capture(st);
                     return 0;
                 }
-                if(st->capture_kind == 0)
-                {
-                    if(wp == VK_DELETE || wp == VK_BACK)
-                        PCFX_Win32_InputSetMapping(st->capture_player, st->capture_button, 0);
-                    else
-                        PCFX_Win32_InputSetMapping(st->capture_player, st->capture_button, (uint32_t)wp);
-                    map_cancel_capture(st);
-                    return 0;
-                }
-                if(st->capture_kind == 1 && (wp == VK_DELETE || wp == VK_BACK))
-                {
-                    PCFX_Win32_InputSetXInputMapping(st->capture_player, st->capture_button, 0);
-                    map_cancel_capture(st);
-                    return 0;
-                }
+                if(wp == VK_DELETE || wp == VK_BACK)
+                    PCFX_Win32_InputSetMapping(st->capture_player, st->capture_button, 0);
+                else
+                    PCFX_Win32_InputSetMapping(st->capture_player, st->capture_button, (uint32_t)wp);
+                map_cancel_capture(st);
                 return 0;
             }
             if(st && wp == VK_ESCAPE)
@@ -1792,12 +1691,9 @@ static void show_input_dialog(HWND parent)
     st.parent = parent;
     for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
         for(int b = 0; b < PCFX_WIN32_BUTTONS; b++)
-        {
             st.key_backup[p][b] = PCFX_Win32_InputGetMapping(p, b);
-            st.xinput_backup[p][b] = PCFX_Win32_InputGetXInputMapping(p, b);
-        }
 
-    RECT rc = {0, 0, 875, 520};
+    RECT rc = {0, 0, 545, 520};
     AdjustWindowRect(&rc, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE);
     HWND dlg = CreateWindowExA(WS_EX_DLGMODALFRAME, MAP_CLASS_NAME, "Configure Controllers",
                                WS_CAPTION | WS_SYSMENU | WS_POPUP,
@@ -1826,10 +1722,7 @@ static void show_input_dialog(HWND parent)
     {
         for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
             for(int b = 0; b < PCFX_WIN32_BUTTONS; b++)
-            {
                 PCFX_Win32_InputSetMapping(p, b, st.key_backup[p][b]);
-                PCFX_Win32_InputSetXInputMapping(p, b, st.xinput_backup[p][b]);
-            }
     }
     else
     {
@@ -1843,14 +1736,10 @@ typedef struct HotkeyDialogState
     HWND hwnd;
     HWND parent;
     HWND key_button;
-    HWND pad_button;
-    HWND pad_player_combo;
     uint32_t key_backup;
-    int pad_player_backup;
-    uint32_t pad_code_backup;
     int done;
     int cancelled;
-    int capture_kind; /* 0=none, 1=keyboard, 2=XInput */
+    int capturing;
 } HotkeyDialogState;
 
 static void hotkey_update_key_button(HotkeyDialogState* st)
@@ -1860,19 +1749,10 @@ static void hotkey_update_key_button(HotkeyDialogState* st)
     SetWindowTextA(st->key_button, name);
 }
 
-static void hotkey_update_pad_button(HotkeyDialogState* st)
-{
-    char name[64];
-    PCFX_Win32_InputXInputName(g_open_hotkey_xinput_code, name, sizeof(name));
-    SetWindowTextA(st->pad_button, name);
-}
-
 static void hotkey_cancel_capture(HotkeyDialogState* st)
 {
-    KillTimer(st->hwnd, ID_HOTKEY_TIMER_XINPUT);
-    st->capture_kind = 0;
+    st->capturing = 0;
     hotkey_update_key_button(st);
-    hotkey_update_pad_button(st);
 }
 
 static LRESULT CALLBACK HotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -1893,87 +1773,43 @@ static LRESULT CALLBACK HotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
             CreateWindowA("STATIC",
                           "These hotkeys are frontend-only. They do not change PC-FX pad mappings.",
-                          WS_CHILD | WS_VISIBLE, 12, 12, 520, 20, hwnd, NULL, g_hinst, NULL);
+                          WS_CHILD | WS_VISIBLE, 12, 12, 400, 20, hwnd, NULL, g_hinst, NULL);
             CreateWindowA("STATIC", "Open new game - keyboard:", WS_CHILD | WS_VISIBLE,
                           12, 48, 180, 20, hwnd, NULL, g_hinst, NULL);
             st->key_button = CreateWindowA("BUTTON", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
                                            210, 44, 170, 24, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_KEY_OPEN, g_hinst, NULL);
-            CreateWindowA("STATIC", "Open new game - gamepad:", WS_CHILD | WS_VISIBLE,
-                          12, 82, 180, 20, hwnd, NULL, g_hinst, NULL);
-            st->pad_button = CreateWindowA("BUTTON", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                           210, 78, 170, 24, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_PAD_OPEN, g_hinst, NULL);
-            CreateWindowA("STATIC", "Gamepad source:", WS_CHILD | WS_VISIBLE,
-                          12, 116, 180, 20, hwnd, NULL, g_hinst, NULL);
-            st->pad_player_combo = CreateWindowA("COMBOBOX", "", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST,
-                                                 210, 112, 170, 120, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_PAD_PLAYER, g_hinst, NULL);
-            SendMessageA(st->pad_player_combo, CB_ADDSTRING, 0, (LPARAM)"Player 1 XInput");
-            SendMessageA(st->pad_player_combo, CB_ADDSTRING, 0, (LPARAM)"Player 2 XInput");
-            SendMessageA(st->pad_player_combo, CB_SETCURSEL, (WPARAM)g_open_hotkey_xinput_player, 0);
 
             HWND def = CreateWindowA("BUTTON", "Defaults", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                     110, 158, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_DEFAULTS, g_hinst, NULL);
+                                     110, 90, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_DEFAULTS, g_hinst, NULL);
             HWND ok = CreateWindowA("BUTTON", "OK", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
-                                    210, 158, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_OK, g_hinst, NULL);
+                                    210, 90, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_OK, g_hinst, NULL);
             HWND cancel = CreateWindowA("BUTTON", "Cancel", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-                                        310, 158, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_CANCEL, g_hinst, NULL);
+                                        310, 90, 90, 26, hwnd, (HMENU)(UINT_PTR)ID_HOTKEY_CANCEL, g_hinst, NULL);
             SendMessage(st->key_button, WM_SETFONT, (WPARAM)font, TRUE);
-            SendMessage(st->pad_button, WM_SETFONT, (WPARAM)font, TRUE);
-            SendMessage(st->pad_player_combo, WM_SETFONT, (WPARAM)font, TRUE);
             SendMessage(def, WM_SETFONT, (WPARAM)font, TRUE);
             SendMessage(ok, WM_SETFONT, (WPARAM)font, TRUE);
             SendMessage(cancel, WM_SETFONT, (WPARAM)font, TRUE);
             hotkey_update_key_button(st);
-            hotkey_update_pad_button(st);
             return 0;
         }
-        case WM_TIMER:
-            if(st && wp == ID_HOTKEY_TIMER_XINPUT && st->capture_kind == 2)
-            {
-                uint32_t code = 0;
-                int player = (int)SendMessageA(st->pad_player_combo, CB_GETCURSEL, 0, 0);
-                if(player < 0) player = 0;
-                if(PCFX_Win32_InputPollXInputCapture(player, &code))
-                {
-                    g_open_hotkey_xinput_player = player;
-                    g_open_hotkey_xinput_code = code;
-                    hotkey_cancel_capture(st);
-                }
-                return 0;
-            }
-            break;
         case WM_COMMAND:
         {
             int id = LOWORD(wp);
             if(id == ID_HOTKEY_KEY_OPEN)
             {
-                st->capture_kind = 1;
-                KillTimer(hwnd, ID_HOTKEY_TIMER_XINPUT);
+                st->capturing = 1;
                 SetWindowTextA(st->key_button, "Press a key...");
-                SetFocus(hwnd);
-                return 0;
-            }
-            if(id == ID_HOTKEY_PAD_OPEN)
-            {
-                st->capture_kind = 2;
-                SetWindowTextA(st->pad_button, "Press pad input...");
-                SetTimer(hwnd, ID_HOTKEY_TIMER_XINPUT, 25, NULL);
                 SetFocus(hwnd);
                 return 0;
             }
             if(id == ID_HOTKEY_DEFAULTS)
             {
                 g_open_hotkey_key = VK_F10;
-                g_open_hotkey_xinput_player = 0;
-                g_open_hotkey_xinput_code = XINPUT_GAMEPAD_RIGHT_THUMB;
-                SendMessageA(st->pad_player_combo, CB_SETCURSEL, 0, 0);
                 hotkey_cancel_capture(st);
                 return 0;
             }
             if(id == ID_HOTKEY_OK)
             {
-                int player = (int)SendMessageA(st->pad_player_combo, CB_GETCURSEL, 0, 0);
-                if(player >= 0 && player < PCFX_WIN32_PLAYERS)
-                    g_open_hotkey_xinput_player = player;
                 st->done = 1;
                 DestroyWindow(hwnd);
                 return 0;
@@ -1988,7 +1824,7 @@ static LRESULT CALLBACK HotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             break;
         }
         case WM_KEYDOWN:
-            if(st && st->capture_kind == 1)
+            if(st && st->capturing)
             {
                 if(wp == VK_ESCAPE)
                 {
@@ -1999,12 +1835,6 @@ static LRESULT CALLBACK HotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                     g_open_hotkey_key = 0;
                 else
                     g_open_hotkey_key = (uint32_t)wp;
-                hotkey_cancel_capture(st);
-                return 0;
-            }
-            if(st && st->capture_kind == 2 && (wp == VK_DELETE || wp == VK_BACK))
-            {
-                g_open_hotkey_xinput_code = 0;
                 hotkey_cancel_capture(st);
                 return 0;
             }
@@ -2023,9 +1853,6 @@ static LRESULT CALLBACK HotkeyWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 st->done = 1;
             }
             DestroyWindow(hwnd);
-            return 0;
-        case WM_DESTROY:
-            KillTimer(hwnd, ID_HOTKEY_TIMER_XINPUT);
             return 0;
     }
     return DefWindowProcA(hwnd, msg, wp, lp);
@@ -2051,10 +1878,8 @@ static void show_hotkey_dialog(HWND parent)
     memset(&st, 0, sizeof(st));
     st.parent = parent;
     st.key_backup = g_open_hotkey_key;
-    st.pad_player_backup = g_open_hotkey_xinput_player;
-    st.pad_code_backup = g_open_hotkey_xinput_code;
 
-    RECT rc = {0, 0, 430, 230};
+    RECT rc = {0, 0, 430, 165};
     AdjustWindowRect(&rc, WS_CAPTION | WS_SYSMENU | WS_POPUP, FALSE);
     HWND dlg = CreateWindowExA(WS_EX_DLGMODALFRAME, "PCFXEmuWin32HotkeyDialog", "Configure Hotkeys",
                                WS_CAPTION | WS_SYSMENU | WS_POPUP,
@@ -2086,8 +1911,6 @@ static void show_hotkey_dialog(HWND parent)
     if(st.cancelled)
     {
         g_open_hotkey_key = st.key_backup;
-        g_open_hotkey_xinput_player = st.pad_player_backup;
-        g_open_hotkey_xinput_code = st.pad_code_backup;
     }
     else
     {
@@ -2231,8 +2054,8 @@ static void handle_command(HWND hwnd, int id)
         case ID_INPUT_HOTKEYS:
             show_hotkey_dialog(hwnd);
             break;
-        case ID_INPUT_XINPUT_ENABLED:
-            PCFX_Win32_InputSetXInputEnabled(!PCFX_Win32_InputGetXInputEnabled());
+        case ID_INPUT_GAMEPAD_ENABLED:
+            PCFX_Win32_InputSetGamepadEnabled(!PCFX_Win32_InputGetGamepadEnabled());
             update_menu_checks();
             save_config();
             break;
@@ -2269,8 +2092,8 @@ typedef struct CommandLineOptions
     int video_backend;
     int fullscreen_mode_set;
     int fullscreen_mode;
-    int xinput_set;
-    int xinput_enabled;
+    int gamepad_set;
+    int gamepad_enabled;
     char load_path[2048];
 } CommandLineOptions;
 
@@ -2365,15 +2188,15 @@ static void parse_command_line_options(CommandLineOptions* opt)
             opt->system_mode_set = 1;
             opt->system_mode = 2;
         }
-        else if(option_match(arg, "xinput"))
+        else if(option_match(arg, "gamepad") || option_match(arg, "xinput"))
         {
-            opt->xinput_set = 1;
-            opt->xinput_enabled = 1;
+            opt->gamepad_set = 1;
+            opt->gamepad_enabled = 1;
         }
-        else if(option_match(arg, "no-xinput"))
+        else if(option_match(arg, "no-gamepad") || option_match(arg, "no-xinput"))
         {
-            opt->xinput_set = 1;
-            opt->xinput_enabled = 0;
+            opt->gamepad_set = 1;
+            opt->gamepad_enabled = 0;
         }
         else if(option_match(arg, "help") || option_match(arg, "h") || option_match(arg, "?"))
         {
@@ -2502,8 +2325,8 @@ static void apply_command_line_options(const CommandLineOptions* opt)
         PCFX_Win32_SetVideoBackend(opt->video_backend);
     if(opt->fullscreen_mode_set)
         PCFX_Win32_SetFullscreenMode(opt->fullscreen_mode);
-    if(opt->xinput_set)
-        PCFX_Win32_InputSetXInputEnabled(opt->xinput_enabled);
+    if(opt->gamepad_set)
+        PCFX_Win32_InputSetGamepadEnabled(opt->gamepad_enabled);
     if(g_launchbox_mode && !opt->fullscreen_set)
         g_start_fullscreen = 1;
     if(opt->fullscreen_set)
@@ -2537,34 +2360,20 @@ static void show_command_line_help(HWND hwnd)
 #else
         "  --video=gdi           Override the saved video backend.\n"
 #endif
-        "  --xinput | --no-xinput Override XInput enable state.\n"
+        "  --gamepad | --no-gamepad Override gamepad enable state.\n"
         "\n"
         "LaunchBox example:\n"
         "  pcfx.exe --launchbox --fullscreen \"C:\\Games\\PC-FX\\Game.cue\"",
         "PCFXEmu - Command line", MB_ICONINFORMATION | MB_OK);
 }
 
-static void request_open_game(HWND hwnd)
-{
-    if(!hwnd || g_open_hotkey_dialog_active)
-        return;
-    PostMessageA(hwnd, WM_PCFX_OPEN_GAME, 0, 0);
-}
-
 static void service_frontend_hotkeys(HWND hwnd)
 {
-    int pad_open_down;
     int combo = 0;
     LARGE_INTEGER now;
 
     if(!hwnd || g_open_hotkey_dialog_active)
         return;
-
-    pad_open_down = g_open_hotkey_xinput_code &&
-                    PCFX_Win32_InputXInputCodeDown(g_open_hotkey_xinput_player, g_open_hotkey_xinput_code);
-    if(pad_open_down && !g_open_hotkey_pad_prev)
-        request_open_game(hwnd);
-    g_open_hotkey_pad_prev = pad_open_down;
 
     if(!g_launchbox_mode || !g_game_loaded)
     {

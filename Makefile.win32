@@ -66,36 +66,37 @@ DEFINES32 += -DHAVE_CHD -D_7ZIP_ST
 SRCDIR += ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/zlib-1.2.11
 endif
 
-# The SDL3 gamepad backend is win64-only and opt-in (SDL3=YES). Keep it out of
-# the globbed source list so the 32-bit legacy build never sees it and the base
-# 64-bit build only compiles it when explicitly enabled below.
+# Gamepad input backend:
+#   pcfx.exe        (64-bit)  -> SDL3 (built from source, static). SDL3 already
+#                                covers XInput/DirectInput/HID controllers, so
+#                                the old XInput code has been removed entirely.
+#   pcfx-winxp.exe  (32-bit)  -> WinMM joystick API, since modern SDL3 does not
+#                                run on Windows XP (uses -lwinmm, already linked).
+# The SDL3 gamepad source is win64-only, so keep it out of the globbed source
+# list (which both builds share) and add it to OBJ64 explicitly.
 SDL3_INPUT_SRC = ./shell/input/win32/pcfx_sdl3_input.c
 SRC_C = $(filter-out $(SDL3_INPUT_SRC),$(sort $(foreach dir,$(SRCDIR),$(wildcard $(dir)/*.c))))
 SRC_REL = $(patsubst ./%,%,$(SRC_C))
-OBJ64 = $(addprefix build/win64/,$(SRC_REL:.c=.o)) build/win64/shell/win32/pcfx_win32_res.o
+OBJ64 = $(addprefix build/win64/,$(SRC_REL:.c=.o)) build/win64/shell/win32/pcfx_win32_res.o \
+        build/win64/shell/input/win32/pcfx_sdl3_input.o
 OBJ32 = $(addprefix build/winxp/,$(SRC_REL:.c=.o)) build/winxp/shell/win32/pcfx_win32_res.o
 
-CFLAGS_COMMON = -O3 -fno-common -Wall -Wextra -Wno-unused-parameter $(INCLUDES)
-CFLAGS64 = $(CFLAGS_COMMON) $(DEFINES64)
-CFLAGS32 = $(CFLAGS_COMMON) $(DEFINES32)
-LDFLAGS64 = -mwindows -lcomdlg32 -lgdi32 -ld3d11 -ldxgi -ldxguid -lwinmm -lole32 -luuid -lshell32 -lxinput9_1_0 -lm
-LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm -s -Wl,--as-needed -Wl,--gc-sections -flto
-
-# --- Optional SDL3 gamepad input for the 64-bit build (SDL3=YES) -------------
-# Mirrors GP32emu: the native Win32 frontend keeps its own window/video/audio,
-# and SDL3 (built from source as a static lib by scripts/build_sdl3_mingw.sh)
-# only supplies gamepad input, OR-combined with keyboard + XInput. The 32-bit
-# pcfx-winxp.exe target is unaffected.
-SDL3 ?= NO
-ifeq ($(SDL3),YES)
+# SDL3 is built from source as a static MinGW library (mirrors GP32emu). The
+# native frontend keeps its own window / D3D11+GDI video / WASAPI+waveOut audio;
+# SDL3 only supplies gamepad input for the 64-bit build.
 SDL3_ARCH   := win64
 SDL3_PREFIX := third_party/sdl/install/$(SDL3_ARCH)
 SDL3_LIB    := $(SDL3_PREFIX)/lib/libSDL3.a
-DEFINES64   += -DPCFX_WIN32_HAVE_SDL3 -DSDL_MAIN_HANDLED
-CFLAGS64    += -I$(SDL3_PREFIX)/include
 # Static SDL3 + its Windows system deps (taken from the generated sdl3.pc).
-LDFLAGS64   += -L$(SDL3_PREFIX)/lib -lSDL3 -limm32 -lsetupapi -ldinput8 -lversion -loleaut32
-OBJ64       += build/win64/shell/input/win32/pcfx_sdl3_input.o
+SDL3_LDLIBS := -L$(SDL3_PREFIX)/lib -lSDL3 -limm32 -lsetupapi -ldinput8 -lversion -loleaut32
+
+DEFINES64 += -DPCFX_WIN32_HAVE_SDL3 -DSDL_MAIN_HANDLED
+
+CFLAGS_COMMON = -O3 -fno-common -Wall -Wextra -Wno-unused-parameter $(INCLUDES)
+CFLAGS64 = $(CFLAGS_COMMON) $(DEFINES64) -I$(SDL3_PREFIX)/include
+CFLAGS32 = $(CFLAGS_COMMON) $(DEFINES32)
+LDFLAGS64 = -mwindows -lcomdlg32 -lgdi32 -ld3d11 -ldxgi -ldxguid -lwinmm -lole32 -luuid -lshell32 $(SDL3_LDLIBS) -lm
+LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm -s -Wl,--as-needed -Wl,--gc-sections -flto
 
 # Build the static SDL3 library from source before compiling/linking win64.
 $(SDL3_LIB):
@@ -108,8 +109,6 @@ $(PRGNAME64): $(SDL3_LIB)
 sdl3: $(SDL3_LIB)
 sdl3-clean:
 	rm -rf third_party/sdl/build third_party/sdl/install
-endif
-# ----------------------------------------------------------------------------
 
 all: $(PRGNAME64) $(PRGNAME32)
 

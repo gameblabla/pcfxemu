@@ -4,14 +4,14 @@
 /* SDL3 gamepad input for the 64-bit Win32 (Win64) PCFXEmu frontend.
  *
  * The native frontend keeps its own window, D3D11/GDI video and WASAPI/waveOut
- * audio; SDL3 is used only as an additional gamepad source, OR-combined with
- * the existing keyboard and XInput paths in shell/input/win32/input_emu.c. This
- * mirrors how GP32emu ships a native Win64 frontend that uses SDL3 purely for
- * joystick input.
+ * audio; SDL3 is the gamepad source, OR-combined with the keyboard path in
+ * shell/input/win32/input_emu.c. This mirrors how GP32emu ships a native Win64
+ * frontend that uses SDL3 purely for joystick input. SDL3 natively covers
+ * XInput/DirectInput/HID controllers, so no separate XInput code is needed.
  *
  * Everything here is compiled only when PCFX_WIN32_HAVE_SDL3 is defined
- * (the SDL3=YES win64 build of Makefile.win32). The 32-bit legacy build is
- * unaffected and stays keyboard + XInput only.
+ * (the 64-bit build of Makefile.win32). The 32-bit legacy build uses the WinMM
+ * joystick API instead, since modern SDL3 does not run on Windows XP.
  */
 
 #include <stdint.h>
@@ -33,7 +33,7 @@ void PCFX_Win32_SDL3_Shutdown(void);
 void PCFX_Win32_SDL3_Poll(void);
 
 /* Combined PC-FX pad button bitmask for a player, in the same bit layout the
- * keyboard/XInput path uses (Up=0x100, Down=0x400, Left=0x800, Right=0x200,
+ * keyboard path uses (Up=0x100, Down=0x400, Left=0x800, Right=0x200,
  * I=0x1..VI=0x20, Run=0x80, Select=0x40). Returns 0 when no pad is assigned. */
 uint16_t PCFX_Win32_SDL3_PadButtons(unsigned player);
 

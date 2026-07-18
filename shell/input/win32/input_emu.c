@@ -3,7 +3,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <xinput.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,25 +11,15 @@
 #include "config.h"
 #ifdef PCFX_WIN32_HAVE_SDL3
 #include "pcfx_sdl3_input.h"
+#else
+#include <mmsystem.h>   /* WinMM joystick API (32-bit / XP-compatible build) */
 #endif
 
 extern uint8_t exit_vb;
 extern uint32_t emulator_state;
 
-#define XI_NONE       0u
-#define XI_LT         0x00010000u
-#define XI_RT         0x00010001u
-#define XI_LS_LEFT    0x00010002u
-#define XI_LS_RIGHT   0x00010003u
-#define XI_LS_UP      0x00010004u
-#define XI_LS_DOWN    0x00010005u
-#define XI_RS_LEFT    0x00010006u
-#define XI_RS_RIGHT   0x00010007u
-#define XI_RS_UP      0x00010008u
-#define XI_RS_DOWN    0x00010009u
-
-#ifndef XINPUT_GAMEPAD_GUIDE
-#define XINPUT_GAMEPAD_GUIDE 0x0400
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
 
 static HWND g_hwnd;
@@ -40,12 +29,7 @@ static int32_t g_mouse_dx;
 static int32_t g_mouse_dy;
 
 static uint32_t g_keymap[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
-static uint32_t g_xmap[PCFX_WIN32_PLAYERS][PCFX_WIN32_BUTTONS];
-static int g_xinput_enabled = 1;
-static int g_xinput_user[PCFX_WIN32_PLAYERS] = { 0, 1 };
-static XINPUT_STATE g_xstate[PCFX_WIN32_XINPUT_USERS];
-static int g_xconnected[PCFX_WIN32_XINPUT_USERS];
-static int g_xpoll_valid;
+static int g_gamepad_enabled = 1;
 
 static const char* const g_button_names[PCFX_WIN32_BUTTONS] = {
     "Up", "Down", "Left", "Right",
@@ -53,92 +37,151 @@ static const char* const g_button_names[PCFX_WIN32_BUTTONS] = {
     "Run / Start", "Select", "Mouse Left", "Mouse Right"
 };
 
+/* PC-FX pad bit for pad-button index 0..11 (Up, Down, Left, Right, I..VI,
+ * Run, Select). */
 static const uint16_t g_button_bits[12] = {
     256, 1024, 2048, 512,
     1, 2, 4, 8, 16, 32,
     128, 64
 };
 
-typedef struct XInputName
+/* Individual pad-button bits, for readability in the gamepad backends. */
+#define PADB_UP      0x0100u
+#define PADB_DOWN    0x0400u
+#define PADB_LEFT    0x0800u
+#define PADB_RIGHT   0x0200u
+#define PADB_I       0x0001u
+#define PADB_II      0x0002u
+#define PADB_III     0x0004u
+#define PADB_IV      0x0008u
+#define PADB_V       0x0010u
+#define PADB_VI      0x0020u
+#define PADB_RUN     0x0080u
+#define PADB_SELECT  0x0040u
+
+/* -------------------------------------------------------------------------
+ * Gamepad backend
+ *
+ * SDL3 on the 64-bit build (it already covers XInput/DirectInput/HID pads);
+ * WinMM joyGetPosEx on the 32-bit XP-compatible build. Both hand back a PC-FX
+ * pad bitmask (g_button_bits layout) using a fixed default mapping.
+ * ------------------------------------------------------------------------- */
+
+#ifdef PCFX_WIN32_HAVE_SDL3
+
+static void gamepad_poll(void)
 {
-    uint32_t code;
-    const char* name;
-} XInputName;
-
-static const XInputName g_xinput_names[] = {
-    { XINPUT_GAMEPAD_DPAD_UP,        "D-Pad Up" },
-    { XINPUT_GAMEPAD_DPAD_DOWN,      "D-Pad Down" },
-    { XINPUT_GAMEPAD_DPAD_LEFT,      "D-Pad Left" },
-    { XINPUT_GAMEPAD_DPAD_RIGHT,     "D-Pad Right" },
-    { XINPUT_GAMEPAD_START,          "Start" },
-    { XINPUT_GAMEPAD_BACK,           "Back" },
-    { XINPUT_GAMEPAD_LEFT_THUMB,     "Left Stick Click" },
-    { XINPUT_GAMEPAD_RIGHT_THUMB,    "Right Stick Click" },
-    { XINPUT_GAMEPAD_LEFT_SHOULDER,  "Left Shoulder" },
-    { XINPUT_GAMEPAD_RIGHT_SHOULDER, "Right Shoulder" },
-    { XINPUT_GAMEPAD_A,              "A" },
-    { XINPUT_GAMEPAD_B,              "B" },
-    { XINPUT_GAMEPAD_X,              "X" },
-    { XINPUT_GAMEPAD_Y,              "Y" },
-    { XI_LT,                         "Left Trigger" },
-    { XI_RT,                         "Right Trigger" },
-    { XI_LS_LEFT,                    "Left Stick Left" },
-    { XI_LS_RIGHT,                   "Left Stick Right" },
-    { XI_LS_UP,                      "Left Stick Up" },
-    { XI_LS_DOWN,                    "Left Stick Down" },
-    { XI_RS_LEFT,                    "Right Stick Left" },
-    { XI_RS_RIGHT,                   "Right Stick Right" },
-    { XI_RS_UP,                      "Right Stick Up" },
-    { XI_RS_DOWN,                    "Right Stick Down" }
-};
-
-#ifndef ARRAY_SIZE
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
-
-#if defined(PCFX_WIN32_XP_COMPAT)
-typedef DWORD (WINAPI *PFN_XInputGetState)(DWORD dwUserIndex, XINPUT_STATE* pState);
-static HMODULE g_xinput_dll;
-static PFN_XInputGetState g_XInputGetState;
-static int g_xinput_load_tried;
-
-static void xinput_load_runtime(void)
-{
-    static const char* const dlls[] = {
-        "xinput1_3.dll",      /* DirectX runtime, available on XP when installed. */
-        "xinput9_1_0.dll",    /* Vista/7 system component. */
-        "xinput1_4.dll",      /* Windows 8+. */
-        "xinput1_2.dll",
-        "xinput1_1.dll"
-    };
-
-    if(g_xinput_load_tried)
+    if(!g_gamepad_enabled)
         return;
-    g_xinput_load_tried = 1;
-    for(size_t i = 0; i < ARRAY_SIZE(dlls); i++)
-    {
-        g_xinput_dll = LoadLibraryA(dlls[i]);
-        if(g_xinput_dll)
-        {
-            g_XInputGetState = (PFN_XInputGetState)GetProcAddress(g_xinput_dll, "XInputGetState");
-            if(g_XInputGetState)
-                return;
-            FreeLibrary(g_xinput_dll);
-            g_xinput_dll = NULL;
-        }
-    }
+    PCFX_Win32_SDL3_Poll();
 }
 
-static DWORD pcfx_xinput_get_state(DWORD user, XINPUT_STATE* state)
+static uint16_t gamepad_pad_mask(unsigned player)
 {
-    xinput_load_runtime();
-    if(!g_XInputGetState)
-        return ERROR_DEVICE_NOT_CONNECTED;
-    return g_XInputGetState(user, state);
+    if(!g_gamepad_enabled || player >= PCFX_WIN32_PLAYERS)
+        return 0;
+    return PCFX_Win32_SDL3_PadButtons(player);
 }
-#else
-#define pcfx_xinput_get_state XInputGetState
-#endif
+
+const char* PCFX_Win32_InputGamepadBackendName(void)
+{
+    return "SDL3";
+}
+
+#else /* WinMM joystick backend */
+
+#define WINMM_AXIS_DEADZONE_FRAC 3   /* fraction of half-range treated as dead */
+
+static int winmm_map_pov(DWORD pov)
+{
+    /* dwPOV is in hundredths of a degree, clockwise from "up"; 0xFFFF center. */
+    uint16_t mask = 0;
+    if(pov == JOY_POVCENTERED || pov == 0xFFFF)
+        return 0;
+    if(pov > 27000 || pov < 9000)   mask |= PADB_UP;
+    if(pov > 0     && pov < 18000)  mask |= PADB_RIGHT;
+    if(pov > 9000  && pov < 27000)  mask |= PADB_DOWN;
+    if(pov > 18000)                 mask |= PADB_LEFT;
+    return mask;
+}
+
+static uint16_t winmm_pad_mask(unsigned player)
+{
+    UINT id = JOYSTICKID1 + player;
+
+    JOYCAPS caps;
+    if(joyGetDevCaps(id, &caps, sizeof(caps)) != JOYERR_NOERROR)
+        return 0;
+
+    JOYINFOEX ji;
+    memset(&ji, 0, sizeof(ji));
+    ji.dwSize = sizeof(ji);
+    ji.dwFlags = JOY_RETURNX | JOY_RETURNY | JOY_RETURNBUTTONS | JOY_RETURNPOV;
+    if(joyGetPosEx(id, &ji) != JOYERR_NOERROR)
+        return 0;
+
+    uint16_t mask = 0;
+
+    /* Face buttons -> I..VI, then Select / Run. WinMM button order is
+     * device-dependent; this default matches the common pad layout. */
+    static const uint16_t btn_to_pad[8] = {
+        PADB_I, PADB_II, PADB_III, PADB_IV, PADB_V, PADB_VI, PADB_SELECT, PADB_RUN
+    };
+    for(int i = 0; i < 8; i++)
+        if(ji.dwButtons & (1u << i))
+            mask |= btn_to_pad[i];
+
+    /* Hat switch. */
+    mask |= winmm_map_pov(ji.dwPOV);
+
+    /* Left stick / D-pad reported as the primary X/Y axes. */
+    DWORD xmin = caps.wXmin, xmax = caps.wXmax;
+    DWORD ymin = caps.wYmin, ymax = caps.wYmax;
+    if(xmax > xmin)
+    {
+        DWORD xcenter = xmin + (xmax - xmin) / 2;
+        DWORD xdead   = (xmax - xmin) / (2 * WINMM_AXIS_DEADZONE_FRAC);
+        if(ji.dwXpos + xdead < xcenter) mask |= PADB_LEFT;
+        if(ji.dwXpos > xcenter + xdead) mask |= PADB_RIGHT;
+    }
+    if(ymax > ymin)
+    {
+        DWORD ycenter = ymin + (ymax - ymin) / 2;
+        DWORD ydead   = (ymax - ymin) / (2 * WINMM_AXIS_DEADZONE_FRAC);
+        if(ji.dwYpos + ydead < ycenter) mask |= PADB_UP;
+        if(ji.dwYpos > ycenter + ydead) mask |= PADB_DOWN;
+    }
+
+    return mask;
+}
+
+static void gamepad_poll(void)
+{
+    /* WinMM is polled on demand in winmm_pad_mask(); nothing to pump here. */
+}
+
+static uint16_t gamepad_pad_mask(unsigned player)
+{
+    if(!g_gamepad_enabled || player >= PCFX_WIN32_PLAYERS)
+        return 0;
+    return winmm_pad_mask(player);
+}
+
+const char* PCFX_Win32_InputGamepadBackendName(void)
+{
+    return "WinMM joystick";
+}
+
+#endif /* PCFX_WIN32_HAVE_SDL3 */
+
+static int gamepad_button_down(unsigned player, int button)
+{
+    if(button < 0 || button >= 12)
+        return 0;
+    return (gamepad_pad_mask(player) & g_button_bits[button]) ? 1 : 0;
+}
+
+/* ------------------------------------------------------------------------- */
 
 const char* PCFX_Win32_InputButtonName(int button)
 {
@@ -163,7 +206,6 @@ void PCFX_Win32_InputResetMouse(void)
 void PCFX_Win32_InputDefaults(void)
 {
     memset(g_keymap, 0, sizeof(g_keymap));
-    memset(g_xmap, 0, sizeof(g_xmap));
 
     g_keymap[0][0] = VK_UP;
     g_keymap[0][1] = VK_DOWN;
@@ -194,25 +236,6 @@ void PCFX_Win32_InputDefaults(void)
     g_keymap[1][11] = VK_DECIMAL;
     g_keymap[1][12] = VK_NUMPAD1;
     g_keymap[1][13] = VK_NUMPAD2;
-
-    for(int p = 0; p < PCFX_WIN32_PLAYERS; p++)
-    {
-        g_xinput_user[p] = p;
-        g_xmap[p][0] = XINPUT_GAMEPAD_DPAD_UP;
-        g_xmap[p][1] = XINPUT_GAMEPAD_DPAD_DOWN;
-        g_xmap[p][2] = XINPUT_GAMEPAD_DPAD_LEFT;
-        g_xmap[p][3] = XINPUT_GAMEPAD_DPAD_RIGHT;
-        g_xmap[p][4] = XINPUT_GAMEPAD_A;
-        g_xmap[p][5] = XINPUT_GAMEPAD_B;
-        g_xmap[p][6] = XINPUT_GAMEPAD_X;
-        g_xmap[p][7] = XINPUT_GAMEPAD_Y;
-        g_xmap[p][8] = XINPUT_GAMEPAD_LEFT_SHOULDER;
-        g_xmap[p][9] = XINPUT_GAMEPAD_RIGHT_SHOULDER;
-        g_xmap[p][10] = XINPUT_GAMEPAD_START;
-        g_xmap[p][11] = XINPUT_GAMEPAD_BACK;
-        g_xmap[p][12] = XINPUT_GAMEPAD_A;
-        g_xmap[p][13] = XINPUT_GAMEPAD_B;
-    }
 
     for(int i = 0; i < PCFX_WIN32_BUTTONS && i < 19; i++)
         option.config_buttons[i] = g_keymap[0][i];
@@ -261,68 +284,14 @@ void PCFX_Win32_InputVKName(uint32_t vk, char* out, unsigned out_size)
         snprintf(out, out_size, "VK 0x%02lX", (unsigned long)vk);
 }
 
-void PCFX_Win32_InputSetXInputEnabled(int enabled)
+void PCFX_Win32_InputSetGamepadEnabled(int enabled)
 {
-    g_xinput_enabled = enabled ? 1 : 0;
-    memset(g_xconnected, 0, sizeof(g_xconnected));
-    g_xpoll_valid = 0;
+    g_gamepad_enabled = enabled ? 1 : 0;
 }
 
-int PCFX_Win32_InputGetXInputEnabled(void)
+int PCFX_Win32_InputGetGamepadEnabled(void)
 {
-    return g_xinput_enabled;
-}
-
-void PCFX_Win32_InputSetXInputUser(int player, int user_index)
-{
-    if(player < 0 || player >= PCFX_WIN32_PLAYERS)
-        return;
-    if(user_index < 0)
-        user_index = 0;
-    if(user_index >= PCFX_WIN32_XINPUT_USERS)
-        user_index = PCFX_WIN32_XINPUT_USERS - 1;
-    g_xinput_user[player] = user_index;
-}
-
-int PCFX_Win32_InputGetXInputUser(int player)
-{
-    if(player < 0 || player >= PCFX_WIN32_PLAYERS)
-        return 0;
-    return g_xinput_user[player];
-}
-
-void PCFX_Win32_InputSetXInputMapping(int player, int button, uint32_t code)
-{
-    if(player < 0 || player >= PCFX_WIN32_PLAYERS || button < 0 || button >= PCFX_WIN32_BUTTONS)
-        return;
-    g_xmap[player][button] = code;
-}
-
-uint32_t PCFX_Win32_InputGetXInputMapping(int player, int button)
-{
-    if(player < 0 || player >= PCFX_WIN32_PLAYERS || button < 0 || button >= PCFX_WIN32_BUTTONS)
-        return 0;
-    return g_xmap[player][button];
-}
-
-void PCFX_Win32_InputXInputName(uint32_t code, char* out, unsigned out_size)
-{
-    if(!out || !out_size)
-        return;
-    if(!code)
-    {
-        snprintf(out, out_size, "Unmapped");
-        return;
-    }
-    for(size_t i = 0; i < ARRAY_SIZE(g_xinput_names); i++)
-    {
-        if(g_xinput_names[i].code == code)
-        {
-            snprintf(out, out_size, "%s", g_xinput_names[i].name);
-            return;
-        }
-    }
-    snprintf(out, out_size, "XInput 0x%08lX", (unsigned long)code);
+    return g_gamepad_enabled;
 }
 
 static int key_down(uint32_t vk)
@@ -332,136 +301,12 @@ static int key_down(uint32_t vk)
     return (GetAsyncKeyState((int)vk) & 0x8000) ? 1 : 0;
 }
 
-/* SDL3 gamepad support (Win64 build only) is OR-combined with the keyboard and
- * XInput sources, so the native input mapping and INI machinery stay unchanged.
- * Without PCFX_WIN32_HAVE_SDL3 these are no-ops the compiler removes. */
-#ifdef PCFX_WIN32_HAVE_SDL3
-static void sdl3_poll(void)
-{
-    PCFX_Win32_SDL3_Poll();
-}
-static uint16_t sdl3_pad_mask(unsigned player)
-{
-    return PCFX_Win32_SDL3_PadButtons(player);
-}
-static int sdl3_button_down(unsigned player, int button)
-{
-    if(button < 0 || button >= 12)
-        return 0;
-    return (sdl3_pad_mask(player) & g_button_bits[button]) ? 1 : 0;
-}
-#else
-static void sdl3_poll(void) { }
-static uint16_t sdl3_pad_mask(unsigned player) { (void)player; return 0; }
-static int sdl3_button_down(unsigned player, int button) { (void)player; (void)button; return 0; }
-#endif
-
-static void xinput_poll(void)
-{
-    if(!g_xinput_enabled)
-    {
-        memset(g_xconnected, 0, sizeof(g_xconnected));
-        g_xpoll_valid = 1;
-        return;
-    }
-
-    for(DWORD i = 0; i < PCFX_WIN32_XINPUT_USERS; i++)
-    {
-        memset(&g_xstate[i], 0, sizeof(g_xstate[i]));
-        g_xconnected[i] = (pcfx_xinput_get_state(i, &g_xstate[i]) == ERROR_SUCCESS) ? 1 : 0;
-    }
-    g_xpoll_valid = 1;
-}
-
-static int xinput_code_down(const XINPUT_GAMEPAD* gp, uint32_t code)
-{
-    if(!gp || !code)
-        return 0;
-
-    switch(code)
-    {
-        case XI_LT:       return gp->bLeftTrigger  > 64;
-        case XI_RT:       return gp->bRightTrigger > 64;
-        case XI_LS_LEFT:  return gp->sThumbLX < -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
-        case XI_LS_RIGHT: return gp->sThumbLX >  XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
-        case XI_LS_UP:    return gp->sThumbLY >  XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
-        case XI_LS_DOWN:  return gp->sThumbLY < -XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE;
-        case XI_RS_LEFT:  return gp->sThumbRX < -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE;
-        case XI_RS_RIGHT: return gp->sThumbRX >  XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE;
-        case XI_RS_UP:    return gp->sThumbRY >  XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE;
-        case XI_RS_DOWN:  return gp->sThumbRY < -XINPUT_GAMEPAD_RIGHT_THUMB_DEADZONE;
-        default:
-            if(code <= 0xFFFFu)
-                return (gp->wButtons & (WORD)code) ? 1 : 0;
-            return 0;
-    }
-}
-
-static int xinput_player_down(unsigned player, uint32_t code)
-{
-    if(!g_xinput_enabled || player >= PCFX_WIN32_PLAYERS || !code)
-        return 0;
-    if(!g_xpoll_valid)
-        xinput_poll();
-    int user = g_xinput_user[player];
-    if(user < 0 || user >= PCFX_WIN32_XINPUT_USERS || !g_xconnected[user])
-        return 0;
-    return xinput_code_down(&g_xstate[user].Gamepad, code);
-}
-
-
 int PCFX_Win32_InputButtonDown(int player, int button)
 {
     if(player < 0 || player >= PCFX_WIN32_PLAYERS || button < 0 || button >= PCFX_WIN32_BUTTONS)
         return 0;
-    xinput_poll();
-    sdl3_poll();
-    return key_down(g_keymap[player][button]) || xinput_player_down((unsigned)player, g_xmap[player][button])
-        || sdl3_button_down((unsigned)player, button);
-}
-
-int PCFX_Win32_InputXInputCodeDown(int player, uint32_t code)
-{
-    if(player < 0 || player >= PCFX_WIN32_PLAYERS)
-        return 0;
-    xinput_poll();
-    return xinput_player_down((unsigned)player, code);
-}
-
-int PCFX_Win32_InputPollXInputCapture(int player, uint32_t* code_out)
-{
-    if(!code_out || player < 0 || player >= PCFX_WIN32_PLAYERS || !g_xinput_enabled)
-        return 0;
-
-    XINPUT_STATE st;
-    memset(&st, 0, sizeof(st));
-    int user = g_xinput_user[player];
-    if(user < 0 || user >= PCFX_WIN32_XINPUT_USERS)
-        return 0;
-    if(pcfx_xinput_get_state((DWORD)user, &st) != ERROR_SUCCESS)
-        return 0;
-
-    static const uint32_t capture_order[] = {
-        XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN,
-        XINPUT_GAMEPAD_DPAD_LEFT, XINPUT_GAMEPAD_DPAD_RIGHT,
-        XINPUT_GAMEPAD_START, XINPUT_GAMEPAD_BACK,
-        XINPUT_GAMEPAD_A, XINPUT_GAMEPAD_B, XINPUT_GAMEPAD_X, XINPUT_GAMEPAD_Y,
-        XINPUT_GAMEPAD_LEFT_SHOULDER, XINPUT_GAMEPAD_RIGHT_SHOULDER,
-        XINPUT_GAMEPAD_LEFT_THUMB, XINPUT_GAMEPAD_RIGHT_THUMB,
-        XI_LT, XI_RT,
-        XI_LS_LEFT, XI_LS_RIGHT, XI_LS_UP, XI_LS_DOWN,
-        XI_RS_LEFT, XI_RS_RIGHT, XI_RS_UP, XI_RS_DOWN
-    };
-
-    for(size_t i = 0; i < ARRAY_SIZE(capture_order); i++)
-    {
-        if(xinput_code_down(&st.Gamepad, capture_order[i]))
-        {
-            *code_out = capture_order[i];
-            return 1;
-        }
-    }
-    return 0;
+    gamepad_poll();
+    return key_down(g_keymap[player][button]) || gamepad_button_down((unsigned)player, button);
 }
 
 void Read_General_Input(void)
@@ -469,8 +314,7 @@ void Read_General_Input(void)
     if(key_down(VK_F12))
         exit_vb = 1;
 
-    xinput_poll();
-    sdl3_poll();
+    gamepad_poll();
 
     if(!g_hwnd)
         return;
@@ -500,10 +344,10 @@ uint16_t Read_Pad_Input_Player(unsigned player)
     uint16_t button = 0;
     for(int i = 0; i < 12; i++)
     {
-        if(key_down(g_keymap[player][i]) || xinput_player_down(player, g_xmap[player][i]))
+        if(key_down(g_keymap[player][i]))
             button |= g_button_bits[i];
     }
-    button |= sdl3_pad_mask(player);
+    button |= gamepad_pad_mask(player);
     return button;
 }
 
@@ -525,9 +369,9 @@ int32_t Read_Mouse_Y(void)
 uint16_t Read_Mouse_buttons(void)
 {
     uint16_t button = 0;
-    if(key_down(g_keymap[0][12]) || xinput_player_down(0, g_xmap[0][12]) || (GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+    if(key_down(g_keymap[0][12]) || (GetAsyncKeyState(VK_LBUTTON) & 0x8000))
         button |= 1;
-    if(key_down(g_keymap[0][13]) || xinput_player_down(0, g_xmap[0][13]) || (GetAsyncKeyState(VK_RBUTTON) & 0x8000))
+    if(key_down(g_keymap[0][13]) || (GetAsyncKeyState(VK_RBUTTON) & 0x8000))
         button |= 2;
     return button;
 }
