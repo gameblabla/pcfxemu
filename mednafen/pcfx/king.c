@@ -2681,35 +2681,22 @@ static void DrawBG(uint32 *target, int n)
 
 	if(bg0_stale_off && bg0_fresh_cells < 32u && !(bgmode & 0x8))
 	{
-	 /* Un-homed BG0 direct bitmap whose microprogram under-fetches.  The
-	  * microprogram only refills part of each 8px cell before the display's CG
-	  * data latch runs dry and holds its last value: the leading fresh_px
-	  * pixels of every cell show the real, correctly-addressed data (the text),
-	  * and the rest of the cell is a SOLID held bar reading the un-homed,
-	  * stale fetch.  With the stock 1-CG-slot schedule fresh_px = 4, i.e. a
-	  * ~4px solid jailbar plus ~4px of text in every cell.  A schedule that
-	  * keeps up (fresh_px >= 8) shows no bar. */
-	 const uint32 fresh_px = bg0_fresh_cells / 4u;   /* 16->4px, 32->8px(no bar) */
-	 uint32 bx = bat_x;
-	 for(uint_fast16_t x = 0; x < 256 + 8; x += 8)
+	 /* Un-homed BG0 direct bitmap whose microprogram under-fetches: only
+	  * bg0_fresh_cells of the 32 cells get a fresh, correctly-addressed word;
+	  * the rest still hold the un-homed fetch pointer's stale word.  The fresh
+	  * cells are spread evenly across the line, so the display shows the real
+	  * text in those columns and the stale (orange) data in the gaps -- the
+	  * "jailbar" pattern.  Fresh cells read the scanline address; stale cells
+	  * read it plus the un-homed displacement. */
+	 uint32 bx = bat_x, cell = 0;
+	 for(uint_fast16_t x = 0; x < 256 + 8; x += 8, cell++)
 	 {
 	  if(bx < bat_width)
 	  {
-	   const uint16 fw = cg_base[(cg_offset + (bx * 1) + sexy_y_pos) & 0x1FFFF];
-	   const uint16 sw = cg_base[(cg_offset + bg0_stale_off + (bx * 1) + sexy_y_pos) & 0x1FFFF];
-	   uint32 hi = (sw >> 14) & 3; if(!hi) hi = (sw >> 12) & 3;
-	   if(!hi) hi = (sw >> 10) & 3; if(!hi) hi = sw & 3;
-	   uint_fast16_t p;
-	   for(p = 0; p < 8; p++)
-	   {
-	    if(p < fresh_px)
-	    {
-	     const uint32 idx = (fw >> ((7 - p) * 2)) & 3;   /* fresh pixel */
-	     if(idx) target[x + p] = palette_ptr[idx] | layer_or;
-	    }
-	    else if(hi)                                      /* held solid bar */
-	     target[x + p] = palette_ptr[hi] | layer_or;
-	   }
+	   const bool fresh = ((cell * bg0_fresh_cells) & 31u) < bg0_fresh_cells;
+	   const uint32 off = fresh ? 0u : bg0_stale_off;
+	   const uint16 *cgptr = &cg_base[(cg_offset + off + (bx * 1) + sexy_y_pos) & 0x1FFFF];
+	   DRAWBG8x1_4(target + x, cgptr, palette_ptr, layer_or);
 	  }
 	  bx = (bx + 1) & bat_bitsize_mask;
 	 }
