@@ -40,6 +40,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "video_blit.h"
 #include "pcfx.h"
@@ -491,6 +492,17 @@ typedef struct
 	 * TRUE between "count would hit zero" and "trailing item consumed". */
 	bool DMARetirePending;
 
+	/* The trailing-item wedge only applies to a COUNT-BOUNDED transfer: one
+	 * programmed with a nonzero word count (reg 0x0A) that the drive then
+	 * exactly satisfies.  A transfer started with count 0 is phase-driven --
+	 * it runs until the target leaves DATA IN, and its count register only
+	 * reaches zero by wrapping the full 18-bit range after every delivered
+	 * byte has already landed.  That wraparound is completion, not an
+	 * exact-length stall, so such a transfer must retire normally (this is
+	 * what Team Innocent's CD loads do; without this they wedge like doom).
+	 * Captured at DMA start (reg 0x07) from the then-current count. */
+	bool DMACountBounded;
+
 
 	uint16 MPROGControl;    // register 0x15
 	uint16 MPROGControlCache;
@@ -838,7 +850,7 @@ static void DoRealDMA(uint8 db)
   king->DMATransferSize = (king->DMATransferSize - 2) & 0x3FFFF;
   if(!king->DMATransferSize)
   {
-   if(king_dma_erratum_enabled())
+   if(king_dma_erratum_enabled() && king->DMACountBounded)
    {
     /* Every requested word has landed in KRAM, but the engine holds the count
      * one item short of zero until one more handshake occurs.  That last count
@@ -1159,7 +1171,21 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
     {    
      if(SCSICD_GetREQ() && !SCSICD_GetACK())
      {
-      if(!king->DRQ)
+      /* The trailing item past an exact-count transfer has appeared: the DMA
+       * retires now.  Crucially it is NOT consumed here -- it is left in DATA
+       * IN so the driver drains the leftover sector itself (real HW "receives
+       * a full sector but disposes the leftovers" via the driver, it does not
+       * silently eat one byte into the retired DMA).  Consuming it corrupts a
+       * following read that reuses the leftover (e.g. Team Innocent). */
+      if((king->DMAStatus & 0x1) && king->DMARetirePending)
+      {
+       king->DMARetirePending = FALSE;
+       king->DMATransferSize = 0;
+       king->DMAInterrupt = TRUE;
+       RedoKINGIRQCheck();
+       king->DMAStatus &= ~1;
+      }
+      else if(!king->DRQ)
       {
        king->DRQ = TRUE;
        king->data_cache = SCSICD_GetDB();
@@ -1778,6 +1804,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 			   if(king->Reg02 & 0x2)
 			   {
+			    king->DMACountBounded = (king->DMATransferSize != 0);
 			    king->dma_receive_active = TRUE;
 			    king->dma_send_active = FALSE;
 			    //StartKingMagic();
