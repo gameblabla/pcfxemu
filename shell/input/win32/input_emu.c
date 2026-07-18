@@ -10,6 +10,9 @@
 #include "input_emu.h"
 #include "input_win32.h"
 #include "config.h"
+#ifdef PCFX_WIN32_HAVE_SDL3
+#include "pcfx_sdl3_input.h"
+#endif
 
 extern uint8_t exit_vb;
 extern uint32_t emulator_state;
@@ -329,6 +332,30 @@ static int key_down(uint32_t vk)
     return (GetAsyncKeyState((int)vk) & 0x8000) ? 1 : 0;
 }
 
+/* SDL3 gamepad support (Win64 build only) is OR-combined with the keyboard and
+ * XInput sources, so the native input mapping and INI machinery stay unchanged.
+ * Without PCFX_WIN32_HAVE_SDL3 these are no-ops the compiler removes. */
+#ifdef PCFX_WIN32_HAVE_SDL3
+static void sdl3_poll(void)
+{
+    PCFX_Win32_SDL3_Poll();
+}
+static uint16_t sdl3_pad_mask(unsigned player)
+{
+    return PCFX_Win32_SDL3_PadButtons(player);
+}
+static int sdl3_button_down(unsigned player, int button)
+{
+    if(button < 0 || button >= 12)
+        return 0;
+    return (sdl3_pad_mask(player) & g_button_bits[button]) ? 1 : 0;
+}
+#else
+static void sdl3_poll(void) { }
+static uint16_t sdl3_pad_mask(unsigned player) { (void)player; return 0; }
+static int sdl3_button_down(unsigned player, int button) { (void)player; (void)button; return 0; }
+#endif
+
 static void xinput_poll(void)
 {
     if(!g_xinput_enabled)
@@ -388,7 +415,9 @@ int PCFX_Win32_InputButtonDown(int player, int button)
     if(player < 0 || player >= PCFX_WIN32_PLAYERS || button < 0 || button >= PCFX_WIN32_BUTTONS)
         return 0;
     xinput_poll();
-    return key_down(g_keymap[player][button]) || xinput_player_down((unsigned)player, g_xmap[player][button]);
+    sdl3_poll();
+    return key_down(g_keymap[player][button]) || xinput_player_down((unsigned)player, g_xmap[player][button])
+        || sdl3_button_down((unsigned)player, button);
 }
 
 int PCFX_Win32_InputXInputCodeDown(int player, uint32_t code)
@@ -441,6 +470,7 @@ void Read_General_Input(void)
         exit_vb = 1;
 
     xinput_poll();
+    sdl3_poll();
 
     if(!g_hwnd)
         return;
@@ -473,6 +503,7 @@ uint16_t Read_Pad_Input_Player(unsigned player)
         if(key_down(g_keymap[player][i]) || xinput_player_down(player, g_xmap[player][i]))
             button |= g_button_bits[i];
     }
+    button |= sdl3_pad_mask(player);
     return button;
 }
 

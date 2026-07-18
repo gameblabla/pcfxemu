@@ -24,6 +24,9 @@
 #include "video_blit.h"
 #include "input_emu.h"
 #include "input_win32.h"
+#ifdef PCFX_WIN32_HAVE_SDL3
+#include "pcfx_sdl3_input.h"
+#endif
 #include "sound_output.h"
 #include "sound_output_win32.h"
 #include "resource.h"
@@ -2781,6 +2784,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if(g_start_fullscreen)
         toggle_fullscreen(g_hwnd);
 
+#ifdef PCFX_WIN32_HAVE_SDL3
+    PCFX_Win32_SDL3_Init();
+#endif
+
     if(cmdopt.show_help)
         show_command_line_help(g_hwnd);
     if(cmdopt.boot_bios)
@@ -2816,6 +2823,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             MsgWaitForMultipleObjects(0, NULL, FALSE, 25, QS_ALLINPUT);
         }
     }
+
+#ifdef PCFX_WIN32_HAVE_SDL3
+    PCFX_Win32_SDL3_Shutdown();
+#endif
 
     if(IsWindow(g_hwnd))
         SendMessageA(g_hwnd, WM_CLOSE, 0, 0);

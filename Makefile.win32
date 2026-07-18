@@ -66,7 +66,11 @@ DEFINES32 += -DHAVE_CHD -D_7ZIP_ST
 SRCDIR += ./deps/libchdr/src ./deps/lzma-19.00/src ./deps/zlib-1.2.11
 endif
 
-SRC_C = $(sort $(foreach dir,$(SRCDIR),$(wildcard $(dir)/*.c)))
+# The SDL3 gamepad backend is win64-only and opt-in (SDL3=YES). Keep it out of
+# the globbed source list so the 32-bit legacy build never sees it and the base
+# 64-bit build only compiles it when explicitly enabled below.
+SDL3_INPUT_SRC = ./shell/input/win32/pcfx_sdl3_input.c
+SRC_C = $(filter-out $(SDL3_INPUT_SRC),$(sort $(foreach dir,$(SRCDIR),$(wildcard $(dir)/*.c))))
 SRC_REL = $(patsubst ./%,%,$(SRC_C))
 OBJ64 = $(addprefix build/win64/,$(SRC_REL:.c=.o)) build/win64/shell/win32/pcfx_win32_res.o
 OBJ32 = $(addprefix build/winxp/,$(SRC_REL:.c=.o)) build/winxp/shell/win32/pcfx_win32_res.o
@@ -76,6 +80,36 @@ CFLAGS64 = $(CFLAGS_COMMON) $(DEFINES64)
 CFLAGS32 = $(CFLAGS_COMMON) $(DEFINES32)
 LDFLAGS64 = -mwindows -lcomdlg32 -lgdi32 -ld3d11 -ldxgi -ldxguid -lwinmm -lole32 -luuid -lshell32 -lxinput9_1_0 -lm
 LDFLAGS32 = -mwindows -lcomdlg32 -lgdi32 -lwinmm -lshell32 -lm -s -Wl,--as-needed -Wl,--gc-sections -flto
+
+# --- Optional SDL3 gamepad input for the 64-bit build (SDL3=YES) -------------
+# Mirrors GP32emu: the native Win32 frontend keeps its own window/video/audio,
+# and SDL3 (built from source as a static lib by scripts/build_sdl3_mingw.sh)
+# only supplies gamepad input, OR-combined with keyboard + XInput. The 32-bit
+# pcfx-winxp.exe target is unaffected.
+SDL3 ?= NO
+ifeq ($(SDL3),YES)
+SDL3_ARCH   := win64
+SDL3_PREFIX := third_party/sdl/install/$(SDL3_ARCH)
+SDL3_LIB    := $(SDL3_PREFIX)/lib/libSDL3.a
+DEFINES64   += -DPCFX_WIN32_HAVE_SDL3 -DSDL_MAIN_HANDLED
+CFLAGS64    += -I$(SDL3_PREFIX)/include
+# Static SDL3 + its Windows system deps (taken from the generated sdl3.pc).
+LDFLAGS64   += -L$(SDL3_PREFIX)/lib -lSDL3 -limm32 -lsetupapi -ldinput8 -lversion -loleaut32
+OBJ64       += build/win64/shell/input/win32/pcfx_sdl3_input.o
+
+# Build the static SDL3 library from source before compiling/linking win64.
+$(SDL3_LIB):
+	./scripts/build_sdl3_mingw.sh $(SDL3_ARCH)
+
+$(OBJ64): | $(SDL3_LIB)
+$(PRGNAME64): $(SDL3_LIB)
+
+.PHONY: sdl3 sdl3-clean
+sdl3: $(SDL3_LIB)
+sdl3-clean:
+	rm -rf third_party/sdl/build third_party/sdl/install
+endif
+# ----------------------------------------------------------------------------
 
 all: $(PRGNAME64) $(PRGNAME32)
 

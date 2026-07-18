@@ -18,3 +18,9 @@
 web/*.wasm
 /build/
 *.d
+
+# Bundled SDL3 sources / build outputs (fetched + built by scripts/build_sdl3_mingw.sh)
+/third_party/sdl/SDL3-*.tar.gz
+/third_party/sdl/SDL3-*/
+/third_party/sdl/build/
+/third_party/sdl/install/
