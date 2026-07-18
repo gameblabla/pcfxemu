@@ -40,6 +40,8 @@ void PCFX_SetPreferFXGABIOS(bool enabled);
 void PCFX_SetSystemMode(int mode);
 void PCFX_SetControllerType(uint8_t type);
 uint8_t PCFX_GetControllerType(void);
+void PCFX_SetControllerTypePort(unsigned port, uint8_t type);
+uint8_t PCFX_GetControllerTypePort(unsigned port);
 void PCFX_SoftReset(void);
 void PCFX_SetBIOSPatches(uint32_t flags);
 uint32_t PCFX_GetBIOSPatches(void);
@@ -426,6 +428,18 @@ uint8_t pcfx_headless_get_controller_type(PCFX_Headless* emu)
 {
     (void)emu;
     return PCFX_GetControllerType();
+}
+
+void pcfx_headless_set_controller_type_port(PCFX_Headless* emu, unsigned port, uint8_t type)
+{
+    (void)emu;
+    PCFX_SetControllerTypePort(port, type == 1 ? 1 : 0);
+}
+
+uint8_t pcfx_headless_get_controller_type_port(PCFX_Headless* emu, unsigned port)
+{
+    (void)emu;
+    return PCFX_GetControllerTypePort(port);
 }
 
 int pcfx_headless_soft_reset(PCFX_Headless* emu)

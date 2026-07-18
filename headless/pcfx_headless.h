@@ -57,6 +57,9 @@ uint16_t pcfx_headless_get_pad(PCFX_Headless* emu, unsigned player);
 void pcfx_headless_set_mouse(PCFX_Headless* emu, int32_t dx, int32_t dy, uint16_t buttons);
 void pcfx_headless_set_controller_type(PCFX_Headless* emu, uint8_t type);
 uint8_t pcfx_headless_get_controller_type(PCFX_Headless* emu);
+/* Per-port controller type (port 0/1): 0 = gamepad, 1 = PC-FX mouse. */
+void pcfx_headless_set_controller_type_port(PCFX_Headless* emu, unsigned port, uint8_t type);
+uint8_t pcfx_headless_get_controller_type_port(PCFX_Headless* emu, unsigned port);
 
 enum
 {

@@ -1241,24 +1241,47 @@ static float mouse_sensitivity = 1.25f;
 static uint16_t input_buf[MAX_PLAYERS] = {0};
 static int32_t  mousedata[MAX_PLAYERS][3] = {{0}, {0}};
 
-void PCFX_SetControllerType(uint8_t type)
+/* Controller type per PC-FX port: 0 = gamepad, 1 = PC-FX mouse. Port 0 mirrors
+   the legacy option.type_controller so existing single-port callers keep
+   working; port 1 is independently selectable (previously hardwired to pad). */
+static uint8_t port_ctype[MAX_PLAYERS] = { 0, 0 };
+
+static void PCFX_ApplyPortInputs(void)
 {
- type = (type == 1) ? 1 : 0;
- option.type_controller = type;
  input_buf[0] = input_buf[1] = 0;
  memset(mousedata, 0, sizeof(mousedata));
- if(type == 1)
-  FXINPUT_SetInput(0, 1, &mousedata[0]);
- else
-  FXINPUT_SetInput(0, 0, &input_buf[0]);
- /* Port 2 remains a gamepad so two-player titles keep working even when
-    port 1 is temporarily switched to the PC-FX mouse. */
- FXINPUT_SetInput(1, 0, &input_buf[1]);
+ for(int p = 0; p < MAX_PLAYERS; p++)
+ {
+  if(port_ctype[p] == 1)
+   FXINPUT_SetInput(p, 1, &mousedata[p]);
+  else
+   FXINPUT_SetInput(p, 0, &input_buf[p]);
+ }
+}
+
+void PCFX_SetControllerTypePort(unsigned port, uint8_t type)
+{
+ if(port >= MAX_PLAYERS)
+  return;
+ port_ctype[port] = (type == 1) ? 1 : 0;
+ if(port == 0)
+  option.type_controller = port_ctype[0];
+ PCFX_ApplyPortInputs();
+}
+
+uint8_t PCFX_GetControllerTypePort(unsigned port)
+{
+ return port < MAX_PLAYERS ? port_ctype[port] : 0;
+}
+
+void PCFX_SetControllerType(uint8_t type)
+{
+ PCFX_SetControllerTypePort(0, type);
 }
 
 uint8_t PCFX_GetControllerType(void)
 {
- return option.type_controller == 1 ? 1 : 0;
+ return port_ctype[0];
 }
 
 typedef struct PathList
@@ -2012,22 +2035,25 @@ void PCFX_SoftReset(void)
 static void update_input(void)
 {
 	Read_General_Input();
-	switch(option.type_controller)
+	for(int p = 0; p < MAX_PLAYERS; p++)
 	{
-		default:
-			input_buf[0] = Read_Pad_Input_Player(0);
-			input_buf[1] = Read_Pad_Input_Player(1);
-			mousedata[0][0] = 0;
-			mousedata[0][1] = 0;
-			mousedata[0][2] = 0;
-		break;
-		case 1:
-			input_buf[0] = 0;
-			input_buf[1] = Read_Pad_Input_Player(1);
-			mousedata[0][0] = (int)roundf( (float)Read_Mouse_X() * mouse_sensitivity);
-			mousedata[0][1] = (int)roundf( (float)Read_Mouse_Y() * mouse_sensitivity);
-			mousedata[0][2] = Read_Mouse_buttons();
-		break;
+		if(port_ctype[p] == 1)
+		{
+			/* PC-FX mouse. There is a single host mouse, so the first mouse
+			   port consumes the pointer delta; a second mouse port (rare) sees
+			   the already-drained delta and only shares the buttons. */
+			input_buf[p] = 0;
+			mousedata[p][0] = (int)roundf( (float)Read_Mouse_X() * mouse_sensitivity);
+			mousedata[p][1] = (int)roundf( (float)Read_Mouse_Y() * mouse_sensitivity);
+			mousedata[p][2] = Read_Mouse_buttons();
+		}
+		else
+		{
+			input_buf[p] = Read_Pad_Input_Player((unsigned)p);
+			mousedata[p][0] = 0;
+			mousedata[p][1] = 0;
+			mousedata[p][2] = 0;
+		}
 	}
 }
 

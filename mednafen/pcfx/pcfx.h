@@ -69,6 +69,9 @@ static inline bool PCFX_HuC6273Active(void) { return false; }
 #endif
 void PCFX_SetControllerType(uint8_t type);
 uint8_t PCFX_GetControllerType(void);
+/* Per-port controller type (port 0/1): 0 = gamepad, 1 = PC-FX mouse. */
+void PCFX_SetControllerTypePort(unsigned port, uint8_t type);
+uint8_t PCFX_GetControllerTypePort(unsigned port);
 void PCFX_SoftReset(void);
 
 

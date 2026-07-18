@@ -208,7 +208,7 @@ struct App
     SDL_Renderer* renderer;
     SDL_Texture* game_tex;
     SDL_AudioStream* audio_stream;
-    SDL_Gamepad* gamepad;
+    SDL_Gamepad* gamepad[2];   /* one per PC-FX port */
     PCFX_Headless* emu;
 
     char game_path[PATH_MAX];
@@ -226,7 +226,8 @@ struct App
     int system_mode;
     int aspect; /* 0=4:3, 1=native, 2=stretch */
     int state_slot;
-    int controller_type; /* 0=gamepad, 1=mouse */
+    int controller_type[2]; /* per port: 0=gamepad, 1=mouse */
+    int menu_scroll[MENU_TAB_COUNT]; /* first visible content row per tab */
     SDL_Scancode keymap[2][ARRAY_SIZE(k_bindings)];
     int remap_player;
     int remap_button;
@@ -555,8 +556,12 @@ static void load_sdl3_config(struct App* app, const char* home_dir)
             app->aspect = parse_int_clamped(val, app->aspect, 0, 2);
         else if(!strcmp(key, "state_slot"))
             app->state_slot = parse_int_clamped(val, app->state_slot, 0, 9);
-        else if(!strcmp(key, "controller_type"))
-            app->controller_type = parse_int_clamped(val, app->controller_type, 0, 1);
+        else if(!strcmp(key, "controller_type"))   /* legacy single-port key */
+            app->controller_type[0] = parse_int_clamped(val, app->controller_type[0], 0, 1);
+        else if(!strcmp(key, "controller_type_p1"))
+            app->controller_type[0] = parse_int_clamped(val, app->controller_type[0], 0, 1);
+        else if(!strcmp(key, "controller_type_p2"))
+            app->controller_type[1] = parse_int_clamped(val, app->controller_type[1], 0, 1);
         else if(!strcmp(key, "cd_speed"))
             app->cd_speed = normalize_cd_speed(parse_int_clamped(val, app->cd_speed, 1, 16));
         else if(!strcmp(key, "adpcm_buggy_codec_mode"))
@@ -598,7 +603,8 @@ static bool save_sdl3_config(const struct App* app, const char* home_dir)
     fprintf(fp, "system_mode=%d\n", app->system_mode);
     fprintf(fp, "aspect=%d\n", app->aspect);
     fprintf(fp, "state_slot=%d\n", app->state_slot);
-    fprintf(fp, "controller_type=%d\n", app->controller_type);
+    fprintf(fp, "controller_type_p1=%d\n", app->controller_type[0]);
+    fprintf(fp, "controller_type_p2=%d\n", app->controller_type[1]);
     fprintf(fp, "cd_speed=%d\n", normalize_cd_speed(app->cd_speed));
     fprintf(fp, "adpcm_buggy_codec_mode=%d\n", app->adpcm_buggy_codec_mode);
     fprintf(fp, "adpcm_suppress_reset_clicks=%d\n", app->adpcm_suppress_reset_clicks ? 1 : 0);
@@ -1012,6 +1018,42 @@ static void init_default_keymaps(struct App* app)
     app->remap_button = 0;
 }
 
+/* Open a newly connected gamepad into the first free player slot. */
+static void gamepad_attach(struct App* app, SDL_JoystickID which)
+{
+    if(!app)
+        return;
+    for(int p = 0; p < 2; p++)
+        if(app->gamepad[p] && SDL_GetGamepadID(app->gamepad[p]) == which)
+            return; /* already open */
+    for(int p = 0; p < 2; p++)
+    {
+        if(!app->gamepad[p])
+        {
+            app->gamepad[p] = SDL_OpenGamepad(which);
+            if(app->gamepad[p])
+                set_message(app, "Gamepad connected: Player %d", p + 1);
+            return;
+        }
+    }
+}
+
+/* Close a disconnected gamepad, freeing its player slot. */
+static void gamepad_detach(struct App* app, SDL_JoystickID which)
+{
+    if(!app)
+        return;
+    for(int p = 0; p < 2; p++)
+    {
+        if(app->gamepad[p] && SDL_GetGamepadID(app->gamepad[p]) == which)
+        {
+            SDL_CloseGamepad(app->gamepad[p]);
+            app->gamepad[p] = NULL;
+            set_message(app, "Gamepad disconnected: Player %d", p + 1);
+        }
+    }
+}
+
 static uint16_t collect_pad_state(struct App* app, const bool* keys, int player)
 {
     uint16_t st = 0;
@@ -1024,7 +1066,7 @@ static uint16_t collect_pad_state(struct App* app, const bool* keys, int player)
         SDL_Scancode sc = app->keymap[player][i];
         if(keys && sc != SDL_SCANCODE_UNKNOWN && keys[sc])
             st |= b->bit;
-        if(player == 0 && app->gamepad && b->gp_button != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(app->gamepad, b->gp_button))
+        if(app->gamepad[player] && b->gp_button != SDL_GAMEPAD_BUTTON_INVALID && SDL_GetGamepadButton(app->gamepad[player], b->gp_button))
             st |= b->bit;
     }
     return st;
@@ -1080,7 +1122,8 @@ static int menu_item_count(const struct App* app, int tab);
 static void activate_menu_item(struct App* app);
 static void clamp_menu_selection(struct App* app);
 static void release_mouse_capture(struct App* app);
-static void apply_controller_type(struct App* app, int type);
+static void apply_controller_type(struct App* app, int player, int type);
+static void apply_all_controller_types(struct App* app);
 
 static void render_game(struct App* app)
 {
@@ -1274,7 +1317,7 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
         return false;
     }
     pcfx_headless_set_audio_callback(app->emu, audio_cb, app->audio_stream);
-    pcfx_headless_set_controller_type(app->emu, (uint8_t)app->controller_type);
+    apply_all_controller_types(app);
     release_mouse_capture(app);
     if(!pcfx_headless_load_cd(app->emu, resolved_path))
     {
@@ -1380,9 +1423,17 @@ static const char* aspect_name(const struct App* app)
     return app->aspect == 1 ? "Native pixels" : (app->aspect == 2 ? "Stretch" : "4:3 display");
 }
 
-static const char* controller_type_name(const struct App* app)
+static const char* controller_type_name(const struct App* app, int player)
 {
-    return app->controller_type == 1 ? "Mouse" : "Gamepad";
+    if(player < 0 || player > 1)
+        return "Gamepad";
+    return app->controller_type[player] == 1 ? "Mouse" : "Gamepad";
+}
+
+/* Any port set to mouse. */
+static bool any_mouse_controller(const struct App* app)
+{
+    return app && (app->controller_type[0] == 1 || app->controller_type[1] == 1);
 }
 
 static void release_mouse_capture(struct App* app)
@@ -1397,19 +1448,27 @@ static void release_mouse_capture(struct App* app)
     app->mouse_buttons = 0;
 }
 
-static void apply_controller_type(struct App* app, int type)
+/* Push both ports' controller types into the emulator core. */
+static void apply_all_controller_types(struct App* app)
 {
-    if(!app)
+    if(!app || !app->emu)
         return;
-    app->controller_type = (type == 1) ? 1 : 0;
-    if(app->controller_type != 1)
+    for(int p = 0; p < 2; p++)
+        pcfx_headless_set_controller_type_port(app->emu, (unsigned)p, (uint8_t)app->controller_type[p]);
+}
+
+static void apply_controller_type(struct App* app, int player, int type)
+{
+    if(!app || player < 0 || player > 1)
+        return;
+    app->controller_type[player] = (type == 1) ? 1 : 0;
+    if(!any_mouse_controller(app))
         release_mouse_capture(app);
-    if(app->emu)
-        pcfx_headless_set_controller_type(app->emu, (uint8_t)app->controller_type);
-    if(app->controller_type == 1)
-        set_message(app, "Controller: Mouse. Click the game window to capture mouse input.");
+    apply_all_controller_types(app);
+    if(app->controller_type[player] == 1)
+        set_message(app, "P%d controller: Mouse. Click the game window to capture mouse input.", player + 1);
     else
-        set_message(app, "Controller: Gamepad");
+        set_message(app, "P%d controller: Gamepad", player + 1);
 }
 
 #ifdef PCFX_ENABLE_PHYSICAL_CD
@@ -1521,7 +1580,7 @@ static int menu_item_count(const struct App* app, int tab)
         case MENU_TAB_VIDEO: return 4;
         case MENU_TAB_AUDIO: return 3;
         case MENU_TAB_STATES: return 5;
-        case MENU_TAB_CONTROLS: return 10;
+        case MENU_TAB_CONTROLS: return 11;
         default: return 0;
     }
 }
@@ -1635,16 +1694,17 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
         case MENU_TAB_CONTROLS:
             switch(index)
             {
-                case 0: snprintf(out, out_size, "Controller type: %s", controller_type_name(app)); return;
-                case 1: snprintf(out, out_size, "P1 remap target: %s = %s", k_bindings[app->remap_button].name, key_name(app->keymap[0][app->remap_button])); return;
-                case 2: label = "Set P1 selected key..."; break;
-                case 3: label = "Next P1 key"; break;
-                case 4: snprintf(out, out_size, "P2 remap target: %s = %s", k_bindings[app->remap_button].name, key_name(app->keymap[1][app->remap_button])); return;
-                case 5: label = "Set P2 selected key..."; break;
-                case 6: label = "Next P2 key"; break;
-                case 7: label = "Mouse mode: click game window to capture, Esc releases"; break;
-                case 8: label = "Menu mouse: click tabs and rows"; break;
-                case 9: label = "Hotkeys: F5 save, F7 load, F11 fullscreen, F12 swap"; break;
+                case 0: snprintf(out, out_size, "P1 controller type: %s", controller_type_name(app, 0)); return;
+                case 1: snprintf(out, out_size, "P2 controller type: %s", controller_type_name(app, 1)); return;
+                case 2: snprintf(out, out_size, "P1 remap target: %s = %s", k_bindings[app->remap_button].name, key_name(app->keymap[0][app->remap_button])); return;
+                case 3: label = "Set P1 selected key..."; break;
+                case 4: label = "Next P1 key"; break;
+                case 5: snprintf(out, out_size, "P2 remap target: %s = %s", k_bindings[app->remap_button].name, key_name(app->keymap[1][app->remap_button])); return;
+                case 6: label = "Set P2 selected key..."; break;
+                case 7: label = "Next P2 key"; break;
+                case 8: label = "Mouse mode: click game window to capture, Esc releases"; break;
+                case 9: label = "Menu mouse: click tabs and rows"; break;
+                case 10: label = "Hotkeys: F5 save, F7 load, F11 fullscreen, F12 swap"; break;
             }
             break;
     }
@@ -1873,7 +1933,9 @@ static void activate_menu_item(struct App* app)
             break;
         case MENU_TAB_CONTROLS:
             if(idx == 0)
-                apply_controller_type(app, app->controller_type ? 0 : 1);
+                apply_controller_type(app, 0, app->controller_type[0] ? 0 : 1);
+            else if(idx == 1)
+                apply_controller_type(app, 1, app->controller_type[1] ? 0 : 1);
             else if(idx == 2 || idx == 5)
             {
                 app->remap_player = (idx == 5) ? 1 : 0;
@@ -1954,6 +2016,55 @@ static void menu_layout(int ww, int wh, SDL_FRect* panel, SDL_FRect* tab_area, S
     content_area->h = tab_area->h;
 }
 
+/* Content-row geometry, shared by the renderer and the hit-tester so clicks
+   land exactly on the drawn rows. */
+#define MENU_ROW_TOP    54.0f   /* first row offset below the content header */
+#define MENU_ROW_PITCH  44.0f   /* vertical step between rows */
+#define MENU_ROW_H      34.0f   /* drawn row height */
+
+/* How many content rows fit in the (possibly small) content area. */
+static int menu_visible_rows(const SDL_FRect* content)
+{
+    float avail = content->h - MENU_ROW_TOP - 8.0f;
+    int rows = (int)(avail / MENU_ROW_PITCH);
+    if(rows < 1)
+        rows = 1;
+    return rows;
+}
+
+/* Clamp the stored scroll offset for a tab and keep the selected row visible.
+   Returns the index of the first visible row. */
+static int menu_scroll_clamped(struct App* app, int tab, int rows)
+{
+    int count = menu_item_count(app, tab);
+    int max_scroll = count - rows;
+    int scroll = app->menu_scroll[tab];
+    int sel = app->menu_selection[tab];
+    if(max_scroll < 0)
+        max_scroll = 0;
+    if(sel < scroll)
+        scroll = sel;
+    else if(sel >= scroll + rows)
+        scroll = sel - rows + 1;
+    if(scroll > max_scroll)
+        scroll = max_scroll;
+    if(scroll < 0)
+        scroll = 0;
+    app->menu_scroll[tab] = scroll;
+    return scroll;
+}
+
+static void menu_scroll_by(struct App* app, int delta)
+{
+    if(!app)
+        return;
+    app->menu_scroll[app->menu_tab] += delta;
+    /* Bounds are finalised on the next render via menu_scroll_clamped(); just
+       avoid a negative intermediate here. */
+    if(app->menu_scroll[app->menu_tab] < 0)
+        app->menu_scroll[app->menu_tab] = 0;
+}
+
 static void menu_hit_test(struct App* app, float mx, float my, int ww, int wh, int* out_tab, int* out_item)
 {
     SDL_FRect panel, tabs, content;
@@ -1974,9 +2085,14 @@ static void menu_hit_test(struct App* app, float mx, float my, int ww, int wh, i
     if(mx >= content.x && mx <= content.x + content.w && my >= content.y && my <= content.y + content.h)
     {
         int count = menu_item_count(app, app->menu_tab);
-        for(int i = 0; i < count; i++)
+        int rows = menu_visible_rows(&content);
+        int scroll = menu_scroll_clamped(app, app->menu_tab, rows);
+        for(int vis = 0; vis < rows; vis++)
         {
-            SDL_FRect r = { content.x + 14.0f, content.y + 54.0f + (float)i * 44.0f, content.w - 28.0f, 34.0f };
+            int i = scroll + vis;
+            if(i >= count)
+                break;
+            SDL_FRect r = { content.x + 14.0f, content.y + MENU_ROW_TOP + (float)vis * MENU_ROW_PITCH, content.w - 28.0f, MENU_ROW_H };
             if(mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h)
             {
                 if(out_item) *out_item = i;
@@ -2030,9 +2146,23 @@ static void render_menu(struct App* app, int ww, int wh)
     SDL_RenderDebugText(app->renderer, content.x + 16.0f, content.y + 32.0f, "Click a row to activate. Left/right changes tabs from keyboard or controller.");
 
     int count = menu_item_count(app, app->menu_tab);
-    for(int i = 0; i < count; i++)
+    int rows = menu_visible_rows(&content);
+    int scroll = menu_scroll_clamped(app, app->menu_tab, rows);
+
+    /* Clip rows to the content area so long tabs never spill outside the panel. */
+    SDL_Rect clip;
+    clip.x = (int)content.x;
+    clip.y = (int)(content.y + MENU_ROW_TOP - 4.0f);
+    clip.w = (int)content.w;
+    clip.h = (int)(content.h - MENU_ROW_TOP + 4.0f);
+    SDL_SetRenderClipRect(app->renderer, &clip);
+
+    for(int vis = 0; vis < rows; vis++)
     {
-        SDL_FRect r = { content.x + 14.0f, content.y + 54.0f + (float)i * 44.0f, content.w - 28.0f, 34.0f };
+        int i = scroll + vis;
+        if(i >= count)
+            break;
+        SDL_FRect r = { content.x + 14.0f, content.y + MENU_ROW_TOP + (float)vis * MENU_ROW_PITCH, content.w - 28.0f, MENU_ROW_H };
         bool selected = (i == app->menu_selection[app->menu_tab]);
         bool hover = (i == app->menu_hover_item);
         menu_item_label(app, app->menu_tab, i, label, sizeof(label));
@@ -2042,6 +2172,28 @@ static void render_menu(struct App* app, int ww, int wh)
         SDL_RenderRect(app->renderer, &r);
         SDL_SetRenderDrawColor(app->renderer, 233, 239, 246, 255);
         SDL_RenderDebugText(app->renderer, r.x + 12.0f, r.y + 10.0f, label);
+    }
+
+    SDL_SetRenderClipRect(app->renderer, NULL);
+
+    /* Scrollbar + hints when the list is taller than the content area. */
+    if(count > rows)
+    {
+        float track_x = content.x + content.w - 8.0f;
+        float track_y = content.y + MENU_ROW_TOP;
+        float track_h = (float)rows * MENU_ROW_PITCH - (MENU_ROW_PITCH - MENU_ROW_H);
+        SDL_FRect track = { track_x, track_y, 4.0f, track_h };
+        SDL_SetRenderDrawColor(app->renderer, 40, 54, 72, 255);
+        SDL_RenderFillRect(app->renderer, &track);
+
+        float thumb_h = track_h * (float)rows / (float)count;
+        if(thumb_h < 14.0f)
+            thumb_h = 14.0f;
+        float max_scroll = (float)(count - rows);
+        float thumb_y = track_y + (track_h - thumb_h) * (max_scroll > 0.0f ? (float)scroll / max_scroll : 0.0f);
+        SDL_FRect thumb = { track_x, thumb_y, 4.0f, thumb_h };
+        SDL_SetRenderDrawColor(app->renderer, 150, 184, 220, 255);
+        SDL_RenderFillRect(app->renderer, &thumb);
     }
 }
 
@@ -2124,18 +2276,14 @@ static void handle_event(struct App* app, const SDL_Event* e)
         set_message(app, "Mouse released");
         return;
     }
-    if(e->type == SDL_EVENT_GAMEPAD_ADDED && !app->gamepad)
+    if(e->type == SDL_EVENT_GAMEPAD_ADDED)
     {
-        app->gamepad = SDL_OpenGamepad(e->gdevice.which);
+        gamepad_attach(app, e->gdevice.which);
         return;
     }
     if(e->type == SDL_EVENT_GAMEPAD_REMOVED)
     {
-        if(app->gamepad && SDL_GetGamepadID(app->gamepad) == e->gdevice.which)
-        {
-            SDL_CloseGamepad(app->gamepad);
-            app->gamepad = NULL;
-        }
+        gamepad_detach(app, e->gdevice.which);
         return;
     }
     if(e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
@@ -2157,13 +2305,13 @@ static void handle_event(struct App* app, const SDL_Event* e)
             return;
         }
     }
-    if(!app->menu_visible && !app->paused && app->controller_type == 1 && e->type == SDL_EVENT_MOUSE_MOTION && app->mouse_captured)
+    if(!app->menu_visible && !app->paused && any_mouse_controller(app) && e->type == SDL_EVENT_MOUSE_MOTION && app->mouse_captured)
     {
         app->mouse_dx += (int32_t)e->motion.xrel;
         app->mouse_dy += (int32_t)e->motion.yrel;
         return;
     }
-    if(!app->menu_visible && !app->paused && app->controller_type == 1 && e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+    if(!app->menu_visible && !app->paused && any_mouse_controller(app) && e->type == SDL_EVENT_MOUSE_BUTTON_DOWN)
     {
         if(!app->mouse_captured)
         {
@@ -2178,11 +2326,17 @@ static void handle_event(struct App* app, const SDL_Event* e)
         else if(e->button.button == SDL_BUTTON_MIDDLE) app->mouse_buttons |= 4;
         return;
     }
-    if(!app->menu_visible && app->controller_type == 1 && e->type == SDL_EVENT_MOUSE_BUTTON_UP)
+    if(!app->menu_visible && any_mouse_controller(app) && e->type == SDL_EVENT_MOUSE_BUTTON_UP)
     {
         if(e->button.button == SDL_BUTTON_LEFT) app->mouse_buttons &= (uint16_t)~1u;
         else if(e->button.button == SDL_BUTTON_RIGHT) app->mouse_buttons &= (uint16_t)~2u;
         else if(e->button.button == SDL_BUTTON_MIDDLE) app->mouse_buttons &= (uint16_t)~4u;
+        return;
+    }
+    if(app->menu_visible && e->type == SDL_EVENT_MOUSE_WHEEL)
+    {
+        /* Wheel up scrolls the content list up. */
+        menu_scroll_by(app, e->wheel.y > 0 ? -1 : (e->wheel.y < 0 ? 1 : 0));
         return;
     }
     if(app->menu_visible && e->type == SDL_EVENT_MOUSE_MOTION)
@@ -2236,7 +2390,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2323,9 +2477,13 @@ int main(int argc, char** argv)
         else if(!strcmp(argv[i], "--no-scanlines"))
             app.scanlines = false;
         else if(!strcmp(argv[i], "--mouse"))
-            app.controller_type = 1;
+            app.controller_type[0] = 1;
         else if(!strcmp(argv[i], "--gamepad"))
-            app.controller_type = 0;
+            app.controller_type[0] = 0;
+        else if(!strcmp(argv[i], "--mouse-p2"))
+            app.controller_type[1] = 1;
+        else if(!strcmp(argv[i], "--gamepad-p2"))
+            app.controller_type[1] = 0;
         else if(!strcmp(argv[i], "--cd-speed") && i + 1 < argc)
             app.cd_speed = normalize_cd_speed(atoi(argv[++i]));
         else if(!strncmp(argv[i], "--cd-speed=", 11))
@@ -2490,7 +2648,7 @@ int main(int argc, char** argv)
         return 1;
     }
     pcfx_headless_set_audio_callback(app.emu, audio_cb, app.audio_stream);
-    pcfx_headless_set_controller_type(app.emu, (uint8_t)app.controller_type);
+    apply_all_controller_types(&app);
     if(app.game_path[0])
     {
         char initial_media_path[PATH_MAX];
@@ -2527,8 +2685,11 @@ int main(int argc, char** argv)
     {
         int gamepad_count = 0;
         SDL_JoystickID* ids = SDL_GetGamepads(&gamepad_count);
-        if(ids && gamepad_count > 0)
-            app.gamepad = SDL_OpenGamepad(ids[0]);
+        if(ids)
+        {
+            for(int gi = 0; gi < gamepad_count && gi < 2; gi++)
+                app.gamepad[gi] = SDL_OpenGamepad(ids[gi]);
+        }
         SDL_free(ids);
     }
 
@@ -2548,27 +2709,34 @@ int main(int argc, char** argv)
         perform_pending_swap_disc(&app);
 
         keys = SDL_GetKeyboardState(NULL);
+        /* Controller types are pushed to the core when they change (init,
+           media reload, menu toggle), not every frame. Here we only feed the
+           live pad/mouse samples for each port's selected type. */
         if(app.paused || app.menu_visible)
         {
             pcfx_headless_set_pad(app.emu, 0, 0);
             pcfx_headless_set_pad(app.emu, 1, 0);
             pcfx_headless_set_mouse(app.emu, 0, 0, 0);
         }
-        else if(app.controller_type == 1)
-        {
-            pcfx_headless_set_controller_type(app.emu, 1);
-            pcfx_headless_set_mouse(app.emu, app.mouse_dx, app.mouse_dy, app.mouse_buttons);
-            pcfx_headless_set_pad(app.emu, 0, 0);
-            pcfx_headless_set_pad(app.emu, 1, collect_pad_state(&app, keys, 1));
-            app.mouse_dx = 0;
-            app.mouse_dy = 0;
-        }
         else
         {
-            pcfx_headless_set_controller_type(app.emu, 0);
-            pcfx_headless_set_pad(app.emu, 0, collect_pad_state(&app, keys, 0));
-            pcfx_headless_set_pad(app.emu, 1, collect_pad_state(&app, keys, 1));
-            pcfx_headless_set_mouse(app.emu, 0, 0, 0);
+            for(int p = 0; p < 2; p++)
+            {
+                if(app.controller_type[p] == 1)
+                    pcfx_headless_set_pad(app.emu, (unsigned)p, 0);
+                else
+                    pcfx_headless_set_pad(app.emu, (unsigned)p, collect_pad_state(&app, keys, p));
+            }
+            if(any_mouse_controller(&app))
+            {
+                pcfx_headless_set_mouse(app.emu, app.mouse_dx, app.mouse_dy, app.mouse_buttons);
+                app.mouse_dx = 0;
+                app.mouse_dy = 0;
+            }
+            else
+            {
+                pcfx_headless_set_mouse(app.emu, 0, 0, 0);
+            }
         }
 
         t = (double)now_ms();
@@ -2599,8 +2767,9 @@ int main(int argc, char** argv)
     save_sdl3_config(&app, home_dir);
 
     release_mouse_capture(&app);
-    if(app.gamepad)
-        SDL_CloseGamepad(app.gamepad);
+    for(int gi = 0; gi < 2; gi++)
+        if(app.gamepad[gi])
+            SDL_CloseGamepad(app.gamepad[gi]);
     if(app.audio_stream)
         SDL_DestroyAudioStream(app.audio_stream);
     if(app.game_tex)
