@@ -30,6 +30,13 @@ endif
 ifeq ($(PROFILE),1)
 DEFINES += -DV810_PROFILE
 endif
+
+# CD_XFER_DEBUG=1 enables the CD/KING transfer profiler (mednafen/pcfx/cd_xfer_debug.h):
+# one stderr line per SCSI READ command dispatch and per KING DMA arm/CPU-PIO
+# data-register touch. Off by default (zero overhead). See that header for details.
+ifeq ($(CD_XFER_DEBUG),1)
+DEFINES += -DPCFX_CD_XFER_DEBUG=1
+endif
 CFLAGS ?= -O2 -g3 -fno-common -Wall -Wextra -Wunused-value
 CSTD ?= -std=gnu11
 CFLAGS += $(INCLUDES) $(DEFINES)

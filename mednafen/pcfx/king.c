@@ -43,6 +43,7 @@
 #include <stdio.h>
 
 #include "video_blit.h"
+#include "cd_xfer_debug.h"
 #include "pcfx.h"
 #include "king.h"
 #include "interrupt.h"
@@ -1473,7 +1474,12 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 			 * and docs/king-pio-read-erratum.md. */
 			if(!king->dma_receive_active &&
 			   SCSICD_GetIO() && !SCSICD_GetCD() && !SCSICD_GetMSG())
+			{
+				if(!king->PIOReadSeen)
+					CDXFERDBG("CPU-PIO data read detected (transfer method latched) timer_hot=%d\n",
+					          (int)king_pio_timer_irq_hot());
 				king->PIOReadSeen = TRUE;
+			}
 			break;
 
 		case 0x01:
@@ -1986,6 +1992,13 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			    king->dma_send_active = FALSE;
 			    //StartKingMagic();
 			    king->dma_cycle_counter = KING_MAGIC_INTERVAL;
+
+			    CDXFERDBG("t=%u DMA arm: dest=%05x page=%d size=%u words (%s) timer_hot=%d\n",
+			              (unsigned)timestamp,
+			              king->DMATransferAddr, king->PageSetting & 1,
+			              king->DMATransferSize >> 1,
+			              king->DMACountBounded ? "count-bounded" : "phase-driven/count-0",
+			              (int)king_pio_timer_irq_hot());
 			   }
 			   break;
 

@@ -22,6 +22,7 @@
 #include "scsicd.h"
 #include "cdromif.h"
 #include "seektime_pcfx.h"
+#include "../pcfx/cd_xfer_debug.h"
 
 #if defined(__SSE2__)
 #include <xmmintrin.h>
@@ -2058,6 +2059,7 @@ static void DoREAD6(const uint8 *cdb)
 	// TODO: confirm real PCE does this(PC-FX does at least).
 	if(!sc) sc = 256;
 
+	CDXFERDBG("READ(6)  lba=%u sectors=%u\n", sa, sc);
 	DoREADBase(sa, sc);
 }
 
@@ -2073,6 +2075,7 @@ static void DoREAD10(const uint8 *cdb)
  uint32 sa = MDFN_de32msb(cdb + 0x2);
  uint32 sc = MDFN_de16msb(cdb + 0x7);
 
+ CDXFERDBG("READ(10) lba=%u sectors=%u\n", sa, sc);
  DoREADBase(sa, sc);
 }
 
@@ -2088,6 +2091,7 @@ static void DoREAD12(const uint8 *cdb)
  uint32 sa = MDFN_de32msb(cdb + 0x2);
  uint32 sc = MDFN_de32msb(cdb + 0x6);
 
+ CDXFERDBG("READ(12) lba=%u sectors=%u\n", sa, sc);
  DoREADBase(sa, sc);
 }
 
@@ -2708,6 +2712,7 @@ static inline void RunCDRead(int32 run_time)
 				 * KING_PIOWedgeBus() in king.c. */
 				if(CurrentPhase == PHASE_DATA_IN && KING_PIOTransferShouldFail())
 				{
+					CDXFERDBG("PIO-erratum wedge: lba=%u (mid-transfer, hot timer)\n", read_sec);
 					KING_PIOWedgeBus();
 					PIOWedgeDropToBusFree();
 				}
