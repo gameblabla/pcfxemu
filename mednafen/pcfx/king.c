@@ -1036,6 +1036,7 @@ static void DoRealDMA(uint8 db)
    }
 
    KINGDBG("DMA Done\n");
+   CDXFERDBG("DMA retire (count reached 0)\n");
    king->DMAInterrupt = TRUE;
    RedoKINGIRQCheck();
    king->DMAStatus &= ~1;
@@ -1362,6 +1363,18 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
         SCSICD_SetACK(TRUE);
         scsicd_ne = SCSICD_Run(running_timestamp);
        }
+       else
+       {
+        CDXFERDBG("t=%u pump: DRQ gap-latch (DMAStatus clear, byte held)\n",
+                  (unsigned)running_timestamp);
+       }
+      }
+      else if(!(king->DMAStatus & 0x1))
+      {
+       /* one-shot would be ideal; rate isn't a problem in practice since
+        * REQ only re-fires per byte */
+       CDXFERDBG("t=%u pump: REQ up but DRQ already latched, DMAStatus clear -- stalled\n",
+                 (unsigned)running_timestamp);
       }
      }
      else if(SCSICD_GetACK() && !SCSICD_GetREQ())
@@ -1696,6 +1709,8 @@ static inline void SCSI_Reg2_Write(uint8 V, bool delay_run)
   king->dma_receive_active = FALSE;
   king->dma_send_active = FALSE;
   king->dma_cycle_counter = 0x7FFFFFFF;
+
+  CDXFERDBG("reg2 DMA-mode 1->0: pump disarmed, DRQ cleared\n");
  }
 
  king->Reg02 = V;

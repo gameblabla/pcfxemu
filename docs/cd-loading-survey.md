@@ -100,15 +100,16 @@ is correct.
   continuously-re-armed pattern for CD→RAM (there is no DMA engine straight to
   system RAM, so it bounces through a small caller-supplied KRAM scratch window):
   full scratch-sized chunks are count-bounded, the final chunk is count-0. It
-  completes correctly against `pcfx-headless` (verified: no wedges, no failed
-  reads, matches the retail chunking shape) but is measurably slower per read
-  than expected against small, scattered reads (the shape `doom-pcfx`'s WAD/map-
-  pack loader needs) for a reason not yet root-caused this session — plausibly
-  something about the per-chunk KRAM copy-out loop or the chunk-boundary
-  DMA-state handling costing far more emulated V810 time than the equivalent CPU-
-  PIO path for many-small-reads workloads, even though large single-chunk reads
-  (matching `eris_cd_read_kram`'s shape) are fine. **Not yet wired into
-  doom-pcfx's WAD/map-pack readers** (`platform/pcfx_wad.c`, `pcfx_mappack.c`) —
-  they remain on the previously-shipped, verified-correct, timer-guarded
-  `eris_cd_read()` CPU-PIO path pending that investigation. Left in libpcfx,
-  documented, for whoever picks this up next.
+  ~~measurably slower per read than expected against small, scattered reads for
+  a reason not yet root-caused~~ **RESOLVED — see
+  `docs/cd-ram-dma-bounce-investigation.md`**: the slowness was two
+  per-chunk-boundary race conditions (a DRQ-latch wedge cured by the
+  retail-style reg-2 DMA-mode toggle between re-arms, `eris_scsi_pause_dma`;
+  and a completion-IRQ-acknowledge consumed by a redundant
+  `eris_scsi_check_dma()` re-check), not a throughput property of the bounce
+  design. Fixed, the path now beats `eris_cd_read()` CPU-PIO on every measured
+  shape (controlled A/B bench: `libpcfx/examples/031_cd_ram_read_bench`).
+  **Not yet wired into doom-pcfx's WAD/map-pack readers**
+  (`platform/pcfx_wad.c`, `pcfx_mappack.c`) — real-hardware validation of the
+  fixed chunked path (the bench ROM doubles as the hardware probe) should come
+  first.

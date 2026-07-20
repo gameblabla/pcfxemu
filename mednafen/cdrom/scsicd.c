@@ -2681,6 +2681,8 @@ static inline void RunCDRead(int32 run_time)
 		{
 			if(SCSI_FIFO_CanWrite(din) < 2352)	// +96 if we find out the PC-FX can read subchannel data along with raw data too. ;)
 			{
+				CDXFERDBG("FIFO full (in_count=%u): sector delivery delayed a full sector period\n",
+				          (unsigned)din->in_count);
 				CDReadTimer += (uint64) 1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE;
 				//CDReadTimer += (uint64) 1 * 128 * System_Clock / CD_DATA_TRANSFER_RATE;
 			}
