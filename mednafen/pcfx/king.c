@@ -503,6 +503,22 @@ typedef struct
 	 * Captured at DMA start (reg 0x07) from the then-current count. */
 	bool DMACountBounded;
 
+	/* --- CPU-PIO SCSI read failure model (king_pio_erratum_enabled) ---------
+	 * Separate from the real-DMA erratum above.  doom-pcfx now loads its ADPCM
+	 * SFX bank with a CPU-driven PIO read (libpcfx eris_cd_read_kram_pio: the
+	 * CPU manually reads the SCSI data register and toggles ACK, NOT the KING
+	 * real-DMA engine), and on real hardware that read FAILS -- doom's first CD
+	 * read returns 0, I_Error fires, and the boot bar oscillates forever
+	 * (pcfx_fatal_blink).  Measured on hardware (probe 027): CPU-PIO reads
+	 * succeed only intermittently and the driver's retry does not recover.  The
+	 * exact SCSI-level mechanism was never captured, so this models the OBSERVED
+	 * result: a CPU-PIO DATA-IN transfer completes but its STATUS byte reads
+	 * non-GOOD, so the driver's read fails.  Set TRUE when the CPU manually ACKs
+	 * a byte in DATA IN (which the BIOS's real-DMA boot loader never does, so the
+	 * BIOS boot is unaffected); consumed when the corrupted STATUS byte is read.
+	 * See docs/king-pio-read-erratum.md. */
+	bool PIODataInSeen;
+
 
 	uint16 MPROGControl;    // register 0x15
 	uint16 MPROGControlCache;
@@ -797,6 +813,24 @@ static bool king_dma_erratum_enabled(void)
  if(cached < 0)
  {
   const char *e = getenv("PCFX_KING_DMA_ERRATUM");
+  cached = (e && *e && *e == '0') ? 0 : 1;
+ }
+ return cached ? TRUE : FALSE;
+}
+
+/* CPU-PIO SCSI read failure (see the PIODataInSeen field comment and
+ * docs/king-pio-read-erratum.md).  Default ON (reproduces doom-pcfx's real-
+ * hardware boot hang: its first CD read -- a CPU-PIO ADPCM-bank load -- fails,
+ * so pcfx_fatal_blink loops forever).  PCFX_KING_PIO_ERRATUM=0 disables it (the
+ * PIO read succeeds, so doom boots to the title -- the pre-accuracy behaviour,
+ * and the mode to use once a doom/libpcfx workaround exists). */
+static bool king_pio_erratum_enabled(void)
+{
+ static int cached = -1;
+
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFX_KING_PIO_ERRATUM");
   cached = (e && *e && *e == '0') ? 0 : 1;
  }
  return cached ? TRUE : FALSE;
@@ -1300,6 +1334,18 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 
 		case 0x00:
 			ret = SCSICD_GetDB();
+			/* PIO-read failure model: after a CPU-PIO DATA-IN
+			 * transfer, force the STATUS byte non-GOOD so the
+			 * driver's read fails (doom -> I_Error -> fatal_blink).
+			 * Only in STATUS phase (IO=CD=1, MSG=0), so DATA-IN
+			 * bytes read through this same register are untouched.
+			 * One-shot per transfer. See king_pio_erratum_enabled(). */
+			if(king->PIODataInSeen && king_pio_erratum_enabled() &&
+			   SCSICD_GetIO() && SCSICD_GetCD() && !SCSICD_GetMSG())
+			{
+			 ret |= 0x0004;   /* non-zero, non-GOOD, not CHECK_CONDITION */
+			 king->PIODataInSeen = FALSE;
+			}
 			break;
 
 		case 0x01:
@@ -1733,6 +1779,7 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			      SCSI_Reg2_Write(0, TRUE);
 			      SCSI_Reg3_Write(0, TRUE);
 			      king->data_cache = 0x00;
+			      king->PIODataInSeen = FALSE;   /* a full bus reset clears the PIO-fail latch */
 
 			      //king->CDInterrupt = true;
 			      //RedoKINGIRQCheck();
@@ -1748,6 +1795,15 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			     SCSICD_SetATN(V & 2);
 			     SCSICD_SetSEL(V & 4);
 			     SCSICD_SetACK(V & 0x10);
+
+			     /* CPU manually ACKing a byte while in DATA IN = a
+			      * CPU-PIO read (the real-DMA boot loader auto-ACKs
+			      * in the pump instead).  Mark it so the STATUS byte
+			      * of this transfer reads back non-GOOD -- see
+			      * king_pio_erratum_enabled(). */
+			     if(king_pio_erratum_enabled() && (V & 0x10) &&
+			        SCSICD_GetIO() && !SCSICD_GetCD())
+			      king->PIODataInSeen = TRUE;
 			    }
                             SCSICD_SetRST(V & 0x80);
 			    scsicd_ne = 1;
@@ -2178,6 +2234,7 @@ void KING_Reset(const v810_timestamp_t timestamp)
  king->dma_send_active = FALSE;
  king->dma_cycle_counter = 0x7FFFFFFF;
  king->DMARetirePending = FALSE;
+ king->PIODataInSeen = FALSE;
  king->BG0FetchRehomed = TRUE;
 
 
@@ -3711,6 +3768,7 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->DMAInterrupt, "DMAInterrupt"),
   SFVARN(king->DMALatch, "DMALatch"),
   SFVARN(king->DMARetirePending, "DMARetirePending"),
+  SFVARN(king->PIODataInSeen, "PIODataInSeen"),
   SFVARN(king->MPROGControl, "MPROGControl"),
   SFVARN(king->MPROGAddress, "MPROGAddress"),
   SFARRAY16N(king->MPROGData, 16, "MPROGData"),
