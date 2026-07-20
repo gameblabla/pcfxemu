@@ -837,6 +837,10 @@ static bool king_pio_erratum_enabled(void)
  {
   const char *e = getenv("PCFX_KING_PIO_ERRATUM");
   cached = (e && *e && *e == '0') ? 0 : 1;
+  /* One-time notice so it's obvious which build/mode is running. */
+  fprintf(stderr, "[KING] PIO-read erratum %s (doom-pcfx boot-hang model; "
+                  "PCFX_KING_PIO_ERRATUM=0 to disable)\n",
+          cached ? "ENABLED" : "disabled");
  }
  return cached ? TRUE : FALSE;
 }
