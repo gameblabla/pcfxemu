@@ -14,6 +14,7 @@ void FXTIMER_ResetTS(int32 ts_base);
 void FXTIMER_Reset(void);
 
 void FXTIMER_Init(void);
+void PCFXTIMER_GetControlPeriod(unsigned *ctrl, unsigned *per);
 
 int FXTIMER_StateAction(StateMem *sm, int load, int data_only);
 

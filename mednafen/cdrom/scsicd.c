@@ -664,6 +664,43 @@ static void CommandCCError_Impl(int key, int asc, int ascq)
 	SendStatusAndMessage(STATUS_CHECK_CONDITION, 0x00);
 }
 
+/* KING CPU-PIO read-failure model hooks (king.c).  KING_PIOTransferShouldFail()
+ * is true when the sector about to be queued next in an already-under-way
+ * DATA_IN read is part of a CPU-PIO transfer (per the CPU having read the SCSI
+ * data register itself -- see king.c's KING_Read16 case 0x00) under a hot timer
+ * IRQ.  Checked at a SECTOR BOUNDARY (FIFO drained, REQ deasserted, driver
+ * between sectors) -- never for a command's first sector, which always
+ * delivers so the transfer method can be observed. KING_PIOReadResetLatch()
+ * clears the per-attempt latch when a new READ command is programmed, so a
+ * retry is judged on its own transfer method, not the previous attempt's.
+ *
+ * The failure itself is a BUS POISONING, not an error status (measured:
+ * probe 027 + the DoomPCFX_VID_20260719 frame timeline -- failed reads die
+ * in milliseconds and retries/REQUEST SENSE/SEEK never recover, only a full
+ * SCSI bus reset does).  At the boundary we call KING_PIOWedgeBus() and
+ * silently DISCONNECT (BUS FREE); while KING_PIOBusWedgedNow(), the command
+ * dispatch below accepts each new CDB and then drops it the same way.  RST
+ * clears the wedge (king.c).  See docs/king-pio-read-erratum.md. */
+extern bool KING_PIOTransferShouldFail(void);
+extern bool KING_PIOBusWedgedNow(void);
+extern void KING_PIOWedgeBus(void);
+extern void KING_PIOReadResetLatch(void);
+
+/* Silent disconnect: drop an in-progress or just-received command on the
+ * floor and return the bus to BUS FREE, the way the poisoned bus does on
+ * real hardware.  Same cleanup as the MESSAGE OUT/ABORT path below -- the
+ * one other place this emulator already drops a command mid-flight. */
+static void PIOWedgeDropToBusFree(void)
+{
+	SCSI_FIFO_Flush(din);
+	cd.data_transfer_done = false;
+	cd.data_out_pos = cd.data_out_size = 0;
+	SectorCount = 0;
+	CDReadTimer = 0;
+	PCFX_ClearSeekDelay();
+	ChangePhase(PHASE_BUS_FREE);
+}
+
 static bool ValidateRawDataSector(uint8 *data)
 {
 	if(!CDIF_ValidateRawSector_C(Cur_CDIF, data))
@@ -1988,6 +2025,11 @@ static void DoREADBase(uint32 sa, uint32 sc)
 	SectorCount = sc;
 	if(SectorCount)
 	{
+		/* KING CPU-PIO read-failure model: a new command is a fresh attempt --
+		 * its transfer method (PIO vs DMA) hasn't been observed yet, so don't
+		 * carry over whether the previous attempt was seen as CPU-PIO. See
+		 * KING_PIOReadResetLatch() in king.c. */
+		KING_PIOReadResetLatch();
 		CDIF_HintReadSector_C(Cur_CDIF, sa);	//, sa + sc);
 		CDReadTimer = PCFX_SectorClocks();
 		if(PCFX_ShouldEmulateSeek())
@@ -2642,7 +2684,34 @@ static inline void RunCDRead(int32 run_time)
 			{
 				uint8 tmp_read_buf[2352 + 96];
 
-				if(TrayOpen)
+				/* KING CPU-PIO read-failure model: the FIRST sector of a
+				 * command always delivers normally (below) -- that's what lets
+				 * the CPU reveal the transfer method by reading the SCSI data
+				 * register itself (king.c's KING_Read16 case 0x00), which a
+				 * KING real-DMA pump never does. Only once a transfer is
+				 * already under way (CurrentPhase == PHASE_DATA_IN) do we ask
+				 * whether to fail the *next* sector -- at this exact point the
+				 * FIFO is drained and REQ is deasserted, so the driver is
+				 * between sectors in its wait-for-REQ/phase-poll loop, not
+				 * mid-byte-handshake (failing there would desync its ACK
+				 * bookkeeping).
+				 *
+				 * The failure is a silent DISCONNECT that poisons the bus,
+				 * not CHECK CONDITION: hardware's failed reads die in
+				 * milliseconds with retries/sense/seek all equally dead
+				 * until a full SCSI reset (probe 027 fld=0 / rty=fails*7;
+				 * the real-hw video's bar ticks ~30 ms apart then blinks).
+				 * A CHECK CONDITION here instead sends libpcfx into its
+				 * REQUEST-SENSE + SEEK-reposition retry mill -- ~seconds of
+				 * emulated seek time per failed read, nothing like the
+				 * measured timeline.  See KING_PIOTransferShouldFail() /
+				 * KING_PIOWedgeBus() in king.c. */
+				if(CurrentPhase == PHASE_DATA_IN && KING_PIOTransferShouldFail())
+				{
+					KING_PIOWedgeBus();
+					PIOWedgeDropToBusFree();
+				}
+				else if(TrayOpen)
 				{
 					SCSI_FIFO_Flush(din);
 					cd.data_transfer_done = false;
@@ -2753,6 +2822,18 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 			  if(cmd_info_ptr->pretty_name == NULL)	// Command not found!
 			  {
 			   CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_COMMAND);
+			   cd.command_buffer_pos = 0;
+			  }
+			  else if(KING_PIOBusWedgedNow())
+			  {
+			   /* KING CPU-PIO read-failure model: the bus is poisoned (a
+			    * CPU-PIO read under a hot timer IRQ failed earlier -- see
+			    * king.c).  Selection and the CDB handshake still work, but
+			    * the command then dies with a silent disconnect, so the
+			    * driver's whole recovery arsenal (retry READs, REQUEST
+			    * SENSE, SEEK repositioning) fails as instantly as probe 027
+			    * measured on hardware.  Only RST clears this. */
+			   PIOWedgeDropToBusFree();
 			   cd.command_buffer_pos = 0;
 			  }
 			  else

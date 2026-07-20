@@ -147,3 +147,12 @@ void FXTIMER_Init(void)
    lastts = 0;
    FXTIMER_Reset();
 }
+
+/* Expose timer control/period so the KING CPU-PIO read-failure model can tell
+ * whether a fast periodic timer IRQ is live during a read (see king.c
+ * king_pio_timer_irq_hot()). */
+void PCFXTIMER_GetControlPeriod(unsigned *ctrl, unsigned *per)
+{
+   if(ctrl) *ctrl = control;
+   if(per)  *per  = period;
+}

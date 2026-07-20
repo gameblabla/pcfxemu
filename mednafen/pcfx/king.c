@@ -504,20 +504,56 @@ typedef struct
 	bool DMACountBounded;
 
 	/* --- CPU-PIO SCSI read failure model (king_pio_erratum_enabled) ---------
-	 * Separate from the real-DMA erratum above.  doom-pcfx now loads its ADPCM
-	 * SFX bank with a CPU-driven PIO read (libpcfx eris_cd_read_kram_pio: the
-	 * CPU manually reads the SCSI data register and toggles ACK, NOT the KING
-	 * real-DMA engine), and on real hardware that read FAILS -- doom's first CD
-	 * read returns 0, I_Error fires, and the boot bar oscillates forever
-	 * (pcfx_fatal_blink).  Measured on hardware (probe 027): CPU-PIO reads
-	 * succeed only intermittently and the driver's retry does not recover.  The
-	 * exact SCSI-level mechanism was never captured, so this models the OBSERVED
-	 * result: a CPU-PIO DATA-IN transfer completes but its STATUS byte reads
-	 * non-GOOD, so the driver's read fails.  Set TRUE when the CPU manually ACKs
-	 * a byte in DATA IN (which the BIOS's real-DMA boot loader never does, so the
-	 * BIOS boot is unaffected); consumed when the corrupted STATUS byte is read.
-	 * See docs/king-pio-read-erratum.md. */
-	bool PIODataInSeen;
+	 * doom-pcfx loads its ADPCM SFX bank with a CPU-driven PIO read (libpcfx
+	 * eris_cd_read_kram_pio: the CPU manually reads the SCSI data register and
+	 * toggles ACK, NOT the KING real-DMA engine), and on real hardware that
+	 * read FAILS -- doom's first CD read returns 0, I_Error fires, and the
+	 * boot bar oscillates forever (pcfx_fatal_blink).  Measured on hardware
+	 * (probe 027): CPU-PIO reads succeed only intermittently and the driver's
+	 * retry does not recover.
+	 *
+	 * The discriminator has to be the TRANSFER METHOD (CPU-PIO vs KING real-
+	 * DMA), not "any CD-data read issued while a fast timer IRQ is hot" --
+	 * DMA is hardware-paced and immune on real silicon (retail titles do DMA
+	 * reads under hot timers and work fine).  So this can't be decided before
+	 * the first sector ever reaches DATA_IN -- at that point the transfer
+	 * method isn't known yet, dma_receive_active is FALSE for every read
+	 * (PIO or DMA) because DMA only arms itself from the driver's phase
+	 * observation callback, which fires *after* DATA_IN begins.  Deciding
+	 * up front makes the check vacuous: it can never exclude a DMA read.
+	 *
+	 * Instead: let DATA_IN begin normally for every read, and latch PIOReadSeen
+	 * when the CPU itself reads the SCSI data register (KING_Read16 case 0x00)
+	 * while dma_receive_active is FALSE -- the same structural signal a real
+	 * KING real-DMA pump never produces (it drains the FIFO with its own
+	 * hardware handshake, never through the CPU's I/O-mapped register read). */
+	bool PIOReadSeen;
+
+	/* What the failure IS, per the real-hardware evidence (probe 027 + the
+	 * DoomPCFX_VID_20260719 frame timeline): the first CPU-PIO transfer under
+	 * a hot timer POISONS THE BUS.  The failing read dies essentially
+	 * instantly (probe 027: a whole failed 8-attempt driver retry loop fits
+	 * inside one vblank field, fld=0), every subsequent command -- READ,
+	 * SEEK, even REQUEST SENSE -- also fails instantly (rty == fails*7:
+	 * once one attempt fails, all remaining attempts fail; per-attempt
+	 * recovery never helps), and only a FULL SCSI bus reset restores the
+	 * bus (027's one recovery finding, and what libpcfx's fixed retry loop
+	 * now does between attempts).
+	 *
+	 * So the model is a persistent wedge, not a per-command error status:
+	 * when a sector boundary is reached with PIOReadSeen + hot timer
+	 * (KING_PIOTransferShouldFail()), scsicd.c sets this flag and silently
+	 * drops the bus to BUS FREE (a disconnect -- NOT CHECK CONDITION, which
+	 * would send the driver into its REQUEST SENSE + SEEK-reposition retry
+	 * mill at ~seconds per failed read; the hardware timeline shows
+	 * milliseconds).  While set, scsicd.c's command dispatch accepts each
+	 * new CDB and then drops it the same way, so retries fail as fast as
+	 * the hardware's do (the driver's handshake waits all bail immediately
+	 * on BSY-drop/BUS FREE).  Cleared ONLY by a SCSI bus reset (RST) --
+	 * matching 027 -- and by power-on/KING reset.  See
+	 * KING_PIOBusWedgedNow()/KING_PIOWedgeBus() and
+	 * docs/king-pio-read-erratum.md. */
+	bool PIOBusWedged;
 
 
 	uint16 MPROGControl;    // register 0x15
@@ -823,7 +859,7 @@ static bool king_dma_erratum_enabled(void)
  return cached ? TRUE : FALSE;
 }
 
-/* CPU-PIO SCSI read failure (see the PIODataInSeen field comment and
+/* CPU-PIO SCSI read failure (see the case-0x00 data-register comment and
  * docs/king-pio-read-erratum.md).  Default ON (reproduces doom-pcfx's real-
  * hardware boot hang: its first CD read -- a CPU-PIO ADPCM-bank load -- fails,
  * so pcfx_fatal_blink loops forever).  PCFX_KING_PIO_ERRATUM=0 disables it (the
@@ -843,6 +879,89 @@ static bool king_pio_erratum_enabled(void)
           cached ? "ENABLED" : "disabled");
  }
  return cached ? TRUE : FALSE;
+}
+
+/* The measured real-hardware CPU-PIO CD-read failure is NOT intrinsic to PIO: a
+ * homebrew that reads via CPU-PIO with the interval timer OFF (waifu / Shattered
+ * Decks -- small metadata PIO reads, bulk via count-0 phase-driven KING DMA)
+ * loads fine, while doom-pcfx -- which starts a ~1 ms level-9 interval-timer IRQ
+ * (pcfx_time_init, period 1432) BEFORE its first CD read -- fails.  The IRQ fires
+ * ~1000x/s inside the tight CPU PIO DATA-IN loop and corrupts the SCSI REQ/ACK
+ * handshake, short-cutting the read (probes 027/028/029; the emulator otherwise
+ * delivers whole sectors atomically and never sees it).  So a CPU-PIO read fails
+ * only when a *fast* periodic timer IRQ is live during it.  Timer control bit0x2
+ * = timer enable, bit0x1 = its IRQ enable; EFF_PERIOD = (period?:0x10000)*15 in
+ * ~21.48 MHz V810 master cycles.  Ceiling ~4 ms (doom is ~1 ms) so a slow
+ * housekeeping timer does not spuriously fail reads. */
+static bool king_pio_timer_irq_hot(void)
+{
+ extern void PCFXTIMER_GetControlPeriod(unsigned *ctrl, unsigned *per);
+ unsigned tc = 0, tp = 0;
+ unsigned eff_cycles;
+
+ PCFXTIMER_GetControlPeriod(&tc, &tp);
+ if((tc & 0x3) != 0x3)          /* timer AND its interrupt must both be enabled */
+  return FALSE;
+ eff_cycles = (tp ? tp : 0x10000) * 15;
+ return (eff_cycles < 86000) ? TRUE : FALSE;   /* < ~4 ms period => fires during the read */
+}
+
+/* Called by scsicd.c's RunCDRead() at a SECTOR BOUNDARY -- just before it
+ * would queue the next sector of an in-progress DATA_IN read, with the FIFO
+ * already drained and REQ deasserted (the driver is between sectors, in its
+ * wait-for-REQ/phase-poll loop, not between a data-register byte read and its
+ * ACK).  Never checked for the very first sector of a command: that sector
+ * always delivers, and it's only the CPU actually reading it (KING_Read16
+ * case 0x00, below) that latches PIOReadSeen and reveals the transfer method.
+ * A DMA transfer never sets the latch (the real-DMA pump drains the FIFO via
+ * its own hardware handshake, not through this CPU register), so DMA reads
+ * under a hot timer are correctly let through -- the fix this whole model
+ * exists to eventually validate.
+ *
+ * When TRUE, scsicd.c doesn't just fail the command -- it calls
+ * KING_PIOWedgeBus() and drops to BUS FREE: on hardware this first failure
+ * poisons the bus until a full SCSI reset (see the PIOBusWedged field
+ * comment). */
+bool KING_PIOTransferShouldFail(void)
+{
+ if(!king)
+  return FALSE;
+ return (king_pio_erratum_enabled() && king->PIOReadSeen &&
+         king_pio_timer_irq_hot()) ? TRUE : FALSE;
+}
+
+/* The persistent bus-poison latch (see the PIOBusWedged field comment).
+ * KING_PIOWedgeBus() is called by scsicd.c at the sector boundary where
+ * KING_PIOTransferShouldFail() first fires; KING_PIOBusWedgedNow() is
+ * checked by scsicd.c's command dispatch so every subsequent command --
+ * the driver's retries, its REQUEST SENSE, its SEEK repositioning -- is
+ * silently dropped to BUS FREE, failing as fast as real hardware's do
+ * (probe 027: a whole failed 8-attempt retry loop inside one vblank
+ * field).  Cleared only by SCSI RST (KING_Write16 RST handling below),
+ * KING reset, and power-on -- a full bus reset is the one recovery real
+ * hardware responds to. */
+void KING_PIOWedgeBus(void)
+{
+ if(king)
+  king->PIOBusWedged = TRUE;
+}
+
+bool KING_PIOBusWedgedNow(void)
+{
+ if(!king)
+  return FALSE;
+ return king->PIOBusWedged ? TRUE : FALSE;
+}
+
+/* Called by scsicd.c when a new READ command's sector count is programmed
+ * (DoREADBase), so each attempt's PIO-vs-DMA determination starts fresh --
+ * the driver's retry after a failed attempt must be re-observed, not judged
+ * by the previous attempt's transfer method.  (The bus wedge above is NOT
+ * reset here -- a new command doesn't unpoison the bus; only RST does.) */
+void KING_PIOReadResetLatch(void)
+{
+ if(king)
+  king->PIOReadSeen = FALSE;
 }
 
 /* While a real-DMA is wedged (it retired one item short and is waiting for a
@@ -1343,18 +1462,18 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 
 		case 0x00:
 			ret = SCSICD_GetDB();
-			/* PIO-read failure model: after a CPU-PIO DATA-IN
-			 * transfer, force the STATUS byte non-GOOD so the
-			 * driver's read fails (doom -> I_Error -> fatal_blink).
-			 * Only in STATUS phase (IO=CD=1, MSG=0), so DATA-IN
-			 * bytes read through this same register are untouched.
-			 * One-shot per transfer. See king_pio_erratum_enabled(). */
-			if(king->PIODataInSeen && king_pio_erratum_enabled() &&
-			   SCSICD_GetIO() && SCSICD_GetCD() && !SCSICD_GetMSG())
-			{
-			 ret |= 0x0004;   /* non-zero, non-GOOD, not CHECK_CONDITION */
-			 king->PIODataInSeen = FALSE;
-			}
+			/* CPU-PIO SCSI read failure model: the CPU reading the SCSI
+			 * data register directly, while in DATA_IN and no KING real-DMA
+			 * is active, IS the structural signature of a CPU-PIO transfer
+			 * (the real-DMA pump drains the FIFO through its own hardware
+			 * handshake and never touches this register).  Latch it; a
+			 * sector boundary in scsicd.c's RunCDRead() checks the latch
+			 * and a hot timer IRQ to decide whether to fail the *next*
+			 * sector of this transfer.  See KING_PIOTransferShouldFail()
+			 * and docs/king-pio-read-erratum.md. */
+			if(!king->dma_receive_active &&
+			   SCSICD_GetIO() && !SCSICD_GetCD() && !SCSICD_GetMSG())
+				king->PIOReadSeen = TRUE;
 			break;
 
 		case 0x01:
@@ -1788,7 +1907,9 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			      SCSI_Reg2_Write(0, TRUE);
 			      SCSI_Reg3_Write(0, TRUE);
 			      king->data_cache = 0x00;
-			      king->PIODataInSeen = FALSE;   /* a full bus reset clears the PIO-fail latch */
+			      king->PIOReadSeen = FALSE;   /* a full bus reset clears the PIO-fail latch */
+			      king->PIOBusWedged = FALSE;  /* ...and unpoisons the wedged bus -- the one
+			                                    * recovery probe 027 proved works on hardware */
 
 			      //king->CDInterrupt = true;
 			      //RedoKINGIRQCheck();
@@ -1804,15 +1925,6 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			     SCSICD_SetATN(V & 2);
 			     SCSICD_SetSEL(V & 4);
 			     SCSICD_SetACK(V & 0x10);
-
-			     /* CPU manually ACKing a byte while in DATA IN = a
-			      * CPU-PIO read (the real-DMA boot loader auto-ACKs
-			      * in the pump instead).  Mark it so the STATUS byte
-			      * of this transfer reads back non-GOOD -- see
-			      * king_pio_erratum_enabled(). */
-			     if(king_pio_erratum_enabled() && (V & 0x10) &&
-			        SCSICD_GetIO() && !SCSICD_GetCD())
-			      king->PIODataInSeen = TRUE;
 			    }
                             SCSICD_SetRST(V & 0x80);
 			    scsicd_ne = 1;
@@ -2243,7 +2355,8 @@ void KING_Reset(const v810_timestamp_t timestamp)
  king->dma_send_active = FALSE;
  king->dma_cycle_counter = 0x7FFFFFFF;
  king->DMARetirePending = FALSE;
- king->PIODataInSeen = FALSE;
+ king->PIOReadSeen = FALSE;
+ king->PIOBusWedged = FALSE;
  king->BG0FetchRehomed = TRUE;
 
 
@@ -3777,7 +3890,8 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->DMAInterrupt, "DMAInterrupt"),
   SFVARN(king->DMALatch, "DMALatch"),
   SFVARN(king->DMARetirePending, "DMARetirePending"),
-  SFVARN(king->PIODataInSeen, "PIODataInSeen"),
+  SFVARN(king->PIOReadSeen, "PIOReadSeen"),
+  SFVARN(king->PIOBusWedged, "PIOBusWedged"),
   SFVARN(king->MPROGControl, "MPROGControl"),
   SFVARN(king->MPROGAddress, "MPROGAddress"),
   SFARRAY16N(king->MPROGData, 16, "MPROGData"),
