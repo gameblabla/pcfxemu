@@ -813,7 +813,12 @@ static bool king_dma_erratum_enabled(void)
  if(cached < 0)
  {
   const char *e = getenv("PCFX_KING_DMA_ERRATUM");
-  cached = (e && *e && *e == '0') ? 0 : 1;
+  /* Default OFF (opt-in via PCFX_KING_DMA_ERRATUM=1).  This models the KING
+   * real-DMA-to-KRAM path, which the current doom-pcfx no longer uses -- it
+   * loads via CPU PIO now (see king_pio_erratum_enabled()), so the real-DMA
+   * erratum no longer reproduces doom's hang and defaulting it on only risks
+   * mis-wedging games that legitimately use exact-length real-DMA transfers. */
+  cached = (e && *e && *e == '1') ? 1 : 0;
  }
  return cached ? TRUE : FALSE;
 }

@@ -1,10 +1,13 @@
 # KING SCSI real-DMA "trailing item" erratum
 
-**Status: modelled by default (hardware-accuracy).** This reproduces the real
-PC-FX behaviour that hangs `doom-pcfx` at boot, so it is on by default. Set
-`PCFX_KING_DMA_ERRATUM=0` in the environment to disable it (retire on the
-programmed count -- the pre-accuracy behaviour) for debugging or for software
-written around the retired-on-count model.
+**Status: OFF by default (opt-in via `PCFX_KING_DMA_ERRATUM=1`).** This models
+the KING **real-DMA-to-KRAM** path. The *current* `doom-pcfx` no longer uses that
+path -- it loads via CPU PIO now -- so this erratum no longer reproduces doom's
+boot hang, and the CPU-PIO failure is modelled separately and on-by-default in
+`king-pio-read-erratum.md`. This real-DMA model is kept (it still reproduced the
+hang for the *old*, real-DMA doom-pcfx, and documents a real quirk) but is now
+opt-in so it can't mis-wedge games that legitimately issue exact-length real-DMA
+transfers. Set `PCFX_KING_DMA_ERRATUM=1` to enable it.
 
 Verified against the broken `doom-pcfx` (no libpcfx CD-driver workaround): with
 the model on (default) the boot progress bar freezes at its first step and never
