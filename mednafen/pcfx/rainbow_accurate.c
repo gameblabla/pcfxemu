@@ -93,6 +93,10 @@ static uint16 HScroll;
 
 static uint32 bits_buffer;
 static uint32 bits_buffered_bits;
+// GetBits keeps its historical zero-fill on underflow. Only real entropy bits
+// may complete a trailing control; a short 11111 prefix plus fake zeros must
+// not turn into the nine-bit scale-0 opcode.
+static uint32 bits_real_buffered_bits;
 static int32 bits_bytes_left;
 
 static void InitBits(int32 bcount)
@@ -100,6 +104,7 @@ static void InitBits(int32 bcount)
  bits_bytes_left = bcount;
  bits_buffer = 0;
  bits_buffered_bits = 0;
+ bits_real_buffered_bits = 0;
 }
 
 static inline uint8 FetchWidgywabbit(void)
@@ -108,12 +113,29 @@ static inline uint8 FetchWidgywabbit(void)
   return(0);
 
  uint8 ret = KING_RB_Fetch();
- if(ret == 0xFF) 
-  KING_RB_Fetch();
-
  bits_bytes_left--;
 
+ // The declared block size counts stored bytes, including FF stuffing.
+ // A terminal FF must not consume a byte outside the entropy budget.
+ if(ret == 0xFF && bits_bytes_left > 0)
+ {
+  KING_RB_Fetch();
+  bits_bytes_left--;
+ }
+
  return(ret);
+}
+
+static inline bool EnsureBitsWithinBlock(const unsigned int count)
+{
+ while(bits_buffered_bits < count && bits_bytes_left > 0)
+ {
+  bits_buffer <<= 8;
+  bits_buffer |= FetchWidgywabbit();
+  bits_buffered_bits += 8;
+  bits_real_buffered_bits += 8;
+ }
+ return bits_real_buffered_bits >= count;
 }
 
 enum
@@ -128,6 +150,8 @@ static inline uint32 GetBits(const unsigned int count, const unsigned int how)
 
  while(bits_buffered_bits < count)
  {
+  if(bits_bytes_left > 0)
+   bits_real_buffered_bits += 8;
   bits_buffer <<= 8;
   bits_buffer |= FetchWidgywabbit();
   bits_buffered_bits += 8;
@@ -136,7 +160,11 @@ static inline uint32 GetBits(const unsigned int count, const unsigned int how)
  ret = (bits_buffer >> (bits_buffered_bits - count)) & ((1 << count) - 1);
 
  if(!(how & MDFNBITS_PEEK))
+ {
   bits_buffered_bits -= count;
+  bits_real_buffered_bits = bits_real_buffered_bits > count
+                         ? bits_real_buffered_bits - count : 0;
+ }
 
  if((how & MDFNBITS_FUNNYSIGN) && count)
  {
@@ -152,8 +180,41 @@ static inline uint32 GetBits(const unsigned int count, const unsigned int how)
 static inline void SkipBits(const unsigned int count)
 {
  bits_buffered_bits -= count;
+ bits_real_buffered_bits = bits_real_buffered_bits > count
+                        ? bits_real_buffered_bits - count : 0;
 }
 
+
+// The same scale state applies within a strip and across FF F8 strips.
+static void RescaleQuantTables(uint32 scale)
+{
+ for(int i = 0; i < 64; i++)
+ {
+  uint32 y = (QuantTablesBase[0][i] * scale) >> 2;
+  uint32 uv = i ? (QuantTablesBase[1][i] * scale) >> 2
+                : QuantTablesBase[1][i] >> 2;
+
+  QuantTables[0][i] = y < 1 ? 1 : (y > 0xFE ? 0xFE : y);
+  QuantTables[1][i] = uv < 1 ? 1 : (uv > 0xFE ? 0xFE : uv);
+ }
+}
+
+static void DrainTrailingRescales(void)
+{
+ // A complete rescale can already be buffered when bits_bytes_left is zero.
+ // Do not synthesize padding or fetch the inner dummy / external guard words.
+ while(EnsureBitsWithinBlock(9))
+ {
+  uint32 rawbits = (bits_buffer >> (bits_buffered_bits - 9)) & 0x1FF;
+  uint32 code = dc_y_qlut[rawbits].val;
+
+  if(code < 0x10 || code > 0x1F)
+   break;
+
+  SkipBits(dc_y_qlut[rawbits].bitc);
+  RescaleQuantTables(code - 0x10);
+ }
+}
 
 static uint32 HappyColor; // Cached, calculated from null run yuv registers;
 static void CalcHappyColor(void)
@@ -206,33 +267,7 @@ static uint32 get_dc_coeff(const HuffmanQuickLUTPair *table, int32 *zeroes, int 
   }
   else if(code >= 0x10)
   {
-   code -= 0x10;
-
-   for(int i = 0; i < 64; i++)
-   {
-    // Y
-    uint32 coeff = (QuantTablesBase[0][i] * code) >> 2;
-
-    if(coeff < 1)
-     coeff = 1;
-    else if(coeff > 0xFE)
-     coeff = 0xFE;
-
-    QuantTables[0][i] = coeff;
-
-    // UV
-    if(i)
-     coeff = (QuantTablesBase[1][i] * code) >> 2;
-    else
-     coeff = (QuantTablesBase[1][i]) >> 2;
-
-    if(coeff < 1)
-     coeff = 1;
-    else if(coeff > 0xFE)
-     coeff = 0xFE;
-
-    QuantTables[1][i] = coeff;
-   }
+   RescaleQuantTables(code - 0x10);
 
   }
  }
@@ -475,6 +510,8 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
      block_size = (int16)tmp;
     }
 
+    // MPCONV stores a two-byte inner dummy in the declared data length.
+    // Keep it out of the entropy budget (the header itself is not counted).
     block_size -= 2;
     if(block_type == 0xFF && block_size <= 0)
      for(int i = 0; i < 128; i++,icount--) KING_RB_Fetch();
@@ -623,6 +660,9 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
       }
      }
     }
+
+    // Retail streams can set up the next strip's quantizer after column 15.
+    DrainTrailingRescales();
 
     // Do bilinear interpolation on the chroma channels:
     if(!Skip && ChromaIP)
