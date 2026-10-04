@@ -3007,10 +3007,10 @@ static void RebuildUVLUT(void)
    u = ur - 128;
    v = vr - 128;
 
-   // FIXME:  Use lrint() ?
-   r = (int)(0 - 0.000039457070707 * u + 1.139827967171717 * v);
-   g = (int)(0 - 0.394610164141414 * u - 0.580500315656566 * v);
-   b = (int)(0 + 2.031999684343434 * u - 0.000481376262626 * v);
+   /* RAINBOW carries full-range BT.601 JPEG YCbCr, not analog composite YUV. */
+   r = (int)lrint(1.402000 * v);
+   g = (int)lrint(-0.344136 * u - 0.714136 * v);
+   b = (int)lrint(1.772000 * u);
 
    UVLUT[vr + ur * 256][0] = r;
    UVLUT[vr + ur * 256][1] = g;

@@ -98,6 +98,7 @@ static uint32 bits_buffered_bits;
 // not turn into the nine-bit scale-0 opcode.
 static uint32 bits_real_buffered_bits;
 static int32 bits_bytes_left;
+static int32 rb_starve_bytes;
 
 static void InitBits(int32 bcount)
 {
@@ -105,12 +106,17 @@ static void InitBits(int32 bcount)
  bits_buffer = 0;
  bits_buffered_bits = 0;
  bits_real_buffered_bits = 0;
+ rb_starve_bytes = 0;
 }
 
 static inline uint8 FetchWidgywabbit(void)
 {
  if(bits_bytes_left <= 0)
+ {
+  if(rb_starve_bytes < 0x7FFFFFFF)
+   rb_starve_bytes++;
   return(0);
+ }
 
  uint8 ret = KING_RB_Fetch();
  bits_bytes_left--;
@@ -225,6 +231,8 @@ static void CalcHappyColor(void)
 
  HappyColor = (y_c << 16) | (u_c << 8) | (v_c << 0);
 }
+
+#include "rainbow_confetti.inc"
 
 static uint32 get_ac_coeff(const HuffmanQuickLUTPair *table, int32 *zeroes)
 {
@@ -405,6 +413,7 @@ bool RAINBOW_Accurate_Init(bool arg_ChromaIP)
  GarbageData = false;
  FirstDecode = true;
  RasterReadPos = 0;
+ RB_ConfettiReset();
 
  return true;
 }
@@ -480,6 +489,7 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
    {
     FirstDecode = true;
     GarbageData = false;
+    RB_ConfettiBeginFrame();
    }
 
    if(GarbageData)
@@ -703,6 +713,9 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
       memcpy(LastLine, linebase1, 256 * 4);
      }
     } // End chroma interpolation
+
+    if(!Skip)
+     RB_ConfettiRepair(dest_base, HappyColor, rb_starve_bytes);
    } // end jpeg-like decoding
    else 
    {
@@ -757,6 +770,7 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
    // KING_RB_Fetch();
 
   BufferNoDecode: ;
+  RB_ConfettiAdvanceRow();
 }
 
 void KING_Moo(void);
@@ -850,6 +864,7 @@ void RAINBOW_Accurate_Reset(void)
  memset(QuantTables, 0, sizeof(QuantTables));
  memset(QuantTablesBase, 0, sizeof(QuantTablesBase));
  DecodeFormat[0] = DecodeFormat[1] = -1;
+ RB_ConfettiReset();
 
  CalcHappyColor();
 }
