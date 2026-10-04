@@ -1,5 +1,42 @@
 #include "../mednafen-endian.h"
 
+// The PC-FXGA BIOS exposes a small external PIO handshake in this mirrored
+// address window.  Bully Off uses the BIOS helpers while starting up.
+static uint8 PCFXGA_PIORegs[8];
+
+static uint8 PCFXGA_PIORead8(uint32 A)
+{
+ return PCFXGA_PIORegs[A & 7];
+}
+
+static uint16 PCFXGA_PIORead16(uint32 A)
+{
+ return (uint16)(PCFXGA_PIORead8(A) | ((uint16)PCFXGA_PIORead8(A + 1) << 8));
+}
+
+static void PCFXGA_PIOWrite8(uint32 A, uint8 V)
+{
+ const uint32 o = A & 7;
+ PCFXGA_PIORegs[o] = V;
+
+ if(o == 6)
+ {
+  switch(V & 0x0F)
+  {
+   case 0x08: PCFXGA_PIORegs[4] |=  0x08; break;
+   case 0x09: PCFXGA_PIORegs[4] &= ~0x08; break;
+   case 0x0A: PCFXGA_PIORegs[4] &= ~0x04; break;
+   case 0x0B: PCFXGA_PIORegs[4] |=  0x04; break;
+  }
+ }
+}
+
+static void PCFXGA_PIOWrite16(uint32 A, uint16 V)
+{
+ PCFXGA_PIOWrite8(A, (uint8)V);
+ PCFXGA_PIOWrite8(A + 1, (uint8)(V >> 8));
+}
+
 static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t *timestamp, uint32 A)
 {
  if(A <= 0x001FFFFF)
@@ -11,6 +48,11 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t *timestamp, uint32 A)
  {
   RAMLPCHECK;
   return(0xFF);
+ }
+ else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
+ {
+  (*timestamp) += 2;
+  return(PCFXGA_PIORead8(A));
  }
  else if(A >= 0xF0000000)	// BIOS ROM mirrored throughout 0xF0000000-0xFFFFFFFF, the "official" location
 				// is at 0xFFF00000(what about on a PC-FXGA??)
@@ -53,6 +95,11 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t *timestamp, uint32 A)
  {
   RAMLPCHECK;
   return(0xFFFF);
+ }
+ else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
+ {
+  (*timestamp) += 2;
+  return(PCFXGA_PIORead16(A));
  }
  else if(A >= 0xF0000000)       // BIOS ROM mirrored throughout 0xF0000000-0xFFFFFFFF, the "official" location
                                 // is at 0xFFF00000
@@ -98,12 +145,6 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t *timestamp, uint32 A)
   }
 
   return(ExBackupRAM[(A & 0xFFFF) >> 1]);
- }
- else if(A >= 0xF8000000 && A <= 0xFFEFFFFF) // PIO
- {
-  FXDBG("PIO H Read: %08x", A);
-
-  return(0x00);
  }
  else if(A >= 0x80000000 && A <= 0x807FFFFF)
  {
@@ -160,6 +201,11 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t *timestamp, uint32 A, uint8
  {
   RAMLPCHECK;
  }
+ else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
+ {
+  (*timestamp) += 2;
+  PCFXGA_PIOWrite8(A, V);
+ }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
  {
   if(BackupControl & 0x1)
@@ -192,6 +238,11 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
  else if(A <= 0x00FFFFFF)
  {
   RAMLPCHECK;
+ }
+ else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
+ {
+  (*timestamp) += 2;
+  PCFXGA_PIOWrite16(A, V);
  }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF)
  {
