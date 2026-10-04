@@ -53,10 +53,10 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t *timestamp, uint32 A)
   return(FXTIMER_Read8(A, (*timestamp)));
  }
  #ifdef HAVE_HUC6273
- else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
+ else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x53ffff)
  {
   if(WantHuC6273)
-   return(HuC6273_Read8(A));
+   { HuC6273_SetTime(*timestamp); return(HuC6273_Read8(A)); }
  }
  #endif
  FXDBG("Unknown 8-bit port read: %08x", A);
@@ -113,10 +113,10 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t *timestamp, uint32 A)
   return(FXTIMER_Read16(A, (*timestamp)));
  }
  #ifdef HAVE_HUC6273
- else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
+ else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x53ffff)
  {
   if(WantHuC6273)
-   return(HuC6273_Read16(A));
+   { HuC6273_SetTime(*timestamp); return(HuC6273_Read16(A)); }
  }
  #endif
  FXDBG("Unknown 16-bit port read: %08x", A);
@@ -182,10 +182,10 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t *timestamp, uint32 A, uint
    PCFXIRQ_Write16(A, V);
   }
   #ifdef HAVE_HUC6273
-  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
+  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x53ffff)
   {
    if(WantHuC6273)
-    HuC6273_Write16(A, V);
+    { HuC6273_SetTime(*timestamp); HuC6273_Write16(A, V); }
   }
   #endif
 }
@@ -249,11 +249,10 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t *timestamp, uint32 A, uin
    FXTIMER_Write16(A, V, (*timestamp));
   }
   #ifdef HAVE_HUC6273
-  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x52ffff)
+  else if((A & 0x7FFFFFFF) >= 0x500000 && (A & 0x7FFFFFFF) <= 0x53ffff)
   {
    if(WantHuC6273)
-    HuC6273_Write16(A, V);
+    { HuC6273_SetTime(*timestamp); HuC6273_Write16(A, V); }
   }
   #endif
 }
-

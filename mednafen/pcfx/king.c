@@ -1312,6 +1312,10 @@ static int32 CalcNextExternalEvent(int32 next_event)
 
 static void MDFN_FASTCALL KING_RunGfx(int32 clocks);
 
+#ifdef HAVE_HUC6273
+static uint32 king_gfx_ts;
+#endif
+
 v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
 {
  int32 clocks = timestamp - king->lastts;
@@ -1321,6 +1325,9 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
 
  king->lastts = timestamp;
 
+#ifdef HAVE_HUC6273
+ king_gfx_ts = running_timestamp;
+#endif
  KING_RunGfx(clocks);
 
  while(clocks > 0)
@@ -3735,6 +3742,9 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 
   clocks -= chunk_clocks;
   HPhaseCounter -= chunk_clocks;
+#ifdef HAVE_HUC6273
+  king_gfx_ts += chunk_clocks;
+#endif
 
   if(skip)
    RunVDCs(chunk_clocks, NULL, NULL);
@@ -3786,6 +3796,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
                         if(fx_vce.raster_counter == 0)
                         {
 #ifdef HAVE_HUC6273
+                         HuC6273_SetTime(king_gfx_ts);
                          HuC6273_FrameBoundary();
 #endif
                          for(uint_fast8_t chip = 0; chip < 2; chip++)

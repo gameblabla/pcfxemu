@@ -241,11 +241,12 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
 static void MDFN_FASTCALL mem_wword(v810_timestamp_t *timestamp, uint32 A, uint32 V)
 {
 #ifdef HAVE_HUC6273
- if(A >= 0x80500000 && A <= 0x8052FFFF)
+ if(A >= 0x80500000 && A <= 0x8053FFFF)
  {
   if(WantHuC6273)
   {
    (*timestamp) += 4;
+   HuC6273_SetTime(*timestamp);
    HuC6273_Write32(A & 0x7FFFFF, V);
    return;
   }

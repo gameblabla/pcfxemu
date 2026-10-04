@@ -567,6 +567,10 @@ static void Emulate(EmulateSpecStruct *espec)
  v810_timestamp_t new_base_ts = 0;
  espec->SoundBufSize = SoundBox_Flush(v810_timestamp, espec->SoundBuf, espec->SoundBufMaxSize);
 
+#ifdef HAVE_HUC6273
+ if(WantHuC6273)
+  HuC6273_EndFrame(v810_timestamp);
+#endif
  KING_ResetTS(new_base_ts);
  FXTIMER_ResetTS(new_base_ts);
  FXINPUT_ResetTS(new_base_ts);
