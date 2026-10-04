@@ -14,9 +14,12 @@ extern const uint_fast32_t setting_nospritelimit;
 extern const uint_fast32_t setting_rainbow_chromaip;
 extern uint_fast32_t setting_cd_speed;
 extern uint_fast32_t setting_video_fast_fallback;
+extern uint_fast32_t setting_pcfx_seek_audio_delay;
 void MDFN_SetPCFXFastVideo(uint_fast32_t enabled);
 void MDFN_SetPCFXCDSpeed(uint_fast32_t speed);
 uint_fast32_t MDFN_GetPCFXCDSpeed(void);
+void MDFN_SetPCFXSeekAudioDelay(uint_fast32_t enabled);
+uint_fast32_t MDFN_GetPCFXSeekAudioDelay(void);
 
 #ifdef __cplusplus
 }

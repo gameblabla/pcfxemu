@@ -31,6 +31,7 @@
 
 #include "mednafen/sound/raw_audio.h"
 #include "../mednafen.h"
+#include "../settings.h"
 #include "../mednafen-endian.h"
 #include "../state_helpers.h"
 
@@ -522,6 +523,8 @@ static int32 PCFX_SectorClocks(void)
 	return (int32)(((uint64)2048 * System_Clock + (CD_DATA_TRANSFER_RATE / 2)) / CD_DATA_TRANSFER_RATE);
 }
 
+/* TODO : To RESEARCH — the measured READ latency is separate from these
+ * command-status and CD-DA start delays, which still need hardware validation. */
 static void PCFX_ClearSeekDelay(void)
 {
 	PCFXSeekTimer = 0;
@@ -546,9 +549,14 @@ static void PCFX_DelayStatusAndMessage(uint8 status, uint8 message, int32 delay_
 	}
 }
 
+static bool PCFX_ShouldDelayCommandSeek(void)
+{
+	return PCFX_ShouldEmulateSeek() && MDFN_GetPCFXSeekAudioDelay();
+}
+
 static void PCFX_SetAudioSeekDelay(uint32 lba, uint8 status, uint8 message)
 {
-	if(PCFX_ShouldEmulateSeek())
+	if(PCFX_ShouldDelayCommandSeek())
 	{
 		const int32 seek_clocks = PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)lba));
 		PCFXAudioDelay = PCFX_MSToClocks(120.0f);
@@ -563,6 +571,8 @@ static void PCFX_SetAudioSeekDelay(uint32 lba, uint8 status, uint8 message)
 	}
 	else
 	{
+		if(PCFX_ShouldEmulateSeek())
+			pcfx_head_pos = lba;
 		PCFX_ClearSeekDelay();
 		SendStatusAndMessage(status, message);
 	}
@@ -570,7 +580,7 @@ static void PCFX_SetAudioSeekDelay(uint32 lba, uint8 status, uint8 message)
 
 static void PCFX_SetSeekStatusDelay(uint32 lba, uint8 status, uint8 message)
 {
-	if(PCFX_ShouldEmulateSeek())
+	if(PCFX_ShouldDelayCommandSeek())
 	{
 		const int32 seek_clocks = PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)lba));
 		PCFXAudioDelay = 0;
@@ -584,6 +594,8 @@ static void PCFX_SetSeekStatusDelay(uint32 lba, uint8 status, uint8 message)
 	}
 	else
 	{
+		if(PCFX_ShouldEmulateSeek())
+			pcfx_head_pos = lba;
 		PCFX_ClearSeekDelay();
 		SendStatusAndMessage(status, message);
 	}
@@ -592,7 +604,6 @@ static void PCFX_SetSeekStatusDelay(uint32 lba, uint8 status, uint8 message)
 static void SendStatusAndMessage(uint8 status, uint8 message)
 {
 	PCFXHasDelayedStatus = false;
-
 	// This should never ever happen, but that doesn't mean it won't. ;)
 	if(din->in_count == 0)  SCSI_FIFO_Flush(din);
 
@@ -2123,7 +2134,6 @@ static void DoPREFETCH(const uint8 *cdb)
 
 
 
-// SEEK functions are mostly just stubs for now, until(if) we emulate seek delays.
 static void DoSEEKBase(uint32 lba)
 {
 	if(lba >= toc.tracks[100].lba)
@@ -2506,6 +2516,13 @@ static inline int32 scale_cdda_delta(int32 v)
 
 static inline void RunPCFXDelayedStatus(int32 run_time)
 {
+	/* Disabling the option while a command is waiting completes it immediately. */
+	if(!MDFN_GetPCFXSeekAudioDelay())
+	{
+		PCFXSeekTimer = 0;
+		PCFXAudioDelay = 0;
+	}
+
 	if(PCFXSeekTimer > 0)
 	{
 		PCFXSeekTimer -= run_time;
@@ -2593,6 +2610,8 @@ static inline void RunCDDA(uint32 system_timestamp, int32 run_time)
 				uint8 tmpbuf[2352 + 96];
 
 				CDIF_ReadRawSector_C(Cur_CDIF, tmpbuf, read_sec);	//, read_sec_end, read_sec_start);
+				if(PCFX_ShouldEmulateSeek())
+					pcfx_head_pos = read_sec;
 
 				for(int i = 0; i < 588 * 2; i++)
 					cdda.CDDASectorBuffer[i] = MDFN_de16lsb(&tmpbuf[i * 2]);
@@ -2622,8 +2641,6 @@ static inline void RunCDDA(uint32 system_timestamp, int32 run_time)
 				else
 					read_sec++;
 
-				if(PCFX_ShouldEmulateSeek())
-					pcfx_head_pos = read_sec;
 			} // End    if(CDDAReadPos == 588)
 
 			// If the last valid sub-Q data decoded indicate that the corresponding sector is a data sector, don't output the
@@ -2750,9 +2767,9 @@ static inline void RunCDRead(int32 run_time)
 
 					CDIRQCallback(SCSICD_IRQ_DATA_TRANSFER_READY);
 
-					SectorAddr++;
 					if(PCFX_ShouldEmulateSeek())
 						pcfx_head_pos = SectorAddr;
+					SectorAddr++;
 					SectorCount--;
 
 					if(CurrentPhase != PHASE_DATA_IN)

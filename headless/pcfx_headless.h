@@ -37,6 +37,7 @@ typedef struct PCFX_HeadlessConfig
     int prefer_fxga_bios; /* 0 = force PC-FX, 1 = force PC-FXGA, 2 = Auto based on media. */
     uint32_t bios_patch_flags; /* PCFX_BIOS_PATCH_* flags; applied in memory to known original console BIOS dumps. */
     int cd_speed; /* 1, 2, 4, 8, or 16. 0 = default 2x. */
+    int disable_seek_audio_delay; /* Nonzero disables TODO-marked PC-FX SEEK/audio command delays. Default is enabled. */
     int adpcm_buggy_codec_mode; /* PCFX_ADPCM_BUGGY_* when PCFX_ADPCM_COMPAT_OPTIONS is enabled. */
     int adpcm_suppress_reset_clicks; /* nonzero = suppress ADPCM channel-reset clicks. */
 } PCFX_HeadlessConfig;
@@ -96,6 +97,8 @@ void pcfx_headless_set_bios_patches(PCFX_Headless* emu, uint32_t flags);
 uint32_t pcfx_headless_get_bios_patches(PCFX_Headless* emu);
 void pcfx_headless_set_cd_speed(PCFX_Headless* emu, uint32_t speed);
 uint32_t pcfx_headless_get_cd_speed(PCFX_Headless* emu);
+void pcfx_headless_set_seek_audio_delay(PCFX_Headless* emu, int enabled);
+int pcfx_headless_get_seek_audio_delay(PCFX_Headless* emu);
 void pcfx_headless_set_adpcm_compat(PCFX_Headless* emu, int buggy_codec_mode, int suppress_reset_clicks);
 int pcfx_headless_get_adpcm_buggy_codec_mode(PCFX_Headless* emu);
 int pcfx_headless_get_adpcm_suppress_reset_clicks(PCFX_Headless* emu);

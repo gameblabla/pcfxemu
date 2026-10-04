@@ -1,11 +1,10 @@
 /*
- * PC-FX 2x CD-ROM seek-delay approximation.
+ * PC-FX CD-ROM seek delay, calibrated against retail hardware.
  *
- * This is deliberately separate from the measured PC Engine CD-ROM2 model.
- * The PC-FX drive is a 2x CD-ROM unit, so transfer cadence and rotational
- * latency differ from the 1x PC Engine CD drive; sled/servo settle behavior is
- * assumed to be much closer.  The model therefore reuses the PCE spiral/zone
- * geometry but scales only the components that should plausibly differ.
+ * The PCE spiral/zone model supplies the head-travel curve; the Queen of Queens
+ * hardware comparison calibrated its resulting latency to 0.6 for the PC-FX.
+ * Keep this PC-FX-specific calibration here rather than changing the shared PCE
+ * model used by PC Engine emulation.
  */
 #include <stdlib.h>
 #include "seektime_pcfx.h"
@@ -19,15 +18,7 @@ typedef struct
 } PCFXSectorGroup;
 
 #define PCFX_NUM_SECTOR_GROUPS 14
-#define PCFX_FRAME_MS          (1000.0f / 60.0f)
-#define PCFX_ROTATION_SCALE_2X       0.50f
-#define PCFX_SHORT_ROTATION_FRACTION  0.65f
-#define PCFX_LONG_ROTATION_FRACTION   0.40f
-#define PCFX_MID_BASE_FRAMES          18.0f
-#define PCFX_LONG_BASE_FRAMES         24.0f
-#define PCFX_LONG_SEEK_SCALE          0.55f
-#define PCFX_LONG_SOFT_LIMIT_MS       650.0f
-#define PCFX_LONG_SOFT_LIMIT_TAIL     0.25f
+#define PCFX_HARDWARE_CALIBRATION 0.60f
 
 static const PCFXSectorGroup pcfx_sector_groups[PCFX_NUM_SECTOR_GROUPS] =
 {
@@ -87,75 +78,33 @@ static float pcfx_track_delta(int start_sector, int target_sector)
     return track_difference;
 }
 
-static float pcfx_rotation_ms(int target_group, float revolution_fraction)
-{
-    return pcfx_sector_groups[target_group].rotation_ms_1x * PCFX_ROTATION_SCALE_2X * revolution_fraction;
-}
-
-static float pcfx_long_seek_soft_limit(float milliseconds)
-{
-    if(milliseconds <= PCFX_LONG_SOFT_LIMIT_MS)
-        return milliseconds;
-
-    return PCFX_LONG_SOFT_LIMIT_MS +
-           ((milliseconds - PCFX_LONG_SOFT_LIMIT_MS) * PCFX_LONG_SOFT_LIMIT_TAIL);
-}
-
 /*
- * Return synthetic PC-FX image-drive seek latency in milliseconds.
- *
- * Component policy:
- *   - the zone table and track-distance conversion are inherited from the
- *     measured PCE model because they describe CD spiral geometry;
- *   - short seeks and servo/data-stream settling are kept close to PCE;
- *   - medium/long mechanical travel is now deliberately less punitive based on
- *     early Queen of Queens hardware-footage comparison: real hardware still
- *     shows a transition delay, but the previous 0.70 long-stroke model held
- *     video changes too long;
- *   - rotational latency is halved for 2x CLV;
- *   - very large jumps use a soft limiter instead of a hard cap, preserving
- *     ordering while avoiding PCE-like full-disc stalls on a 2x image drive.
+ * Return the PCE head-travel curve scaled to the value that matched PC-FX
+ * hardware in the Queen of Queens side-by-side comparison. The read-delay
+ * plumbing applies this only to image-backed PC-FX drives.
  */
 float PCFX_CDSeekMS(int start_sector, int target_sector)
 {
     const int sector_delta = abs(target_sector - start_sector);
     const int target_group = pcfx_find_sector_group(target_sector);
     const float tracks = pcfx_track_delta(start_sector, target_sector);
-
-    /* Adjacent sequential reads are assumed to remain in the PC-FX CD buffer/head stream.
-       A one-track-or-more move still falls through to the short-seek minimum below. */
-    if(sector_delta <= 1)
-        return 0.0f;
+    const float rotation_ms = pcfx_sector_groups[target_group].rotation_ms_1x;
+    float milliseconds;
 
     if(sector_delta <= 3)
-        return 2.0f * PCFX_FRAME_MS;
-
-    if(sector_delta < 7)
-        return 8.0f * PCFX_FRAME_MS +
-               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
-
-    if(tracks <= 80.0f)
-        return 14.0f * PCFX_FRAME_MS +
-               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
-
-    if(tracks <= 160.0f)
-        return PCFX_MID_BASE_FRAMES * PCFX_FRAME_MS +
-               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION);
-
-    if(tracks <= 644.0f)
-    {
-        const float long_motion_ms = (tracks - 161.0f) * (16.66f / 80.0f) * PCFX_LONG_SEEK_SCALE;
-        const float delay_ms = (PCFX_MID_BASE_FRAMES * PCFX_FRAME_MS) +
-                               pcfx_rotation_ms(target_group, PCFX_SHORT_ROTATION_FRACTION) +
-                               long_motion_ms;
-        return pcfx_long_seek_soft_limit(delay_ms);
-    }
+        milliseconds = (6.0f * 1000.0f / 60.0f) + rotation_ms * 0.75f;
+    else if(sector_delta < 7)
+        milliseconds = (9.0f * 1000.0f / 60.0f) + rotation_ms * 0.75f;
+    else if(tracks <= 80.0f)
+        milliseconds = (17.0f * 1000.0f / 60.0f) + rotation_ms * 0.75f;
+    else if(tracks <= 160.0f)
+        milliseconds = (22.0f * 1000.0f / 60.0f) + rotation_ms * 0.75f;
+    else if(tracks <= 644.0f)
+        milliseconds = (22.0f * 1000.0f / 60.0f) + rotation_ms * 0.75f +
+                       (tracks - 161.0f) * 16.66f / 80.0f;
     else
-    {
-        const float long_motion_ms = (tracks - 644.0f) * (16.66f / 195.0f) * PCFX_LONG_SEEK_SCALE;
-        const float delay_ms = (PCFX_LONG_BASE_FRAMES * PCFX_FRAME_MS) +
-                               pcfx_rotation_ms(target_group, PCFX_LONG_ROTATION_FRACTION) +
-                               long_motion_ms;
-        return pcfx_long_seek_soft_limit(delay_ms);
-    }
+        milliseconds = (36.0f * 1000.0f / 60.0f) + rotation_ms * 0.50f +
+                       (tracks - 644.0f) * 16.66f / 195.0f;
+
+    return milliseconds * PCFX_HARDWARE_CALIBRATION;
 }

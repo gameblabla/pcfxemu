@@ -34,6 +34,7 @@ WASM_EXPORTS := \
   --export=pcfx_wasm_version --export=pcfx_wasm_malloc --export=pcfx_wasm_reset_heap --export=pcfx_wasm_heap_used --export=pcfx_wasm_init \
   --export=pcfx_wasm_set_system_mode --export=pcfx_wasm_set_3d_enabled --export=pcfx_wasm_get_3d_enabled \
   --export=pcfx_wasm_set_bios_patches --export=pcfx_wasm_get_bios_patches --export=pcfx_wasm_set_cd_speed --export=pcfx_wasm_get_cd_speed \
+  --export=pcfx_wasm_set_seek_audio_delay --export=pcfx_wasm_get_seek_audio_delay \
   --export=pcfx_wasm_set_adpcm_compat --export=pcfx_wasm_get_adpcm_buggy_codec_mode --export=pcfx_wasm_get_adpcm_suppress_reset_clicks --export=pcfx_wasm_get_adpcm_effective_buggy_codec \
   --export=pcfx_wasm_set_browser_smooth --export=pcfx_wasm_set_controller_type --export=pcfx_wasm_get_controller_type --export=pcfx_wasm_load_bios --export=pcfx_wasm_set_media_path \
   --export=pcfx_wasm_set_media --export=pcfx_wasm_start --export=pcfx_wasm_swap_disc --export=pcfx_wasm_soft_reset --export=pcfx_wasm_frame --export=pcfx_wasm_frame2 \

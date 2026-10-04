@@ -52,6 +52,7 @@ static uint32_t browser_smooth;
 static uint32_t controller_type;
 static uint32_t bios_patch_flags;
 static uint32_t cd_speed = 2;
+static uint32_t seek_audio_delay = 1;
 static uint32_t adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
 static uint32_t adpcm_suppress_reset_clicks = 1;
 static char media_path[260];
@@ -156,6 +157,7 @@ void pcfx_wasm_init(uint32_t mode)
     controller_type = 0;
     bios_patch_flags = 0;
     cd_speed = 2;
+    seek_audio_delay = 1;
     adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
     adpcm_suppress_reset_clicks = 1;
 }
@@ -218,6 +220,17 @@ void pcfx_wasm_set_cd_speed(uint32_t speed)
 
 __attribute__((export_name("pcfx_wasm_get_cd_speed")))
 uint32_t pcfx_wasm_get_cd_speed(void) { return cd_speed; }
+
+__attribute__((export_name("pcfx_wasm_set_seek_audio_delay")))
+void pcfx_wasm_set_seek_audio_delay(uint32_t enabled)
+{
+    seek_audio_delay = enabled ? 1u : 0u;
+    if(emu)
+        pcfx_headless_set_seek_audio_delay(emu, (int)seek_audio_delay);
+}
+
+__attribute__((export_name("pcfx_wasm_get_seek_audio_delay")))
+uint32_t pcfx_wasm_get_seek_audio_delay(void) { return seek_audio_delay; }
 
 __attribute__((export_name("pcfx_wasm_set_adpcm_compat")))
 void pcfx_wasm_set_adpcm_compat(uint32_t buggy_codec_mode, uint32_t suppress_reset_clicks)
@@ -292,6 +305,7 @@ uint32_t pcfx_wasm_start(void)
     cfg.prefer_fxga_bios = (int)system_mode;
     cfg.bios_patch_flags = bios_patch_flags;
     cfg.cd_speed = (int)normalize_cd_speed_wasm(cd_speed);
+    cfg.disable_seek_audio_delay = seek_audio_delay ? 0 : 1;
     cfg.adpcm_buggy_codec_mode = (int)normalize_adpcm_mode_wasm(adpcm_buggy_codec_mode);
     cfg.adpcm_suppress_reset_clicks = adpcm_suppress_reset_clicks ? 1 : 0;
     emu = pcfx_headless_create(&cfg);

@@ -110,6 +110,7 @@
 #define ID_AUDIO_CD_SPEED_4X    372
 #define ID_AUDIO_CD_SPEED_8X    373
 #define ID_AUDIO_CD_SPEED_16X   374
+#define ID_AUDIO_SEEK_DELAY     375
 #define ID_INPUT_CONFIGURE       400
 #define ID_INPUT_PORT1_PAD       401
 #define ID_INPUT_PORT1_MOUSE     402
@@ -161,6 +162,7 @@ static int g_adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
 static int g_adpcm_suppress_reset_clicks = 1;
 #endif
 static int g_cd_speed = 2;
+static int g_seek_audio_delay = 1;
 static int g_save_slot = 0;
 static int g_fullscreen;
 static int g_start_fullscreen;
@@ -500,6 +502,8 @@ static void save_config(void)
 #endif
     snprintf(tmp, sizeof(tmp), "%d", g_cd_speed);
     WritePrivateProfileStringA("CDROM", "Speed", tmp, g_ini_path);
+    snprintf(tmp, sizeof(tmp), "%d", g_seek_audio_delay);
+    WritePrivateProfileStringA("CDROM", "SeekAudioDelay", tmp, g_ini_path);
     snprintf(tmp, sizeof(tmp), "%lu", (unsigned long)g_open_hotkey_key);
     WritePrivateProfileStringA("Hotkeys", "OpenGameKey", tmp, g_ini_path);
 
@@ -553,6 +557,7 @@ static void load_config(void)
     g_adpcm_suppress_reset_clicks = 1;
 #endif
     g_cd_speed = 2;
+    g_seek_audio_delay = 1;
     g_open_hotkey_key = VK_F10;
     PCFX_Win32_SetScaleMode(2, PCFX_WIN32_SCALE_ASPECT, 0);
     PCFX_Win32_SetVideoBackend(PCFX_WIN32_DEFAULT_VIDEO_BACKEND);
@@ -590,6 +595,7 @@ static void load_config(void)
     g_adpcm_suppress_reset_clicks = read_ini_int_range("Audio", "ADPCMSuppressChannelResetClicks", 1, 0, 1) ? 1 : 0;
 #endif
     g_cd_speed = read_ini_int_range("CDROM", "Speed", 2, 1, 16);
+    g_seek_audio_delay = read_ini_int_range("CDROM", "SeekAudioDelay", 1, 0, 1) ? 1 : 0;
     if(g_cd_speed != 1 && g_cd_speed != 2 && g_cd_speed != 4 && g_cd_speed != 8 && g_cd_speed != 16)
     {
         g_config_repair_needed = 1;
@@ -688,6 +694,7 @@ static void apply_core_options(void)
                                g_adpcm_suppress_reset_clicks ? true : false);
 #endif
     PCFX_SetCDSpeed((uint_fast32_t)g_cd_speed);
+    PCFX_SetSeekAudioDelay(g_seek_audio_delay ? true : false);
 #ifdef HAVE_HUC6273
     PCFX_SetHuC6273Enabled(g_huc6273_enabled ? true : false);
 #else
@@ -765,6 +772,8 @@ static void update_menu_checks(void)
                      g_cd_speed <= 4 ? ID_AUDIO_CD_SPEED_4X :
                      g_cd_speed <= 8 ? ID_AUDIO_CD_SPEED_8X : ID_AUDIO_CD_SPEED_16X;
         CheckMenuRadioItem(g_audio_menu, ID_AUDIO_CD_SPEED_1X, ID_AUDIO_CD_SPEED_16X, cd_id, MF_BYCOMMAND);
+        CheckMenuItem(g_audio_menu, ID_AUDIO_SEEK_DELAY,
+                      MF_BYCOMMAND | (g_seek_audio_delay ? MF_CHECKED : MF_UNCHECKED));
     }
     CheckMenuRadioItem(g_menu, ID_INPUT_PORT1_PAD, ID_INPUT_PORT1_MOUSE,
                        option.type_controller ? ID_INPUT_PORT1_MOUSE : ID_INPUT_PORT1_PAD,
@@ -971,6 +980,7 @@ static HMENU build_menu(void)
     AppendMenuA(audio, MF_STRING, ID_AUDIO_CD_SPEED_4X, "CD-ROM speed: &4x");
     AppendMenuA(audio, MF_STRING, ID_AUDIO_CD_SPEED_8X, "CD-ROM speed: &8x");
     AppendMenuA(audio, MF_STRING, ID_AUDIO_CD_SPEED_16X, "CD-ROM speed: 1&6x");
+    AppendMenuA(audio, MF_STRING, ID_AUDIO_SEEK_DELAY, "PC-FX SEEK status / audio start delay");
 
     AppendMenuA(input, MF_STRING, ID_INPUT_CONFIGURE, "&Configure Controllers...");
     AppendMenuA(input, MF_STRING, ID_INPUT_HOTKEYS, "Configure &Hotkeys...");
@@ -1245,6 +1255,14 @@ static void set_cd_speed(HWND hwnd, int speed)
     if(speed > 16) speed = 16;
     g_cd_speed = speed;
     PCFX_SetCDSpeed((uint_fast32_t)g_cd_speed);
+    update_menu_checks();
+    save_config();
+}
+
+static void toggle_seek_audio_delay(void)
+{
+    g_seek_audio_delay = !g_seek_audio_delay;
+    PCFX_SetSeekAudioDelay(g_seek_audio_delay ? true : false);
     update_menu_checks();
     save_config();
 }
@@ -2048,6 +2066,7 @@ static void handle_command(HWND hwnd, int id)
         case ID_AUDIO_CD_SPEED_4X: set_cd_speed(hwnd, 4); break;
         case ID_AUDIO_CD_SPEED_8X: set_cd_speed(hwnd, 8); break;
         case ID_AUDIO_CD_SPEED_16X: set_cd_speed(hwnd, 16); break;
+        case ID_AUDIO_SEEK_DELAY: toggle_seek_audio_delay(); break;
         case ID_INPUT_CONFIGURE:
             show_input_dialog(hwnd);
             break;

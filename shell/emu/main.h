@@ -39,6 +39,8 @@ bool PCFX_GetADPCMSuppressChannelResetClicks(void);
 #endif
 void PCFX_SetCDSpeed(uint_fast32_t speed);
 uint_fast32_t PCFX_GetCDSpeed(void);
+void PCFX_SetSeekAudioDelay(bool enabled);
+bool PCFX_GetSeekAudioDelay(void);
 #ifdef HAVE_HUC6273
 void PCFX_SetHuC6273Enabled(bool enabled);
 bool PCFX_GetHuC6273Enabled(void);

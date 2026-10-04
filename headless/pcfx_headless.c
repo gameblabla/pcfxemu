@@ -47,6 +47,8 @@ void PCFX_SetBIOSPatches(uint32_t flags);
 uint32_t PCFX_GetBIOSPatches(void);
 void PCFX_SetCDSpeed(uint_fast32_t speed);
 uint_fast32_t PCFX_GetCDSpeed(void);
+void PCFX_SetSeekAudioDelay(bool enabled);
+bool PCFX_GetSeekAudioDelay(void);
 #ifdef PCFX_ADPCM_COMPAT_OPTIONS
 void PCFX_SetADPCMCompatOptions(int buggy_codec_mode, bool suppress_channel_reset_clicks);
 int PCFX_GetADPCMBuggyCodecMode(void);
@@ -289,6 +291,7 @@ PCFX_Headless* pcfx_headless_create(const PCFX_HeadlessConfig* config)
     PCFX_SetSystemMode(config ? config->prefer_fxga_bios : 0);
     pcfx_headless_set_bios_patches(emu, config ? config->bios_patch_flags : 0u);
     pcfx_headless_set_cd_speed(emu, (config && config->cd_speed) ? (uint32_t)config->cd_speed : 2u);
+    PCFX_SetSeekAudioDelay(!(config && config->disable_seek_audio_delay));
 #ifdef PCFX_ADPCM_COMPAT_OPTIONS
     pcfx_headless_set_adpcm_compat(emu,
         config ? config->adpcm_buggy_codec_mode : PCFX_ADPCM_BUGGY_AUTO,
@@ -521,6 +524,18 @@ uint32_t pcfx_headless_get_cd_speed(PCFX_Headless* emu)
 {
     (void)emu;
     return (uint32_t)PCFX_GetCDSpeed();
+}
+
+void pcfx_headless_set_seek_audio_delay(PCFX_Headless* emu, int enabled)
+{
+    (void)emu;
+    PCFX_SetSeekAudioDelay(enabled != 0);
+}
+
+int pcfx_headless_get_seek_audio_delay(PCFX_Headless* emu)
+{
+    (void)emu;
+    return PCFX_GetSeekAudioDelay() ? 1 : 0;
 }
 
 void pcfx_headless_set_adpcm_compat(PCFX_Headless* emu, int buggy_codec_mode, int suppress_reset_clicks)

@@ -27,6 +27,7 @@ const uint_fast32_t setting_last_scanline = 239;
 const uint_fast32_t setting_nospritelimit = 0;
 const uint_fast32_t setting_rainbow_chromaip = 0;
 uint_fast32_t setting_cd_speed = 2;
+uint_fast32_t setting_pcfx_seek_audio_delay = 1;
 #ifndef PCFX_FAST_VIDEO_DEFAULT
 #define PCFX_FAST_VIDEO_DEFAULT 0
 #endif
@@ -47,6 +48,16 @@ void MDFN_SetPCFXCDSpeed(uint_fast32_t speed)
 uint_fast32_t MDFN_GetPCFXCDSpeed(void)
 {
    return setting_cd_speed;
+}
+
+void MDFN_SetPCFXSeekAudioDelay(uint_fast32_t enabled)
+{
+   setting_pcfx_seek_audio_delay = enabled ? 1 : 0;
+}
+
+uint_fast32_t MDFN_GetPCFXSeekAudioDelay(void)
+{
+   return setting_pcfx_seek_audio_delay;
 }
 
 /*

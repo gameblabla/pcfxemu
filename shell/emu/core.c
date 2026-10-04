@@ -240,6 +240,16 @@ uint_fast32_t PCFX_GetCDSpeed(void)
  return MDFN_GetPCFXCDSpeed();
 }
 
+void PCFX_SetSeekAudioDelay(bool enabled)
+{
+ MDFN_SetPCFXSeekAudioDelay(enabled ? 1 : 0);
+}
+
+bool PCFX_GetSeekAudioDelay(void)
+{
+ return MDFN_GetPCFXSeekAudioDelay() != 0;
+}
+
 
 static const uint8 PCFX_BIOS_PATCH_ENGLISH_DATA[499] =
 {

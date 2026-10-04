@@ -57,6 +57,7 @@ static void usage(const char* argv0)
         "  --state-out FILE        Save emulator state after running frames\n"
         "  --fast-video            Use legacy fast RAINBOW backend instead of upstream-accurate backend\n"
         "  --disable-3d-hardware   Disable optional HuC6273/Aurora 3D chip\n"
+        "  --no-seek-audio-delay   Disable TODO-marked PC-FX SEEK/audio command delays\n"
         "  --auto                  Select PC-FX or PC-FXGA from the loaded media (default for frontends)\n"
         "  --pcfx                  Force standard PC-FX BIOS/startup path only\n"
         "  --pcfxga                Force PC-FXGA BIOS/startup path only\n"
@@ -457,6 +458,7 @@ int main(int argc, char** argv)
     bool auto_run = false;
     bool fast_video = false;
     bool disable_3d_hardware = false;
+    bool disable_seek_audio_delay = false;
     int bios_mode = 0;
     struct DumpList dumps;
     memset(&dumps, 0, sizeof(dumps));
@@ -486,6 +488,8 @@ int main(int argc, char** argv)
         else if(!strcmp(a, "--state-out")) state_out = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--fast-video")) fast_video = true;
         else if(!strcmp(a, "--disable-3d-hardware")) disable_3d_hardware = true;
+        else if(!strcmp(a, "--no-seek-audio-delay")) disable_seek_audio_delay = true;
+        else if(!strcmp(a, "--seek-audio-delay")) disable_seek_audio_delay = false;
         else if(!strcmp(a, "--auto")) bios_mode = 2;
         else if(!strcmp(a, "--pcfx")) bios_mode = 0;
         else if(!strcmp(a, "--pcfxga")) bios_mode = 1;
@@ -563,6 +567,7 @@ int main(int argc, char** argv)
     cfg.fast_video = fast_video ? 1 : 0;
     cfg.disable_3d_hardware = disable_3d_hardware ? 1 : 0;
     cfg.prefer_fxga_bios = bios_mode;
+    cfg.disable_seek_audio_delay = disable_seek_audio_delay ? 1 : 0;
     PCFX_Headless* emu = pcfx_headless_create(&cfg);
     if(!emu)
     {

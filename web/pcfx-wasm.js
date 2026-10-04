@@ -43,7 +43,7 @@ const DEFAULT_CONFIG = {
   keysP2: { ...DEFAULT_KEYS_P2 },
   touchGamepad: { opacity: 0.72 },
   video: { aspect: 'native', smoothUpscale: false, scanlines: false, showFps: true },
-  audio: { adpcmBuggyMode: 'auto', adpcmSuppressClicks: true, cdSpeed: 2 },
+  audio: { adpcmBuggyMode: 'auto', adpcmSuppressClicks: true, cdSpeed: 2, seekAudioDelay: true },
   biosPatches: { shortIntro: false, english: false, autoLaunch: false },
   enable3D: true,
   controllerType: 'gamepad',
@@ -97,6 +97,7 @@ const els = {
   adpcmBuggyMode: document.getElementById('adpcmBuggyMode'),
   adpcmSuppressClicks: document.getElementById('adpcmSuppressClicks'),
   cdSpeed: document.getElementById('cdSpeed'),
+  seekAudioDelay: document.getElementById('seekAudioDelay'),
   aspectMode: document.getElementById('aspectMode'),
   smoothUpscale: document.getElementById('smoothUpscale'),
   scanlines: document.getElementById('scanlines'),
@@ -180,6 +181,7 @@ function loadConfig() {
           adpcmBuggyMode: ['auto', 'off', 'on'].includes(saved.audio?.adpcmBuggyMode) ? saved.audio.adpcmBuggyMode : 'auto',
           adpcmSuppressClicks: saved.audio?.adpcmSuppressClicks !== false,
           cdSpeed: [1, 2, 4, 8, 16].includes(Number(saved.audio?.cdSpeed)) ? Number(saved.audio.cdSpeed) : 2,
+          seekAudioDelay: saved.audio?.seekAudioDelay !== false,
         },
         biosPatches: {
           shortIntro: !!saved.biosPatches?.shortIntro,
@@ -270,6 +272,7 @@ function applyWasmCoreOptions() {
   if (!wasm) return;
   wasm.pcfx_wasm_set_bios_patches?.(biosPatchFlags());
   wasm.pcfx_wasm_set_cd_speed?.(cdSpeedValue());
+  wasm.pcfx_wasm_set_seek_audio_delay?.(config.audio?.seekAudioDelay === false ? 0 : 1);
   wasm.pcfx_wasm_set_adpcm_compat?.(adpcmBuggyModeValue(), config.audio?.adpcmSuppressClicks === false ? 0 : 1);
 }
 function biosKindForSystem(system) { return system === 'pcfxga' ? 2 : 1; }
@@ -291,6 +294,7 @@ function applyConfigToControls() {
   if (els.adpcmBuggyMode) els.adpcmBuggyMode.value = ['auto', 'off', 'on'].includes(config.audio?.adpcmBuggyMode) ? config.audio.adpcmBuggyMode : 'auto';
   if (els.adpcmSuppressClicks) els.adpcmSuppressClicks.checked = config.audio?.adpcmSuppressClicks !== false;
   if (els.cdSpeed) els.cdSpeed.value = String(cdSpeedValue());
+  if (els.seekAudioDelay) els.seekAudioDelay.checked = config.audio?.seekAudioDelay !== false;
   els.aspectMode.value = config.video.aspect;
   els.smoothUpscale.checked = config.video.smoothUpscale;
   els.scanlines.checked = config.video.scanlines;
@@ -1538,6 +1542,7 @@ function applyRuntimeOptions() {
     adpcmBuggyMode: ['auto', 'off', 'on'].includes(els.adpcmBuggyMode?.value) ? els.adpcmBuggyMode.value : 'auto',
     adpcmSuppressClicks: els.adpcmSuppressClicks?.checked !== false,
     cdSpeed: [1, 2, 4, 8, 16].includes(Number(els.cdSpeed?.value)) ? Number(els.cdSpeed.value) : 2,
+    seekAudioDelay: els.seekAudioDelay?.checked !== false,
   };
   config.video.aspect = els.aspectMode.value;
   config.video.smoothUpscale = els.smoothUpscale.checked;
@@ -1676,7 +1681,7 @@ function wireEvents() {
     loadingMedia = false;
   }));
 
-  for (const el of [els.enable3D, els.biosPatchShortIntro, els.biosPatchEnglish, els.biosPatchAutoLaunch, els.adpcmBuggyMode, els.adpcmSuppressClicks, els.cdSpeed, els.aspectMode, els.smoothUpscale, els.scanlines, els.showFps, els.controllerType, els.stateSlot, els.touchOpacity].filter(Boolean)) {
+  for (const el of [els.enable3D, els.biosPatchShortIntro, els.biosPatchEnglish, els.biosPatchAutoLaunch, els.adpcmBuggyMode, els.adpcmSuppressClicks, els.cdSpeed, els.seekAudioDelay, els.aspectMode, els.smoothUpscale, els.scanlines, els.showFps, els.controllerType, els.stateSlot, els.touchOpacity].filter(Boolean)) {
     el.addEventListener('change', applyRuntimeOptions);
   }
 

@@ -254,6 +254,7 @@ struct App
     int adpcm_buggy_codec_mode;
     bool adpcm_suppress_reset_clicks;
     int cd_speed;
+    bool seek_audio_delay;
     bool pending_load;
     volatile bool pending_swap;
     char pending_load_path[PATH_MAX];
@@ -564,6 +565,8 @@ static void load_sdl3_config(struct App* app, const char* home_dir)
             app->controller_type[1] = parse_int_clamped(val, app->controller_type[1], 0, 1);
         else if(!strcmp(key, "cd_speed"))
             app->cd_speed = normalize_cd_speed(parse_int_clamped(val, app->cd_speed, 1, 16));
+        else if(!strcmp(key, "seek_audio_delay"))
+            app->seek_audio_delay = parse_bool_value(val, app->seek_audio_delay);
         else if(!strcmp(key, "adpcm_buggy_codec_mode"))
             app->adpcm_buggy_codec_mode = parse_int_clamped(val, app->adpcm_buggy_codec_mode, PCFX_ADPCM_BUGGY_AUTO, PCFX_ADPCM_BUGGY_ON);
         else if(!strcmp(key, "bios_patch_flags"))
@@ -606,6 +609,7 @@ static bool save_sdl3_config(const struct App* app, const char* home_dir)
     fprintf(fp, "controller_type_p1=%d\n", app->controller_type[0]);
     fprintf(fp, "controller_type_p2=%d\n", app->controller_type[1]);
     fprintf(fp, "cd_speed=%d\n", normalize_cd_speed(app->cd_speed));
+    fprintf(fp, "seek_audio_delay=%d\n", app->seek_audio_delay ? 1 : 0);
     fprintf(fp, "adpcm_buggy_codec_mode=%d\n", app->adpcm_buggy_codec_mode);
     fprintf(fp, "adpcm_suppress_reset_clicks=%d\n", app->adpcm_suppress_reset_clicks ? 1 : 0);
     fprintf(fp, "bios_patch_flags=0x%08x\n", app->bios_patch_flags);
@@ -1308,6 +1312,7 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
     cfg.prefer_fxga_bios = app->system_mode;
     cfg.bios_patch_flags = app->bios_patch_flags;
     cfg.cd_speed = normalize_cd_speed(app->cd_speed);
+    cfg.disable_seek_audio_delay = app->seek_audio_delay ? 0 : 1;
     cfg.adpcm_buggy_codec_mode = app->adpcm_buggy_codec_mode;
     cfg.adpcm_suppress_reset_clicks = app->adpcm_suppress_reset_clicks ? 1 : 0;
     app->emu = pcfx_headless_create(&cfg);
@@ -1578,7 +1583,7 @@ static int menu_item_count(const struct App* app, int tab)
 #endif
         case MENU_TAB_SYSTEM: return 9;
         case MENU_TAB_VIDEO: return 4;
-        case MENU_TAB_AUDIO: return 3;
+        case MENU_TAB_AUDIO: return 4;
         case MENU_TAB_STATES: return 5;
         case MENU_TAB_CONTROLS: return 11;
         default: return 0;
@@ -1679,6 +1684,7 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
                 case 0: snprintf(out, out_size, "ADPCM buggy encoder codec: %s%s", adpcm_buggy_mode_name(app->adpcm_buggy_codec_mode), pcfx_headless_get_adpcm_effective_buggy_codec((PCFX_Headless*)app->emu) ? " (active)" : ""); return;
                 case 1: snprintf(out, out_size, "ADPCM suppress channel-reset clicks: %s", app->adpcm_suppress_reset_clicks ? "on" : "off"); return;
                 case 2: snprintf(out, out_size, "CD-ROM emulator speed: %dx", normalize_cd_speed(app->cd_speed)); return;
+                case 3: snprintf(out, out_size, "PC-FX SEEK/audio command delay: %s", app->seek_audio_delay ? "on" : "off"); return;
             }
             break;
         case MENU_TAB_STATES:
@@ -1908,6 +1914,11 @@ static void activate_menu_item(struct App* app)
                     app->cd_speed = next_cd_speed(app->cd_speed);
                     pcfx_headless_set_cd_speed(app->emu, (uint32_t)app->cd_speed);
                     set_message(app, "CD-ROM speed: %dx", app->cd_speed);
+                    break;
+                case 3:
+                    app->seek_audio_delay = !app->seek_audio_delay;
+                    pcfx_headless_set_seek_audio_delay(app->emu, app->seek_audio_delay ? 1 : 0);
+                    set_message(app, "PC-FX SEEK/audio command delay: %s", app->seek_audio_delay ? "on" : "off");
                     break;
             }
             break;
@@ -2390,7 +2401,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2425,6 +2436,7 @@ int main(int argc, char** argv)
     app.adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
     app.adpcm_suppress_reset_clicks = true;
     app.cd_speed = 2;
+    app.seek_audio_delay = true;
     app.display_x = 32;
     app.display_y = 0;
     app.display_w = 256;
@@ -2488,6 +2500,10 @@ int main(int argc, char** argv)
             app.cd_speed = normalize_cd_speed(atoi(argv[++i]));
         else if(!strncmp(argv[i], "--cd-speed=", 11))
             app.cd_speed = normalize_cd_speed(atoi(argv[i] + 11));
+        else if(!strcmp(argv[i], "--seek-audio-delay"))
+            app.seek_audio_delay = true;
+        else if(!strcmp(argv[i], "--no-seek-audio-delay"))
+            app.seek_audio_delay = false;
         else if(!strcmp(argv[i], "--adpcm-buggy") && i + 1 < argc)
         {
             const char* v = argv[++i];
@@ -2638,6 +2654,7 @@ int main(int argc, char** argv)
     cfg.prefer_fxga_bios = app.system_mode;
     cfg.bios_patch_flags = app.bios_patch_flags;
     cfg.cd_speed = normalize_cd_speed(app.cd_speed);
+    cfg.disable_seek_audio_delay = app.seek_audio_delay ? 0 : 1;
     cfg.adpcm_buggy_codec_mode = app.adpcm_buggy_codec_mode;
     cfg.adpcm_suppress_reset_clicks = app.adpcm_suppress_reset_clicks ? 1 : 0;
     app.emu = pcfx_headless_create(&cfg);
