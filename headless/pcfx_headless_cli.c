@@ -40,7 +40,7 @@ struct DumpList
 static void usage(const char* argv0)
 {
     fprintf(stderr,
-        "Usage: %s [options] [game.cue|game.chd|game.toc|game.bin|game.iso|playlist.m3u|program.ex]\n"
+        "Usage: %s [options] [game.cue|game.chd|game.toc|game.bin|game.iso|playlist.m3u|program.ex|raw.pcfxboot]\n"
         "\n"
         "Options:\n"
         "  --bios-dir DIR          Directory or BIOS file; accepts pcfx.rom, pcfxbios.bin, pcfxv101.bin, pcfxga.rom (auto-searches $HOME/.pcfxemu)\n"
@@ -59,6 +59,7 @@ static void usage(const char* argv0)
         "  --disable-3d-hardware   Disable optional HuC6273/Aurora 3D chip\n"
         "  --no-seek-audio-delay   Disable TODO-marked PC-FX SEEK/audio command delays\n"
         "  --auto                  Select PC-FX or PC-FXGA from the loaded media (default for frontends)\n"
+        "  --pcfxboot              Load the positional file as raw V810 code at RAM $8000 (for .bin cartridge dumps)\n"
         "  --pcfx                  Force standard PC-FX BIOS/startup path only\n"
         "  --pcfxga                Force PC-FXGA BIOS/startup path only\n"
         "\n"
@@ -459,6 +460,7 @@ int main(int argc, char** argv)
     bool fast_video = false;
     bool disable_3d_hardware = false;
     bool disable_seek_audio_delay = false;
+    bool pcfxboot = false;
     int bios_mode = 0;
     struct DumpList dumps;
     memset(&dumps, 0, sizeof(dumps));
@@ -493,6 +495,7 @@ int main(int argc, char** argv)
         else if(!strcmp(a, "--auto")) bios_mode = 2;
         else if(!strcmp(a, "--pcfx")) bios_mode = 0;
         else if(!strcmp(a, "--pcfxga")) bios_mode = 1;
+        else if(!strcmp(a, "--pcfxboot")) pcfxboot = true;
         else if(!strcmp(a, "--pad"))
         {
             if(!parse_pad_expr(need_arg(&i, argc, argv, a), &initial_pad))
@@ -579,7 +582,7 @@ int main(int argc, char** argv)
 
     int status = 1;
     size_t next_cmd = 0;
-    if(!pcfx_headless_load_cd(emu, game))
+    if(!(pcfxboot ? pcfx_headless_load_pcfxboot(emu, game) : pcfx_headless_load_cd(emu, game)))
     {
         fprintf(stderr, "Load failed: %s\n", pcfx_headless_last_error(emu));
         fprintf(stderr, "BIOS path in use: %s\n", bios_dir ? bios_dir : ".");

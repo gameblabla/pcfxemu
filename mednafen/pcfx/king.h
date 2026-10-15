@@ -17,7 +17,9 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A);
 
 void KING_Write8(const v810_timestamp_t timestamp, uint32 A, uint8 V);
 void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V);
+uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A);
 uint32 KING_KRAMWriteContentionCycles(uint32 A);
+uint32 KING_KRAMReadWaitCycles(uint32 A);
 uint32 KING_DMAWedgeStallCycles(void);
 bool KING_Init(void);
 void KING_Close(void);

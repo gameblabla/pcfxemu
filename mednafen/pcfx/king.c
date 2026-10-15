@@ -561,6 +561,7 @@ typedef struct
 	uint16 MPROGControlCache;
 	uint16 MPROGAddress;
 	uint16 MPROGData[0x10];
+	v810_timestamp_t KRAMWriteBusyUntil;
 
 	bool DMAInterrupt;
 	uint8 Reg00;
@@ -1250,6 +1251,13 @@ void KING_EndFrame(v810_timestamp_t timestamp)
 {
  PCFX_SetEvent(PCFX_EVENT_KING, KING_Update(timestamp));
  scsicd_ne = SCSICD_Run(timestamp);
+ /* CPU/device timestamps restart at zero for the next field.  Keep only the
+  * outstanding portion of the posted-write drain across that rebase. */
+ if(king->KRAMWriteBusyUntil > timestamp)
+  king->KRAMWriteBusyUntil -= timestamp;
+ else
+  king->KRAMWriteBusyUntil = 0;
+
 }
 
 void KING_ResetTS(v810_timestamp_t ts_base)
@@ -1648,6 +1656,9 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 		case 0x15: ret = king->MPROGControl;
 			   break;
 
+		case 0x61: ret = king->KRAM_Mode;
+			   break;
+
 		//case 0x40: break; 	// Super Power League FX reads this, but I think it's write-only.
 
 		case 0x53:
@@ -1854,9 +1865,34 @@ static inline bool KING_AnyBusySlotIsWide(void)
  return FALSE;
 }
 
+/* A KRAM write enters KING's input latch and releases the CPU while that
+ * halfword drains.  Hardware observations put the complete back-to-back
+ * OUT.H interval near 16 V810 clocks.  The V810 core and I/O handler have
+ * already charged four clocks by the time this callback sees the write, so
+ * 12 remain in this timestamp domain.  A second write before then holds the
+ * CPU in WAIT until the latch is free. */
+#define KRAM_WRITE_DRAIN_REMAINDER 12
+
+uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A)
+{
+ v810_timestamp_t ready;
+ uint32 wait = 0;
+
+ if(!(A & 0x4) || king->AR != 0x0E)
+  return 0;
+
+ KING_Update(timestamp);
+ ready = king->KRAMWriteBusyUntil;
+ if(ready > timestamp)
+  wait = (uint32)(ready - timestamp);
+
+ king->KRAMWriteBusyUntil = timestamp + wait + KRAM_WRITE_DRAIN_REMAINDER;
+ return wait;
+}
+
 /* Called for every write to KING's KRAM-data port (register 0x0E, i.e. the
  * "0x604"-style port write with the AR already selected to 0x0E). Returns
- * extra V810 cycles to charge on top of the existing fixed I/O write cost,
+ * measured display microprogram contention on top of the latch WAIT above,
  * accumulating sub-cycle fractions across calls so the average matches the
  * measured per-word rate rather than rounding every call down to zero. */
 uint32 KING_KRAMWriteContentionCycles(uint32 A)
@@ -1889,6 +1925,26 @@ uint32 KING_KRAMWriteContentionCycles(uint32 A)
   kram_contention_frac_x256 &= 0xFF;
   return whole;
  }
+}
+
+/* KRAM reads complete synchronously after a short KING busy interval.  The
+ * hardware probe bounds this at 4-6 V810 cycles; use the midpoint.  Reading
+ * KRAMWA is also the documented drain/fence for a posted KRAM write. */
+uint32 KING_KRAMReadWaitCycles(uint32 A)
+{
+ if(!(A & 0x4))
+  return 0;
+
+ if(king->AR == 0x0D)
+ {
+  king->KRAMWriteBusyUntil = 0;
+  return 0;
+ }
+
+ if(king->AR == 0x0E)
+  return 5;
+
+ return 0;
 }
 
 void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
@@ -3954,6 +4010,7 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->dma_receive_active, "dma_receive_active"),
   SFVARN(king->dma_send_active, "dma_send_active"),
   SFVARN(king->dma_cycle_counter, "dma_cycle_counter"),
+  SFVARN(king->KRAMWriteBusyUntil, "KRAMWriteBusyUntil"),
 
   SFVARN(king->SubChannelBuf, "SubChannelBuf"),
   SFVARN(king->SubChannelInterrupt, "SubChannelInterrupt"),

@@ -46,6 +46,8 @@ PCFX_Headless* pcfx_headless_create(const PCFX_HeadlessConfig* config);
 void pcfx_headless_destroy(PCFX_Headless* emu);
 
 int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path);
+/* Load a raw PCFXBoot V810 image at RAM $8000 and start it directly. */
+int pcfx_headless_load_pcfxboot(PCFX_Headless* emu, const char* boot_path);
 int pcfx_headless_boot_bios(PCFX_Headless* emu);
 int pcfx_headless_swap_disc(PCFX_Headless* emu, const char* cd_path);
 int pcfx_headless_run_frame(PCFX_Headless* emu);

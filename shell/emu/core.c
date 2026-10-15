@@ -1878,6 +1878,51 @@ static int LoadHuEXE(const char* name)
  return 1;
 }
 
+/* PCFXBoot raw cartridge images are V810 code copied to main RAM at $8000;
+ * they have no HuEXE header or CD boot sectors.  The real boot cartridge
+ * hands control to the program with KING in 4 MiB mode, so establish that
+ * state before entering the image. */
+static int LoadPCFXBoot(const char* name)
+{
+ struct MDFNFILE *BootFile = file_open(name);
+ if(!BootFile)
+  return 0;
+ if(!BootFile->size || BootFile->size > 0x200000 - 0x8000)
+ {
+  file_close(BootFile);
+  return 0;
+ }
+
+ HuEXEBaseDir[0] = 0;
+ EmuFlags = PCFX_SystemModeForcesFXGA() ? CDGE_FLAG_FXGA : 0;
+#ifdef HAVE_HUC6273
+ PCFX_ApplyHuC6273Presence();
+#endif
+ cdifs = NULL;
+ CD_TrayOpen = false;
+ CD_SelectedDisc = -1;
+ PCFX_ClearPendingHuEXEUpload();
+ LoadingHuEXE = false;
+
+ if(!LoadCommon(NULL))
+ {
+  file_close(BootFile);
+  return 0;
+ }
+
+ PCFX_Power();
+ memset(RAM, 0x00, 2048 * 1024);
+ memcpy(RAM + 0x8000, BootFile->data, BootFile->size);
+ file_close(BootFile);
+
+ KING_Write16(v810_timestamp, 0x600, 0x61);
+ KING_Write16(v810_timestamp, 0x604, 1);
+ V810_SetPC(0x8000);
+ V810_SetPR(3, 0x00000E00);
+ ForceEventUpdates(v810_timestamp);
+ return 1;
+}
+
 static int OpenCDList(const char *devicename, CDIFList *out)
 {
  if(!devicename || !out)
@@ -2010,6 +2055,8 @@ static uint8_t MDFNI_LoadGame(const char *name)
    }
    if((len > 3 && !strcasecmp(name + len - 3, ".ex")) || (len > 4 && !strcasecmp(name + len - 4, ".exe")))
       return LoadHuEXE(name);
+   if(len > 9 && !strcasecmp(name + len - 9, ".pcfxboot"))
+      return LoadPCFXBoot(name);
    return 0;
 }
 
@@ -2026,6 +2073,13 @@ int Load_Game_Memory(char* path)
 {
 	const int loaded = MDFNI_LoadGame(path);
 	if(!loaded)
+		return 0;
+	return FinishLoadMemory();
+}
+
+int Load_PCfxBoot_Memory(char* path)
+{
+	if(!LoadPCFXBoot(path))
 		return 0;
 	return FinishLoadMemory();
 }

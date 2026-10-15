@@ -56,6 +56,7 @@ bool PCFX_GetADPCMEmulateBuggyCodec(void);
 bool PCFX_GetADPCMSuppressChannelResetClicks(void);
 #endif
 extern int Load_Game_Memory(char* path);
+extern int Load_PCfxBoot_Memory(char* path);
 extern int Load_BIOS_Memory(void);
 extern int PCFX_SwapCD(const char* path);
 extern void Emulation_Run(void);
@@ -353,6 +354,23 @@ int pcfx_headless_load_cd(PCFX_Headless* emu, const char* cd_path)
     make_game_name(resolved_path);
     if(!Load_Game_Memory(resolved_path))
         return set_error(emu, "failed to load game or BIOS from --bios-dir: %s", home_path);
+    Load_Configuration();
+    emu->loaded = true;
+    return 1;
+}
+
+int pcfx_headless_load_pcfxboot(PCFX_Headless* emu, const char* boot_path)
+{
+    if(!emu)
+        return 0;
+    if(emu != g_active)
+        return set_error(emu, "this build supports one active emulator instance at a time");
+    char resolved_path[1024];
+    if(!resolve_homebrew_path(boot_path, resolved_path, sizeof(resolved_path)))
+        return set_error(emu, "PCFXBoot path is not a regular file: %s", boot_path ? boot_path : "(null)");
+    make_game_name(resolved_path);
+    if(!Load_PCfxBoot_Memory(resolved_path))
+        return set_error(emu, "failed to load raw PCFXBoot image or BIOS from --bios-dir: %s", home_path);
     Load_Configuration();
     emu->loaded = true;
     return 1;

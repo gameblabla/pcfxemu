@@ -125,7 +125,9 @@ static uint16 MDFN_FASTCALL mem_rhword(v810_timestamp_t *timestamp, uint32 A)
  else if(A >= 0xAC000000 && A <= 0xAFFFFFFF)
  {
   (*timestamp) += 4;
-  return(KING_Read16((*timestamp), 0x604));
+  uint16 ret = KING_Read16((*timestamp), 0x604);
+  (*timestamp) += KING_KRAMReadWaitCycles(0x604);
+  return ret;
  }
  else if(A >= 0xB0000000 && A <= 0xBFFFFFFF) // Write only
  {
@@ -277,7 +279,10 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
  }
  else if(A >= 0xBC000000 && A <= 0xBFFFFFFF)
  {
+  uint32 wait;
   (*timestamp) += 2;
+  wait = KING_KRAMWriteWaitCycles(*timestamp, 0x604);
+  (*timestamp) += wait;
   KING_Write16((*timestamp), 0x604, V);
   (*timestamp) += KING_KRAMWriteContentionCycles(0x604);
  }
