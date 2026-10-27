@@ -5,9 +5,9 @@
 #include "surface.h"
 
 #define HOST_WIDTH_RESOLUTION 512
-#define HOST_HEIGHT_RESOLUTION 240
+#define HOST_HEIGHT_RESOLUTION 480
 #define BACKBUFFER_WIDTH_RESOLUTION 512
-#define BACKBUFFER_HEIGHT_RESOLUTION 240
+#define BACKBUFFER_HEIGHT_RESOLUTION 480
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,6 +25,11 @@ void Update_Video_Ingame(void);
 void Clear_Video(void);
 
 void pcfx_headless_video_set_full_width(int full_width);
+void pcfx_headless_video_set_interlaced(int interlaced);
+/* Last actually mixed field, not next-field TETSU status at vertical rollover. */
+void pcfx_headless_video_note_field(int odd);
+int pcfx_headless_video_last_field_is_odd(void);
+int pcfx_headless_video_is_interlaced(void);
 void pcfx_headless_video_set_display_width(int width);
 const MDFN_Pixel* pcfx_headless_video_pixels(int* width, int* height, int* pitch_pixels);
 int pcfx_headless_video_bytes_per_pixel(void);

@@ -18,13 +18,15 @@
 
 #include "headless/pcfx_headless.h"
 #include "mednafen/cdrom/cdromif.h"
+#include "video_blit.h"
+#include "pcfx_interlace.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
 
 #define EMU_W 512
-#define EMU_H 240
+#define EMU_H 480
 #define PCFX_FPS (60000.0 / 1001.0)
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -207,6 +209,7 @@ struct App
     SDL_Window* window;
     SDL_Renderer* renderer;
     SDL_Texture* game_tex;
+    uint8_t* bob_buf;
     SDL_AudioStream* audio_stream;
     SDL_Gamepad* gamepad[2];   /* one per PC-FX port */
     PCFX_Headless* emu;
@@ -222,6 +225,7 @@ struct App
     bool fullscreen;
     bool bilinear;
     bool scanlines;
+    bool interlace_bob;
     bool enable_3d_hardware;
     int system_mode;
     int aspect; /* 0=4:3, 1=native, 2=stretch */
@@ -545,6 +549,8 @@ static void load_sdl3_config(struct App* app, const char* home_dir)
             app->bilinear = parse_bool_value(val, app->bilinear);
         else if(!strcmp(key, "scanlines"))
             app->scanlines = parse_bool_value(val, app->scanlines);
+        else if(!strcmp(key, "interlace_bob"))
+            app->interlace_bob = parse_bool_value(val, app->interlace_bob);
         else if(!strcmp(key, "enable_3d_hardware"))
             app->enable_3d_hardware = parse_bool_value(val, app->enable_3d_hardware);
         else if(!strcmp(key, "fast_video"))
@@ -601,6 +607,7 @@ static bool save_sdl3_config(const struct App* app, const char* home_dir)
     fprintf(fp, "fullscreen=%d\n", app->fullscreen ? 1 : 0);
     fprintf(fp, "bilinear=%d\n", app->bilinear ? 1 : 0);
     fprintf(fp, "scanlines=%d\n", app->scanlines ? 1 : 0);
+    fprintf(fp, "interlace_bob=%d\n", app->interlace_bob ? 1 : 0);
     fprintf(fp, "enable_3d_hardware=%d\n", app->enable_3d_hardware ? 1 : 0);
     fprintf(fp, "fast_video=%d\n", app->fast_video ? 1 : 0);
     fprintf(fp, "system_mode=%d\n", app->system_mode);
@@ -918,7 +925,7 @@ static void update_display_rect(struct App* app)
     int x = 32;
     int y = 0;
     int w = 256;
-    int h = EMU_H;
+    int h = 240;
     pcfx_headless_get_display_rect(app->emu, &x, &y, &w, &h);
     if(x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > EMU_W || y + h > EMU_H)
     {
@@ -1147,8 +1154,21 @@ static void render_game(struct App* app)
     pix = pcfx_headless_get_pixels(app->emu, &w, &h, &pitch, &pixel_format, &bytes_per_pixel);
     (void)pixel_format;
     update_display_rect(app);
+    /* The 512x480 core buffer already contains the actual interleaved fields.
+       For bob, use ONLY the most recently mixed field. Never copy the stale
+       partner field, and never modify the emulated TETSU surface. */
     if(pix)
-        SDL_UpdateTexture(app->game_tex, NULL, pix, pitch * bytes_per_pixel);
+    {
+        const void *upload = pix;
+        if(app->interlace_bob && pcfx_headless_video_is_interlaced() &&
+           h == EMU_H && pitch > 0 && bytes_per_pixel > 0 && app->bob_buf)
+        {
+            pcfx_bob_field(app->bob_buf, pix, (size_t)pitch * bytes_per_pixel,
+                           EMU_H, pcfx_headless_video_last_field_is_odd());
+            upload = app->bob_buf;
+        }
+        SDL_UpdateTexture(app->game_tex, NULL, upload, pitch * bytes_per_pixel);
+    }
 
     SDL_SetRenderDrawColor(app->renderer, 8, 11, 18, 255);
     SDL_RenderClear(app->renderer);
@@ -1582,7 +1602,7 @@ static int menu_item_count(const struct App* app, int tab)
         case MENU_TAB_MEDIA: return (int)ARRAY_SIZE(k_media_actions);
 #endif
         case MENU_TAB_SYSTEM: return 9;
-        case MENU_TAB_VIDEO: return 4;
+        case MENU_TAB_VIDEO: return 5;
         case MENU_TAB_AUDIO: return 4;
         case MENU_TAB_STATES: return 5;
         case MENU_TAB_CONTROLS: return 11;
@@ -1675,7 +1695,8 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
                 case 0: snprintf(out, out_size, "Aspect: %s", aspect_name(app)); return;
                 case 1: snprintf(out, out_size, "Scaling filter: %s", app->bilinear ? "linear" : "nearest"); return;
                 case 2: snprintf(out, out_size, "Scanlines: %s", app->scanlines ? "on" : "off"); return;
-                case 3: snprintf(out, out_size, "Fullscreen: %s", app->fullscreen ? "on" : "off"); return;
+                case 3: snprintf(out, out_size, "Interlace output: %s", app->interlace_bob ? "bob (latest field)" : "weave (both fields)"); return;
+                case 4: snprintf(out, out_size, "Fullscreen: %s", app->fullscreen ? "on" : "off"); return;
             }
             break;
         case MENU_TAB_AUDIO:
@@ -1891,6 +1912,10 @@ static void activate_menu_item(struct App* app)
                     set_message(app, "Scanlines: %s", app->scanlines ? "on" : "off");
                     break;
                 case 3:
+                    app->interlace_bob = !app->interlace_bob;
+                    set_message(app, "Interlace: %s", app->interlace_bob ? "bob" : "weave");
+                    break;
+                case 4:
                     app->fullscreen = !app->fullscreen;
                     SDL_SetWindowFullscreen(app->window, app->fullscreen);
                     set_message(app, app->fullscreen ? "Fullscreen" : "Windowed");
@@ -2401,7 +2426,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--bob|--weave] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2484,6 +2509,10 @@ int main(int argc, char** argv)
             app.bilinear = false;
         else if(!strcmp(argv[i], "--linear"))
             app.bilinear = true;
+        else if(!strcmp(argv[i], "--bob"))
+            app.interlace_bob = true;
+        else if(!strcmp(argv[i], "--weave"))
+            app.interlace_bob = false;
         else if(!strcmp(argv[i], "--scanlines"))
             app.scanlines = true;
         else if(!strcmp(argv[i], "--no-scanlines"))
@@ -2636,6 +2665,16 @@ int main(int argc, char** argv)
         return 1;
     }
     SDL_SetTextureScaleMode(app.game_tex, app.bilinear ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
+    app.bob_buf = malloc((size_t)EMU_W * EMU_H * 4u);
+    if(!app.bob_buf)
+    {
+        fprintf(stderr, "Cannot allocate bob staging frame\n");
+        SDL_DestroyTexture(app.game_tex);
+        SDL_DestroyRenderer(app.renderer);
+        SDL_DestroyWindow(app.window);
+        SDL_Quit();
+        return 1;
+    }
 
     SDL_zero(spec);
     spec.format = SDL_AUDIO_S16;
@@ -2789,6 +2828,7 @@ int main(int argc, char** argv)
             SDL_CloseGamepad(app.gamepad[gi]);
     if(app.audio_stream)
         SDL_DestroyAudioStream(app.audio_stream);
+    free(app.bob_buf);
     if(app.game_tex)
         SDL_DestroyTexture(app.game_tex);
     if(app.emu)

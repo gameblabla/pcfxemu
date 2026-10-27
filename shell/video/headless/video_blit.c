@@ -2,7 +2,7 @@
 #include <string.h>
 #include "video_blit.h"
 
-static MDFN_Pixel headless_framebuffer[512 * 240];
+static MDFN_Pixel headless_framebuffer[512 * 480];
 MDFN_Pixel* __restrict__ internal_pix = headless_framebuffer;
 const uint32_t internal_pitch = 512;
 static int active_x = 0;
@@ -10,8 +10,10 @@ static int active_y = 0;
 static int active_w = 256;
 static int active_h = 240;
 static int active_fxga = 0;
+static int active_interlaced = 0;
+static int last_mixed_odd = 0;
 #if !defined(MDFN_PIXEL_FORMAT_RGB565)
-static uint16_t rgb565_shadow[512 * 240];
+static uint16_t rgb565_shadow[512 * 480];
 #endif
 
 void Clear_Video(void)
@@ -29,12 +31,35 @@ void Init_Video(void)
     active_w = 256;
     active_h = 240;
     active_fxga = 0;
+    active_interlaced = 0;
+    last_mixed_odd = 0;
     internal_pix = headless_framebuffer + active_x;
     Clear_Video();
 }
 
 void Set_Video_Menu(void) { Clear_Video(); }
 void Set_Video_InGame(void) { internal_pix = headless_framebuffer + active_x; }
+
+/* The mode is selected by TETSU, never by the screenshot caller.
+   Keep the previous field intact until its partner completes. */
+void pcfx_headless_video_set_interlaced(int interlaced)
+{
+    interlaced = !!interlaced;
+    if(active_interlaced != interlaced)
+    {
+        active_interlaced = interlaced;
+        Clear_Video();
+    }
+    active_h = interlaced ? 480 : 240;
+}
+
+void pcfx_headless_video_note_field(int odd)
+{
+    last_mixed_odd = !!odd;
+}
+
+int pcfx_headless_video_last_field_is_odd(void) { return last_mixed_odd; }
+int pcfx_headless_video_is_interlaced(void) { return active_interlaced; }
 
 void pcfx_headless_video_set_full_width(int fxga_active)
 {
@@ -46,7 +71,7 @@ void pcfx_headless_video_set_full_width(int fxga_active)
     active_x = 0;
     active_y = 0;
     active_w = 256;
-    active_h = 240;
+    active_h = active_interlaced ? 480 : 240;
     internal_pix = headless_framebuffer + active_x;
 }
 
@@ -76,7 +101,7 @@ void Update_Video_Ingame(void) {}
 const MDFN_Pixel* pcfx_headless_video_pixels(int* width, int* height, int* pitch_pixels)
 {
     if(width) *width = 512;
-    if(height) *height = 240;
+    if(height) *height = 480;
     if(pitch_pixels) *pitch_pixels = (int)internal_pitch;
     return headless_framebuffer;
 }
@@ -152,7 +177,7 @@ static void pixel_to_rgb888(MDFN_Pixel p, uint8_t* r, uint8_t* g, uint8_t* b)
 #endif
 }
 
-static uint8_t rgba8_shadow[512 * 240 * 4];
+static uint8_t rgba8_shadow[512 * 480 * 4];
 
 const uint8_t* pcfx_headless_video_rgba8888(int* width, int* height, int* pitch_pixels)
 {

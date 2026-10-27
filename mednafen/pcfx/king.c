@@ -3261,6 +3261,11 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
 
  // For the case of interlaced mode(clear ~0 state)
  LineWidths[0] = 0;
+#ifdef PCFX_HEADLESS
+ /* Change the headless crop at frame entry, not after the field is drawn.
+    In 480i, the two 240-line scanouts weave into separate parity rows. */
+ pcfx_headless_video_set_interlaced((fx_vce.picture_mode & 0x2u) != 0);
+#endif
 
  // These 2 should be overwritten in the big loop below.
  DisplayRect->x = 0;
@@ -3554,7 +3559,14 @@ static void MixLayers(void)
 
     MDFN_Pixel *target;
     uint32 BPC_Cache = (LAYER_NONE << 28); // Backmost pixel color(cache)
-	target = pXBuf + internal_pitch * (fx_vce.raster_counter - 22);
+#ifdef PCFX_HEADLESS
+        /* C6261 section 2.6: odd field first, even field vertically offset.
+           Weave *different* decoded field lines, never copy/scale the prior field. */
+        if(fx_vce.picture_mode & 0x2u)
+          target = pXBuf + internal_pitch * (2u * (fx_vce.raster_counter - 22u) + (fx_vce.odd_field ? 0u : 1u));
+        else
+#endif
+          target = pXBuf + internal_pitch * (fx_vce.raster_counter - 22u);
     
 
     // If at least one layer is enabled with the HuC6261, hindmost color is palette[0]
@@ -3833,6 +3845,10 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
                         {
                          if(fx_vce.raster_counter >= 22 && fx_vce.raster_counter < 262)
                          {
+#ifdef PCFX_HEADLESS
+                          if(fx_vce.raster_counter == 22 && (fx_vce.picture_mode & 2u))
+                           pcfx_headless_video_note_field(fx_vce.odd_field);
+#endif
                           MixVDC();
                           MixLayers();
                          }
@@ -3847,7 +3863,20 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			break;
 
     case HPHASE_HBLANK_PART3:
-			fx_vce.raster_counter = (fx_vce.raster_counter + 1) % ((fx_vce.picture_mode & 0x1) ? 262 : 263); //lines_per_frame;
+                        /* HuC6261 C6261 §2.6: 525 scanlines over two NTSC
+                           interlace fields, with odd/even status on SR bit 14.
+                           Mode 2 alternates 263/262 scanlines.  Mode 3 also
+                           asks for half-dot shift (not simulated here yet). */
+                        const unsigned mode = fx_vce.picture_mode & 3u;
+                        const unsigned lines = (mode & 2u)
+                          ? (fx_vce.odd_field ? 263u : 262u)
+                          : ((mode & 1u) ? 262u : 263u);
+                        fx_vce.raster_counter = (fx_vce.raster_counter + 1u) % lines;
+                        if(fx_vce.raster_counter == 0)
+                        {
+                          if(mode & 2u) fx_vce.odd_field = !fx_vce.odd_field;
+                          else fx_vce.odd_field = false;
+                        }
 
                         if(fx_vce.raster_counter == 0)
                         {
