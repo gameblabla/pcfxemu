@@ -209,7 +209,10 @@ struct App
     SDL_Window* window;
     SDL_Renderer* renderer;
     SDL_Texture* game_tex;
-    uint8_t* bob_buf;
+    uint8_t* interlace_buf;
+    PCFXInterlaceState interlace_state;
+    uint64_t emulated_field_serial;
+    uint64_t processed_field_serial;
     SDL_AudioStream* audio_stream;
     SDL_Gamepad* gamepad[2];   /* one per PC-FX port */
     PCFX_Headless* emu;
@@ -225,10 +228,10 @@ struct App
     bool fullscreen;
     bool bilinear;
     bool scanlines;
-    bool interlace_bob;
+    PCFXInterlaceMode interlace_mode;
     bool enable_3d_hardware;
     int system_mode;
-    int aspect; /* 0=4:3, 1=native, 2=stretch */
+    int aspect; /* 0=4:3, 1=integer sharp, 2=stretch */
     int state_slot;
     int controller_type[2]; /* per port: 0=gamepad, 1=mouse */
     int menu_scroll[MENU_TAB_COUNT]; /* first visible content row per tab */
@@ -549,8 +552,10 @@ static void load_sdl3_config(struct App* app, const char* home_dir)
             app->bilinear = parse_bool_value(val, app->bilinear);
         else if(!strcmp(key, "scanlines"))
             app->scanlines = parse_bool_value(val, app->scanlines);
+        else if(!strcmp(key, "interlace_mode"))
+            app->interlace_mode = (PCFXInterlaceMode)parse_int_clamped(val, 0, 0, 4);
         else if(!strcmp(key, "interlace_bob"))
-            app->interlace_bob = parse_bool_value(val, app->interlace_bob);
+            app->interlace_mode = parse_bool_value(val, false) ? PCFX_INTERLACE_BOB : PCFX_INTERLACE_WEAVE;
         else if(!strcmp(key, "enable_3d_hardware"))
             app->enable_3d_hardware = parse_bool_value(val, app->enable_3d_hardware);
         else if(!strcmp(key, "fast_video"))
@@ -607,7 +612,7 @@ static bool save_sdl3_config(const struct App* app, const char* home_dir)
     fprintf(fp, "fullscreen=%d\n", app->fullscreen ? 1 : 0);
     fprintf(fp, "bilinear=%d\n", app->bilinear ? 1 : 0);
     fprintf(fp, "scanlines=%d\n", app->scanlines ? 1 : 0);
-    fprintf(fp, "interlace_bob=%d\n", app->interlace_bob ? 1 : 0);
+    fprintf(fp, "interlace_mode=%d\n", (int)app->interlace_mode);
     fprintf(fp, "enable_3d_hardware=%d\n", app->enable_3d_hardware ? 1 : 0);
     fprintf(fp, "fast_video=%d\n", app->fast_video ? 1 : 0);
     fprintf(fp, "system_mode=%d\n", app->system_mode);
@@ -957,6 +962,13 @@ static void get_render_size(struct App* app, int* ww, int* wh)
     if(wh) *wh = h;
 }
 
+static void apply_scaling_filter(struct App* app)
+{
+    if(app && app->game_tex)
+        SDL_SetTextureScaleMode(app->game_tex,
+            (app->aspect == 1 || !app->bilinear) ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
+}
+
 static SDL_FRect compute_game_rect(struct App* app, int ww, int wh)
 {
     int src_w = app->display_w > 0 ? app->display_w : 1;
@@ -986,17 +998,41 @@ static SDL_FRect compute_game_rect(struct App* app, int ww, int wh)
     }
     if(app->aspect == 1)
     {
-        int sx = (int)(dw / src_w);
-        int sy = (int)(dh / src_h);
-        int s;
-        if(sx < 1) sx = 1;
-        if(sy < 1) sy = 1;
-        s = sx < sy ? sx : sy;
-        dw = (float)(src_w * s);
-        dh = (float)(src_h * s);
+        if((src_w == 256 || src_w == 344) && (src_h == 240 || src_h == 480))
+        {
+            int sx = ww / src_w;
+            int sy = wh / src_h;
+            if(sx < 1) sx = 1;
+            if(sy < 1) sy = 1;
+            if(sx > 3) sx = 3;
+            if(sy > 3) sy = 3;
+            /* Sharp 3x horizontal pixel replication, with a separate whole-
+               number vertical scale so 480i fits normal-height displays. */
+            dw = (float)(src_w * sx);
+            dh = (float)(src_h * sy);
+        }
+        else
+        {
+            int sx = (int)(dw / src_w);
+            int sy = (int)(dh / src_h);
+            int s;
+            if(sx < 1) sx = 1;
+            if(sy < 1) sy = 1;
+            s = sx < sy ? sx : sy;
+            dw = (float)(src_w * s);
+            dh = (float)(src_h * s);
+        }
     }
-    rect.x = ((float)ww - dw) * 0.5f;
-    rect.y = ((float)wh - dh) * 0.5f;
+    if(app->aspect == 1)
+    {
+        rect.x = (float)((ww - (int)dw) / 2);
+        rect.y = (float)((wh - (int)dh) / 2);
+    }
+    else
+    {
+        rect.x = ((float)ww - dw) * 0.5f;
+        rect.y = ((float)wh - dh) * 0.5f;
+    }
     rect.w = dw;
     rect.h = dh;
     return rect;
@@ -1110,9 +1146,36 @@ static void load_state_slot(struct App* app, int slot)
         return;
     }
     if(pcfx_headless_load_state(app->emu, path))
+    {
+        pcfx_interlace_reset(&app->interlace_state);
+        app->processed_field_serial = UINT64_MAX;
         set_message(app, "Loaded state slot %d", slot);
+    }
     else
         set_message(app, "Load failed: %s", pcfx_headless_last_error(app->emu));
+}
+
+static const void* filtered_video_pixels(struct App* app, const void* pix,
+                                         int pitch, int h, int bytes_per_pixel)
+{
+    if(!pix)
+        return NULL;
+    if(pcfx_headless_video_is_interlaced() && h == EMU_H && pitch == EMU_W &&
+       (bytes_per_pixel == 4 || bytes_per_pixel == 2) && app->interlace_buf)
+    {
+        if(app->processed_field_serial != app->emulated_field_serial)
+        {
+            pcfx_interlace_present(&app->interlace_state, app->interlace_buf, pix,
+                (size_t)pitch * (size_t)bytes_per_pixel, EMU_H,
+                (unsigned)bytes_per_pixel, pcfx_headless_video_last_field_is_odd(),
+                app->interlace_mode);
+            app->processed_field_serial = app->emulated_field_serial;
+        }
+        return app->interlace_buf;
+    }
+    pcfx_interlace_reset(&app->interlace_state);
+    app->processed_field_serial = UINT64_MAX;
+    return pix;
 }
 
 static void save_screenshot(struct App* app)
@@ -1154,19 +1217,11 @@ static void render_game(struct App* app)
     pix = pcfx_headless_get_pixels(app->emu, &w, &h, &pitch, &pixel_format, &bytes_per_pixel);
     (void)pixel_format;
     update_display_rect(app);
-    /* The 512x480 core buffer already contains the actual interleaved fields.
-       For bob, use ONLY the most recently mixed field. Never copy the stale
-       partner field, and never modify the emulated TETSU surface. */
+    /* Presentation modes operate on a staging image; the emulated framebuffer
+       remains untouched. Pair/history state advances once per emulated field. */
     if(pix)
     {
-        const void *upload = pix;
-        if(app->interlace_bob && pcfx_headless_video_is_interlaced() &&
-           h == EMU_H && pitch > 0 && bytes_per_pixel > 0 && app->bob_buf)
-        {
-            pcfx_bob_field(app->bob_buf, pix, (size_t)pitch * bytes_per_pixel,
-                           EMU_H, pcfx_headless_video_last_field_is_odd());
-            upload = app->bob_buf;
-        }
+        const void *upload = filtered_video_pixels(app, pix, pitch, h, bytes_per_pixel);
         SDL_UpdateTexture(app->game_tex, NULL, upload, pitch * bytes_per_pixel);
     }
 
@@ -1315,6 +1370,9 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
         return false;
     }
 
+    pcfx_interlace_reset(&app->interlace_state);
+    app->processed_field_serial = UINT64_MAX;
+
     if(app->audio_stream)
         SDL_ClearAudioStream(app->audio_stream);
     if(app->emu)
@@ -1430,6 +1488,8 @@ static void perform_pending_swap_disc(struct App* app)
         set_message(app, "Disc swap failed: %s", pcfx_headless_last_error(app->emu));
         return;
     }
+    pcfx_interlace_reset(&app->interlace_state);
+    app->processed_field_serial = UINT64_MAX;
     copy_str(app->game_path, sizeof(app->game_path), app->pending_swap_path);
     if(CDIF_IsPhysicalPath_C(resolved_path))
         copy_str(app->game_id, sizeof(app->game_id), "Physical CD-ROM");
@@ -1445,7 +1505,14 @@ static void perform_pending_swap_disc(struct App* app)
 
 static const char* aspect_name(const struct App* app)
 {
-    return app->aspect == 1 ? "Native pixels" : (app->aspect == 2 ? "Stretch" : "4:3 display");
+    return app->aspect == 1 ? "Integer scale (sharp)" : (app->aspect == 2 ? "Stretch" : "4:3 display");
+}
+
+static const char* scaling_filter_name(const struct App* app)
+{
+    if(app->aspect == 1)
+        return "nearest (integer scale)";
+    return app->bilinear ? "linear" : "nearest";
 }
 
 static const char* controller_type_name(const struct App* app, int player)
@@ -1693,9 +1760,9 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
             switch(index)
             {
                 case 0: snprintf(out, out_size, "Aspect: %s", aspect_name(app)); return;
-                case 1: snprintf(out, out_size, "Scaling filter: %s", app->bilinear ? "linear" : "nearest"); return;
+                case 1: snprintf(out, out_size, "Scaling filter: %s", scaling_filter_name(app)); return;
                 case 2: snprintf(out, out_size, "Scanlines: %s", app->scanlines ? "on" : "off"); return;
-                case 3: snprintf(out, out_size, "Interlace output: %s", app->interlace_bob ? "bob (latest field)" : "weave (both fields)"); return;
+                case 3: snprintf(out, out_size, "Interlace output: %s", pcfx_interlace_mode_name(app->interlace_mode)); return;
                 case 4: snprintf(out, out_size, "Fullscreen: %s", app->fullscreen ? "on" : "off"); return;
             }
             break;
@@ -1868,7 +1935,12 @@ static void activate_menu_item(struct App* app)
                     reload_current_media_keep_menu(app);
                     break;
                 case 3:
-                    if(pcfx_headless_soft_reset(app->emu)) set_message(app, "Soft reset");
+                    if(pcfx_headless_soft_reset(app->emu))
+                    {
+                        pcfx_interlace_reset(&app->interlace_state);
+                        app->processed_field_serial = UINT64_MAX;
+                        set_message(app, "Soft reset");
+                    }
                     else set_message(app, "Soft reset failed: %s", pcfx_headless_last_error(app->emu));
                     break;
                 case 4:
@@ -1899,21 +1971,23 @@ static void activate_menu_item(struct App* app)
             {
                 case 0:
                     app->aspect = (app->aspect + 1) % 3;
+                    apply_scaling_filter(app);
                     set_message(app, "Aspect: %s", aspect_name(app));
                     break;
                 case 1:
                     app->bilinear = !app->bilinear;
-                    if(app->game_tex)
-                        SDL_SetTextureScaleMode(app->game_tex, app->bilinear ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
-                    set_message(app, "Scaling filter: %s", app->bilinear ? "linear" : "nearest");
+                    apply_scaling_filter(app);
+                    set_message(app, "Scaling filter: %s", scaling_filter_name(app));
                     break;
                 case 2:
                     app->scanlines = !app->scanlines;
                     set_message(app, "Scanlines: %s", app->scanlines ? "on" : "off");
                     break;
                 case 3:
-                    app->interlace_bob = !app->interlace_bob;
-                    set_message(app, "Interlace: %s", app->interlace_bob ? "bob" : "weave");
+                    app->interlace_mode = (PCFXInterlaceMode)(((int)app->interlace_mode + 1) % 5);
+                    pcfx_interlace_reset(&app->interlace_state);
+                    app->processed_field_serial = UINT64_MAX;
+                    set_message(app, "Interlace: %s", pcfx_interlace_mode_name(app->interlace_mode));
                     break;
                 case 4:
                     app->fullscreen = !app->fullscreen;
@@ -2426,7 +2500,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--bob|--weave] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--integer-scale|--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--weave|--bob|--raw-interlace|--motion-adaptive|--pair-locked] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2452,7 +2526,7 @@ int main(int argc, char** argv)
     init_default_keymaps(&app);
     copy_str(app.bios_dir, sizeof(app.bios_dir), "");
     app.running = true;
-    app.bilinear = true;
+    app.bilinear = false;
     app.enable_3d_hardware = true;
     app.system_mode = PCFX_UI_MODE_AUTO;
     app.menu_hover_tab = -1;
@@ -2501,7 +2575,7 @@ int main(int argc, char** argv)
             app.fullscreen = true;
         else if(!strcmp(argv[i], "--windowed"))
             app.fullscreen = false;
-        else if(!strcmp(argv[i], "--native-aspect"))
+        else if(!strcmp(argv[i], "--integer-scale") || !strcmp(argv[i], "--native-aspect"))
             app.aspect = 1;
         else if(!strcmp(argv[i], "--stretch"))
             app.aspect = 2;
@@ -2510,9 +2584,15 @@ int main(int argc, char** argv)
         else if(!strcmp(argv[i], "--linear"))
             app.bilinear = true;
         else if(!strcmp(argv[i], "--bob"))
-            app.interlace_bob = true;
+            app.interlace_mode = PCFX_INTERLACE_BOB;
         else if(!strcmp(argv[i], "--weave"))
-            app.interlace_bob = false;
+            app.interlace_mode = PCFX_INTERLACE_WEAVE;
+        else if(!strcmp(argv[i], "--raw-interlace"))
+            app.interlace_mode = PCFX_INTERLACE_RAW;
+        else if(!strcmp(argv[i], "--motion-adaptive"))
+            app.interlace_mode = PCFX_INTERLACE_ADAPTIVE;
+        else if(!strcmp(argv[i], "--pair-locked"))
+            app.interlace_mode = PCFX_INTERLACE_PAIR_LOCK;
         else if(!strcmp(argv[i], "--scanlines"))
             app.scanlines = true;
         else if(!strcmp(argv[i], "--no-scanlines"))
@@ -2664,11 +2744,21 @@ int main(int argc, char** argv)
         SDL_Quit();
         return 1;
     }
-    SDL_SetTextureScaleMode(app.game_tex, app.bilinear ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST);
-    app.bob_buf = malloc((size_t)EMU_W * EMU_H * 4u);
-    if(!app.bob_buf)
+    SDL_SetTextureBlendMode(app.game_tex, SDL_BLENDMODE_NONE);
+    apply_scaling_filter(&app);
+    app.interlace_buf = malloc((size_t)EMU_W * EMU_H * 4u);
+    app.processed_field_serial = UINT64_MAX;
+    if(!app.interlace_buf || !pcfx_interlace_init(&app.interlace_state,
+#ifdef WANT_32BPP
+                     (size_t)EMU_W * 4u,
+#else
+                     (size_t)EMU_W * 2u,
+#endif
+                     EMU_H))
     {
-        fprintf(stderr, "Cannot allocate bob staging frame\n");
+        fprintf(stderr, "Cannot allocate interlace staging/history frames\n");
+        pcfx_interlace_destroy(&app.interlace_state);
+        free(app.interlace_buf);
         SDL_DestroyTexture(app.game_tex);
         SDL_DestroyRenderer(app.renderer);
         SDL_DestroyWindow(app.window);
@@ -2808,6 +2898,7 @@ int main(int argc, char** argv)
                     break;
                 }
                 app.next_frame_ms += 1000.0 / PCFX_FPS;
+                app.emulated_field_serial++;
                 ran++;
             }
             if(ran == 4 && t > app.next_frame_ms + 500.0)
@@ -2828,7 +2919,8 @@ int main(int argc, char** argv)
             SDL_CloseGamepad(app.gamepad[gi]);
     if(app.audio_stream)
         SDL_DestroyAudioStream(app.audio_stream);
-    free(app.bob_buf);
+    pcfx_interlace_destroy(&app.interlace_state);
+    free(app.interlace_buf);
     if(app.game_tex)
         SDL_DestroyTexture(app.game_tex);
     if(app.emu)
