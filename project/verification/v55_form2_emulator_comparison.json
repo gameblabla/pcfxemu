@@ -1,0 +1,49 @@
+{
+  "emulator": "PCFXEMU v43 source / pcfx-headless patched Mode2 backend",
+  "bios": "user-provided pcfx.rom; excluded from deliverables",
+  "baseline_release": "PCFX_v55_HuC6271_TRELLIS_NATIVE_480i.cue",
+  "enhanced_release": "PCFX_v55_Form2_TRELLIS_Experimental.cue",
+  "emulated_fields": 8500,
+  "baseline": {
+    "dw3_boot_stage": 4,
+    "g_video_frames_presented": 1777,
+    "g_video_frames_dropped_stale": 0,
+    "g_video_frames_held": 0,
+    "g_video_frames_audio_late": 91,
+    "g_video_cadence_intervals": 1775,
+    "g_video_cadence_exact4": 1775,
+    "g_video_cadence_short": 0,
+    "g_video_cadence_long": 0,
+    "g_video_cadence_max_gap": 4,
+    "g_adpcm_underruns": 0,
+    "g_scsi_dma_errors": 0,
+    "g_scsi_dma_started": 268
+  },
+  "form2_trellis": {
+    "dw3_boot_stage": 4,
+    "g_video_frames_presented": 1777,
+    "g_video_frames_dropped_stale": 0,
+    "g_video_frames_held": 10,
+    "g_video_frames_audio_late": 1577,
+    "g_video_cadence_intervals": 1775,
+    "g_video_cadence_exact4": 1766,
+    "g_video_cadence_short": 0,
+    "g_video_cadence_long": 9,
+    "g_video_cadence_max_gap": 12,
+    "g_adpcm_underruns": 0,
+    "g_scsi_dma_errors": 0,
+    "g_scsi_dma_started": 293
+  },
+  "source_measured_replacement_fields": [
+    1400,
+    1401,
+    1402,
+    1403
+  ],
+  "tested_source_picture_sse_gain_db": 0.128013141230315,
+  "transport_only_repack_sampled_fields_pixel_identical": true,
+  "audio_adpcm_sha256": "6b488726981b487e1b8beb8ae3ae955bb152f0c06bdce49f13bb8e1c0265b789",
+  "note": "g_video_frames_audio_late counts displayed video frames behind the audio-derived target, not raw ADPCM sample drift.",
+  "physical_drive_hardware_verified": false,
+  "bitrate_claim": "authored physical sectors divided by nominal encoded clip duration; instantaneous transfer throughput not instrumented"
+}

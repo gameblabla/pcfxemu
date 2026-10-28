@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "fields": 3584,
+  "trellis_modified_fields": [
+    1400,
+    1401,
+    1402,
+    1403
+  ],
+  "all_other_video_records_identical": true,
+  "adpcm_sha256": "6b488726981b487e1b8beb8ae3ae955bb152f0c06bdce49f13bb8e1c0265b789",
+  "audio_identical": true,
+  "physical_sector_size": 2352,
+  "form2_application_payload_size": 2324,
+  "mode1_boot_sectors": 630,
+  "mode2_form2_movie_sectors": 11546,
+  "all_raw_form2_EDC_valid": true,
+  "tested_mode1_EDC_ECC_valid": true,
+  "sector_budget_per_field_met": true
+}

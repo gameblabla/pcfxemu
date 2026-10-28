@@ -41,6 +41,47 @@ static void (*CDIRQCallback)(int);
 static void (*CDStuffSubchannels)(uint8, int);
 static PCFX_RawAudioMixer *cdda_mixer;
 static int WhichSystem;
+/* SCSI logical block length selected by the PC-FX initiator.  Changing this
+ * alters the bytes exposed per physical sector, never the CD spindle rate. */
+static uint16 PCFXSectorBytes = 2048;
+
+static bool PCFXGetSectorView(const uint8 *raw, unsigned requested,
+                             const uint8 **payload, unsigned *length)
+{
+    const bool mode1 = raw[15] == 1;
+    const bool mode2 = raw[15] == 2;
+    const bool form2 = mode2 && (raw[18] & 0x20) != 0;
+
+    if(!mode1 && !mode2)
+        return false;
+    switch(requested)
+    {
+        case 2048:
+            *payload = raw + (mode2 ? 24 : 16);
+            *length = 2048;
+            return true;
+        case 2324:
+            if(!form2) return false;
+            *payload = raw + 24;
+            *length = 2324;
+            return true;
+        case 2336:
+            if(!mode2) return false;
+            *payload = raw + 16;
+            *length = 2336;
+            return true;
+        case 2340:
+            *payload = raw + 12;
+            *length = 2340;
+            return true;
+        case 2352:
+            *payload = raw;
+            *length = 2352;
+            return true;
+        default:
+            return false;
+    }
+}
 
 static CDIF *Cur_CDIF;
 static bool TrayOpen;
@@ -283,6 +324,7 @@ static void FixOPV(void)
 static void VirtualReset(void)
 {
 	InitModePages();
+	PCFXSectorBytes = 2048;
 
 	SCSI_FIFO_Flush(din);
 
@@ -943,6 +985,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 {
 	uint8 mode_data_length, medium_type, device_specific, block_descriptor_length;
 	uint32 offset = 0;
+	uint16 pending_sector_bytes = PCFXSectorBytes;
 
 	if(data_len < 4)
 	{
@@ -972,7 +1015,23 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 		return;
 	}
 
-	// TODO: block descriptors.
+	/* Standard 8-byte MODE SELECT(6) descriptor: 24-bit block length at
+         bytes 9..11, after the four-byte parameter header.  Commit only
+         after every mode page has passed validation. */
+    if(WhichSystem == SCSICD_PCFX && block_descriptor_length == 8)
+    {
+        const uint32 requested = ((uint32)data[9] << 16) |
+                                 ((uint32)data[10] << 8) | data[11];
+        switch(requested)
+        {
+            case 2048: case 2324: case 2336: case 2340: case 2352:
+                pending_sector_bytes = (uint16)requested;
+                break;
+            default:
+                CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+                return;
+        }
+    }
 	offset += block_descriptor_length;
 
 	// Now handle mode pages
@@ -1042,6 +1101,8 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 	 }
 	}
 
+    if(WhichSystem == SCSICD_PCFX)
+        PCFXSectorBytes = pending_sector_bytes;
 	SendStatusAndMessage(STATUS_GOOD, 0x00);
 }
 
@@ -1101,7 +1162,7 @@ static void DoMODESENSE6(const uint8 *cdb)
   index += 3;
  
   data_in[index++] = 0x00;	// Reserved
-  MDFN_en24msb(&data_in[index], 0x800); // Block length;
+  MDFN_en24msb(&data_in[index], (WhichSystem == SCSICD_PCFX && PC == 0) ? PCFXSectorBytes : 2048); // Block length;
   index += 3;
  }
 
@@ -2758,10 +2819,17 @@ static inline void RunCDRead(int32 run_time)
 				{
 					memcpy(cd.SubPWBuf, tmp_read_buf + 2352, 96);
 
-					if(tmp_read_buf[12 + 3] == 0x2)
-						SCSI_FIFO_Write(din, tmp_read_buf + 24, 2048);
-					else
-						SCSI_FIFO_Write(din, tmp_read_buf + 16, 2048);
+                    const uint8 *payload = NULL;
+                    unsigned payload_size = 0;
+                    const unsigned requested = (WhichSystem == SCSICD_PCFX) ? PCFXSectorBytes : 2048;
+                    if(!PCFXGetSectorView(tmp_read_buf, requested, &payload, &payload_size))
+                    {
+                        SCSI_FIFO_Flush(din);
+                        cd.data_transfer_done = false;
+                        CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+                        return;
+                    }
+                    SCSI_FIFO_Write(din, payload, payload_size);
 
 					GenSubQFromSubPW();
 
@@ -3088,6 +3156,7 @@ int SCSICD_StateAction(StateMem* sm, const unsigned load, const bool data_only, 
 	  SFVARN(cd_bus.DB, "DB"),
 	  SFVARN(cd_bus.signals, "Signals"),
 	  SFVAR(CurrentPhase),
+      SFVAR(PCFXSectorBytes),
 
 	  //SFVARN(cd_bus.BSY, "BSY"),
 	  //SFVARN(cd_bus.MSG, "MSG"),
