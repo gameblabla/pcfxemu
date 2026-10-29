@@ -1010,30 +1010,16 @@ static SDL_FRect compute_game_rect(struct App* app, int ww, int wh)
     }
     if(app->aspect == 1)
     {
-        if((src_w == 256 || src_w == 344) && (src_h == 240 || src_h == 480))
-        {
-            int sx = ww / src_w;
-            int sy = wh / src_h;
-            if(sx < 1) sx = 1;
-            if(sy < 1) sy = 1;
-            if(sx > 3) sx = 3;
-            if(sy > 3) sy = 3;
-            /* Sharp 3x horizontal pixel replication, with a separate whole-
-               number vertical scale so 480i fits normal-height displays. */
-            dw = (float)(src_w * sx);
-            dh = (float)(src_h * sy);
-        }
-        else
-        {
-            int sx = (int)(dw / src_w);
-            int sy = (int)(dh / src_h);
-            int s;
-            if(sx < 1) sx = 1;
-            if(sy < 1) sy = 1;
-            s = sx < sy ? sx : sy;
-            dw = (float)(src_w * s);
-            dh = (float)(src_h * s);
-        }
+        int sx = ww / src_w;
+        int sy = wh / src_h;
+        if(sx < 1) sx = 1;
+        if(sy < 1) sy = 1;
+        if(sx > 3) sx = 3;
+        if(sy > 3) sy = 3;
+        /* Scale each source axis by the largest whole-number factor that
+           fits. This also handles 341-dot and 1024-clock output surfaces. */
+        dw = (float)(src_w * sx);
+        dh = (float)(src_h * sy);
     }
     if(app->aspect == 1)
     {
