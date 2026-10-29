@@ -1,0 +1,638 @@
+diff --git a/mednafen/pcfx/pcfx_yuv_color.h b/mednafen/pcfx/pcfx_yuv_color.h
+--- a/mednafen/pcfx/pcfx_yuv_color.h
++++ b/mednafen/pcfx/pcfx_yuv_color.h
+@@ -1,105 +1,49 @@
+ /* HuC6261 final DAC signal conversion for PC-FX emulator display.
+  *
+- * HuC6261 device notes, section 2.8, define Y=0..255; U,V are signed
+- * colour differences biased by 128, full-range and linear at the DAC.
+- * The DAC is NOT a JPEG/BT.601 YCbCr decoder. JPEG-like HuC6271 output
+- * is mixed with KING direct YUV and palette-derived YUV *before* the DAC.
++ * The DAC receives full-range Y, U and V, with unsigned U/V biased by 128.
++ * KING, RAINBOW and palette graphics share this final conversion.
+  *
+- * The following is the conventional analog-YUV inverse transform, used
+- * as a display/measurement approximation. NEC/Hudson do not provide
+- * precise PC-FX motherboard analog gains, display gamma, or encoder
+- * transfer response: refer to docs/HARDWARE_TESTS_REQUIRED.md.
++ * The six constants below are the inverse of the conventional three-decimal
++ * RGB->analog YUV matrix:
++ *   Y =  0.299 R + 0.587 G + 0.114 B
++ *   U = -0.147 R - 0.289 G + 0.436 B
++ *   V =  0.615 R - 0.515 G - 0.100 B
++ *
++ * The small U->R and V->B terms arise from rounding the forward coefficients;
++ * they are NOT hardware measurements of crosstalk. This is an analog-YUV
++ * display approximation, not measured motherboard/encoder colorimetry.
++ * Refer to docs/HARDWARE_TESTS_REQUIRED.md for calibration limitations.
+  */
+ #ifndef PCFX_YUV_COLOR_H
+ #define PCFX_YUV_COLOR_H
+ 
+ #include <math.h>
+-#include <string.h>
+ 
+ typedef struct
+ {
+  int r, g, b;
+ } PCFX_YUVColorOffsets;
+ 
+-/* The v25 display approximation is intentionally the default.  The other
+- * modes are diagnostics, NOT hardware-validated calibration profiles.
+- *
+- * The six coefficients in the original pre-d344a0ad code are the inverse of:
+- *   Y = 0.299 R + 0.587 G + 0.114 B
+- *   U = -0.147 R - 0.289 G + 0.436 B
+- *   V = 0.615 R - 0.515 G - 0.100 B
+- * Rounding the forward coefficients to three digits causes the small
+- * nonzero U->R and V->B cross terms.  They do not represent measured
+- * HuC6261 DAC crosstalk.  Both inverse options below retain those terms.
++/* The single supported final-output color transform. For the common default
++ * floating-point mode (FE_TONEAREST), lrint rounds to nearest, ties-to-even.
++ * The 65536-entry chroma offset table is constructed at initialization, not
++ * per pixel. Keep the historical expression evaluation order for continuity.
+  */
+-typedef enum
+-{
+- PCFX_YUV_V25 = 0,        /* simplified analog YUV, lrint; unchanged v25 output */
+- PCFX_YUV_INVERSE_LRINT,  /* exact historical matrix, rounded to nearest */
+- PCFX_YUV_INVERSE_TRUNC   /* historical matrix and C cast (towards zero) */
+-} PCFX_YUVMatrixMode;
+-
+-static inline int PCFX_YUVMatrixModeFromString(const char *value,
+-                                               PCFX_YUVMatrixMode *mode)
+-{
+- if(!value || !*value || !strcmp(value, "v25"))
+-  *mode = PCFX_YUV_V25;
+- else if(!strcmp(value, "inverse-lrint"))
+-  *mode = PCFX_YUV_INVERSE_LRINT;
+- else if(!strcmp(value, "inverse-trunc"))
+-  *mode = PCFX_YUV_INVERSE_TRUNC;
+- else
+-  return 0;
+- return 1;
+-}
+-
+-static inline PCFX_YUVColorOffsets PCFX_YUVOffsetsForMode(unsigned ur,
+-                    unsigned vr, PCFX_YUVMatrixMode mode)
++static inline PCFX_YUVColorOffsets PCFX_AnalogYUVOffsets(unsigned ur,
++                                                         unsigned vr)
+ {
+  const int u = (int)ur - 128;
+  const int v = (int)vr - 128;
+  PCFX_YUVColorOffsets out;
+-
+- if(mode == PCFX_YUV_V25)
+- {
+-  /* v25's original literals/order: maintain pixel-identical default. */
+-  out.r = (int)lrint(1.13983 * v);
+-  out.g = (int)lrint(-0.39465 * u - 0.58060 * v);
+-  out.b = (int)lrint(2.03211 * u);
+- }
+- else
+- {
+-  /* Inverse of the rounded three-decimal forward matrix above.
+-   * Important: keep the original operation grouping for exact A/B parity.
+-   */
+-  const double r = 0 - 0.000039457070707 * u + 1.139827967171717 * v;
+-  const double g = 0 - 0.394610164141414 * u - 0.580500315656566 * v;
+-  const double b = 0 + 2.031999684343434 * u - 0.000481376262626 * v;
+-  if(mode == PCFX_YUV_INVERSE_TRUNC)
+-  {
+-   out.r = (int)r;
+-   out.g = (int)g;
+-   out.b = (int)b;
+-  }
+-  else
+-  {
+-   out.r = (int)lrint(r);
+-   out.g = (int)lrint(g);
+-   out.b = (int)lrint(b);
+-  }
+- }
++ out.r = (int)lrint(0 - 0.000039457070707 * u + 1.139827967171717 * v);
++ out.g = (int)lrint(0 - 0.394610164141414 * u - 0.580500315656566 * v);
++ out.b = (int)lrint(0 + 2.031999684343434 * u - 0.000481376262626 * v);
+  return out;
+-}
+-
+-static inline PCFX_YUVColorOffsets PCFX_AnalogYUVOffsets(unsigned ur, unsigned vr)
+-{
+- return PCFX_YUVOffsetsForMode(ur, vr, PCFX_YUV_V25);
+ }
+ 
+ static inline unsigned PCFX_YUVPalettePacked(unsigned yuv844)
+ {
+- /* Palette YUV844 must have zero-filled low chroma nibbles, NOT
+-  * sign-extended, limited-range-remapped or gamma-corrected. */
++ /* Palette YUV844: zero-fill low chroma nibbles, not sign-extend or remap. */
+  return ((yuv844 & 0xFF00u) << 8) |
+         ((yuv844 & 0x00F0u) << 8) |
+         ((yuv844 & 0x000Fu) << 4);
+diff --git a/mednafen/pcfx/king.c b/mednafen/pcfx/king.c
+--- a/mednafen/pcfx/king.c
++++ b/mednafen/pcfx/king.c
+@@ -4172,20 +4172,14 @@
+ 
+ static void RebuildUVLUT(void)
+ {
+- /* Optional reconstruction comparison. Only the final TETSU output is
+-  * affected; no RAINBOW decoding or guest-visible registers are altered. */
+- PCFX_YUVMatrixMode matrix_mode = PCFX_YUV_V25;
+- const char *matrix_env = getenv("PCFX_YUV_MATRIX");
+- if(!PCFX_YUVMatrixModeFromString(matrix_env, &matrix_mode))
+-  fprintf(stderr, "PCFX: unknown PCFX_YUV_MATRIX='%s'; using v25\n", matrix_env);
+-
++ /* One color reconstruction for all TETSU output: KING, RAINBOW, palettes. */
+  for(uint_fast16_t ur = 0; ur < 256; ur++)
+  {
+   for(uint_fast16_t vr = 0; vr < 256; vr++)
+   {
+    int r, g, b;
+    /* All TETSU output planes share the HuC6261 analog YUV DAC. */
+-   const PCFX_YUVColorOffsets offset = PCFX_YUVOffsetsForMode(ur, vr, matrix_mode);
++   const PCFX_YUVColorOffsets offset = PCFX_AnalogYUVOffsets(ur, vr);
+    r = offset.r;
+    g = offset.g;
+    b = offset.b;
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -98,22 +98,17 @@
+ `tests/run_rainbow_concealment_test.sh`.
+ 
+ 
+-## v26 — trace the analog-YUV coefficients and compare rounding
++## v27 — one inverse-YUV matrix, nearest integer
+ 
+-The six unusual historical coefficients in `king.c` are the **inverse** of the
+-three-decimal RGB-to-YUV matrix, not measurements of the HuC6261.
+-The default is deliberately **identical** to v25.  An opt-in final-output
+-matrix comparator (shared by KING, VDC/palette and RAINBOW) is available:
++The full six-coefficient inverse of the conventional analog RGB-to-YUV
++matrix is now the **only** TETSU display conversion. Chrominance offsets
++are rounded with `lrint()` when the shared 65,536-entry UV table is built.
++This is the v26 `inverse-lrint` output, now unconditional.
+ 
+-```sh
+-PCFX_YUV_MATRIX=v25 ./pcfx-headless-v26 --help
+-PCFX_YUV_MATRIX=inverse-lrint ./pcfx-headless-v26 --help
+-PCFX_YUV_MATRIX=inverse-trunc ./pcfx-headless-v26 --help
+-```
++There is no `PCFX_YUV_MATRIX` runtime selector and no simplified-v25 or
++truncation alternatives in the production conversion code. The conversion
++applies equally to KING, RAINBOW, and palette-based planes. It remains a
++**display approximation**, not a verified PC-FX analog board calibration.
+ 
+-Apply the same environment variable to `pcfx-sdl3-ui-v26` for the SDL3
+-frontend. `inverse-trunc` exactly reproduces the original pre-regression
+-UV offset LUT; `inverse-lrint` changes only the final coefficient rounding.
+-These are diagnostic rendering profiles, **not calibrated hardware presets**.
+-The documented 8-bit DAC encoding and existing KING/K-BUS schedule are untouched.
+-See `docs/YUV_INVERSE_MATRIX_V26.md` and `tests/run_king_v26_yuv_matrix_test.sh`.
++See `docs/YUV_INVERSE_MATRIX_V27.md` and
++`tests/run_king_v27_yuv_matrix_test.sh`.
+diff --git a/run-sdl3-offscreen.sh b/run-sdl3-offscreen.sh
+--- a/run-sdl3-offscreen.sh
++++ b/run-sdl3-offscreen.sh
+@@ -6,4 +6,4 @@
+ LD_LIBRARY_PATH="$HERE/runtime_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+ SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" \
+ SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}" \
+-exec "$HERE/pcfx-sdl3-ui-v26" "$@"
++exec "$HERE/pcfx-sdl3-ui-v27" "$@"
+diff --git a/tests/run_king_v26_yuv_matrix_test.sh b/tests/run_king_v26_yuv_matrix_test.sh
+deleted file mode 100755
+--- a/tests/run_king_v26_yuv_matrix_test.sh
++++ /dev/null
+@@ -1,6 +0,0 @@
+-#!/bin/sh
+-set -eu
+-cd "$(dirname "$0")/.."
+-cc -std=gnu11 -O2 -Wall -Wextra -Werror -I. \
+-  -o /tmp/pcfx_v26_yuv_matrix_test tests/king_v26_yuv_matrix_test.c -lm
+-/tmp/pcfx_v26_yuv_matrix_test
+diff --git a/tests/king_v26_yuv_matrix_test.c b/tests/king_v26_yuv_matrix_test.c
+deleted file mode 100644
+--- a/tests/king_v26_yuv_matrix_test.c
++++ /dev/null
+@@ -1,116 +0,0 @@
+-/* PCFXemu v26 YUV inverse-matrix and rounding regression tests.
+- * These assert arithmetic and compatibility only, NOT physical RGB output.
+- */
+-#include <assert.h>
+-#include <fenv.h>
+-#include <math.h>
+-#include <stdint.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include "mednafen/pcfx/pcfx_yuv_color.h"
+-
+-static int clamp(int x) { return x < 0 ? 0 : x > 255 ? 255 : x; }
+-static int equal(PCFX_YUVColorOffsets a, PCFX_YUVColorOffsets b)
+-{ return a.r == b.r && a.g == b.g && a.b == b.b; }
+-
+-/* Independent, explicit reference to source as it was before d344a0ad. */
+-static PCFX_YUVColorOffsets original(int ur, int vr)
+-{
+- const int u = ur - 128;
+- const int v = vr - 128;
+- PCFX_YUVColorOffsets r;
+- r.r = (int)(0 - 0.000039457070707 * u + 1.139827967171717 * v);
+- r.g = (int)(0 - 0.394610164141414 * u - 0.580500315656566 * v);
+- r.b = (int)(0 + 2.031999684343434 * u - 0.000481376262626 * v);
+- return r;
+-}
+-
+-/* Invert a matrix using elimination, independent of hardcoded inverse numbers. */
+-static void invert_forward(long double result[3][3])
+-{
+- long double a[3][6] = {
+-  { .299L, .587L, .114L, 1, 0, 0 },
+-  {-.147L,-.289L, .436L, 0, 1, 0 },
+-  { .615L,-.515L,-.100L, 0, 0, 1 }
+- };
+- for(int p=0;p<3;p++)
+- {
+-  long double div=a[p][p];
+-  assert(fabsl(div)>0.0001L);
+-  for(int j=0;j<6;j++) a[p][j]/=div;
+-  for(int i=0;i<3;i++) if(i!=p)
+-  {
+-   long double x=a[i][p];
+-   for(int j=0;j<6;j++) a[i][j]-=x*a[p][j];
+-  }
+- }
+- for(int i=0;i<3;i++) for(int j=0;j<3;j++) result[i][j]=a[i][j+3];
+-}
+-
+-int main(void)
+-{
+- PCFX_YUVMatrixMode mode;
+- assert(PCFX_YUVMatrixModeFromString(NULL,&mode) && mode==PCFX_YUV_V25);
+- assert(PCFX_YUVMatrixModeFromString("v25",&mode) && mode==PCFX_YUV_V25);
+- assert(PCFX_YUVMatrixModeFromString("inverse-lrint",&mode) && mode==PCFX_YUV_INVERSE_LRINT);
+- assert(PCFX_YUVMatrixModeFromString("inverse-trunc",&mode) && mode==PCFX_YUV_INVERSE_TRUNC);
+- assert(!PCFX_YUVMatrixModeFromString("jpeg",&mode));
+- assert(fesetround(FE_TONEAREST)==0);
+- /* nearest, ties-to-even is different from C's truncation and lround(). */
+- assert((int)lrint(1.8) == 2 && (int)(1.8) == 1);
+- assert((int)lrint(-1.8) == -2 && (int)(-1.8) == -1);
+- assert((int)lrint(2.5) == 2 && (int)lrint(3.5) == 4);
+-
+- long double inv[3][3];
+- invert_forward(inv);
+- const long double expected[3][3] = {
+-  {1.0L, -0.000039457070707L,  1.139827967171717L},
+-  {1.0L, -0.394610164141414L, -0.580500315656566L},
+-  {1.0L,  2.031999684343434L, -0.000481376262626L}
+- };
+- for(int i=0;i<3;i++) for(int j=0;j<3;j++)
+-  assert(fabsl(inv[i][j]-expected[i][j]) < 1e-11L);
+-
+- int legacy_mismatch=0, rounded_mismatch=0;
+- int matrix_changed=0, round_changed=0;
+- int channel_diff[3] = {0,0,0};
+- for(int ur=0;ur<256;ur++) for(int vr=0;vr<256;vr++)
+- {
+-  const PCFX_YUVColorOffsets o=original(ur,vr);
+-  const PCFX_YUVColorOffsets v25=PCFX_YUVOffsetsForMode(ur,vr,PCFX_YUV_V25);
+-  const PCFX_YUVColorOffsets trunc=PCFX_YUVOffsetsForMode(ur,vr,PCFX_YUV_INVERSE_TRUNC);
+-  const PCFX_YUVColorOffsets near=PCFX_YUVOffsetsForMode(ur,vr,PCFX_YUV_INVERSE_LRINT);
+-  const PCFX_YUVColorOffsets d=PCFX_AnalogYUVOffsets(ur,vr);
+-  legacy_mismatch+=!equal(o,trunc);
+-  rounded_mismatch+=!equal(v25,d);
+-  matrix_changed+=!equal(near,v25);
+-  round_changed+=!equal(near,trunc);
+-  channel_diff[0]+=near.r!=v25.r;
+-  channel_diff[1]+=near.g!=v25.g;
+-  channel_diff[2]+=near.b!=v25.b;
+-  /* Every mode preserves neutral chroma for all Y. */
+-  if(ur==128 && vr==128)
+-  {
+-   assert(equal(o,v25) && equal(v25,near));
+-   assert(v25.r==0 && v25.g==0 && v25.b==0);
+-  }
+-  /* The 8-bit output only changes by +/- 1 between nearest matrices. */
+-  assert(abs(near.r-v25.r)<=1 && abs(near.g-v25.g)<=1 && abs(near.b-v25.b)<=1);
+-  for(int y=0;y<256;y+=17)
+-  {
+-   int r=clamp(y+near.r), g=clamp(y+near.g), b=clamp(y+near.b);
+-   assert(r>=0 && r<=255 && g>=0 && g<=255 && b>=0 && b<=255);
+-  }
+- }
+- assert(legacy_mismatch==0 && rounded_mismatch==0);
+- assert(matrix_changed>0 && round_changed>0);
+- /* On the default FE_TONEAREST environment, checked over all 65,536 UV inputs. */
+- printf("PASS: inverse of RGB->YUV matrix matches 6 historical coefficients (1e-11)\n");
+- printf("PASS: original cast-trunc LUT matches historical C expression on all 65536 inputs\n");
+- printf("PASS: v25 default remains bit-identical on all 65536 inputs\n");
+- printf("PASS: inverse-lrint differs from v25 at %d UV tuples (R %d, G %d, B %d); <=1 code per channel\n",
+-        matrix_changed,channel_diff[0],channel_diff[1],channel_diff[2]);
+- printf("PASS: inverse-trunc differs from inverse-lrint at %d UV tuples\n",round_changed);
+- return 0;
+-}
+diff --git a/docs/YUV_INVERSE_MATRIX_V26.md b/docs/YUV_INVERSE_MATRIX_V26.md
+deleted file mode 100644
+--- a/docs/YUV_INVERSE_MATRIX_V26.md
++++ /dev/null
+@@ -1,133 +0,0 @@
+-# PCFXemu v26: origin of the KING/TETSU YUV inverse coefficients
+-
+-This is a numerical audit and diagnostic improvement, **not** a physical PC-FX
+-color calibration. The default pixel output remains v25.
+-
+-## Discovery: the six historical numbers are *not* mysterious hardware gains
+-
+-The old `king.c` table used the following values (before commit
+-[`d344a0ad`](https://github.com/gameblabla/pcfxemu/commit/d344a0ad8ae24a5f381b61652b69e601cf48db4a)):
+-
+-```
+-R_offset = -0.000039457070707*U + 1.139827967171717*V
+-G_offset = -0.394610164141414*U - 0.580500315656566*V
+-B_offset =  2.031999684343434*U - 0.000481376262626*V
+-```
+-
+-Here `U = unsigned_8bit_U - 128`, `V = unsigned_8bit_V - 128`, and
+-`RGB = clamp(Y + [R_offset, G_offset, B_offset], 0, 255)`.
+-
+-These offsets are the matrix inverse of the conventional **three-decimal**
+-RGB-to-YUV coefficients:
+-
+-```
+-[Y]   [ 0.299  0.587   0.114] [R]
+-[U] = [-0.147 -0.289   0.436] [G]
+-[V]   [ 0.615 -0.515  -0.100] [B]
+-```
+-
+-Gauss-Jordan inversion of that forward matrix produces, numerically:
+-
+-```
+-[Y]                   [R]   [1  -0.000039457070707   1.139827967171717] [Y]
+-[U] ... invert ... -> [G] = [1  -0.394610164141414  -0.580500315656566] [U]
+-[V]                   [B]   [1   2.031999684343434 -0.000481376262626] [V]
+-```
+-
+-The old `U->R` and `V->B` cross-terms are tiny **because the forward
+-coefficients were rounded to three decimal places**. They do not demonstrate
+-real electronic crosstalk or a specially characterized NEC video encoder.
+-
+-The v25 simplification is:
+-
+-```
+-R_offset =  1.13983*V
+-G_offset = -0.39465*U - 0.58060*V
+-B_offset =  2.03211*U
+-```
+-
+-It is a standard analog-YUV inverse *approximation*, not a calibrated output
+-transform. It preserves the HuC6261's stated Y/U/V DAC encoding and sign.
+-The earlier JPEG/BT.601 *full-range YCbCr* matrix, introduced in d344a0ad,
+-was erroneously applied to the **shared** TETSU output, not just RAINBOW.
+-
+-## `lrint()` vs `(int)` and whether to change it
+-
+-* `(int)x` truncates toward zero (e.g. -1.8 -> -1).
+-* `lrint(x)` rounds to an integer using the active floating-point rounding
+-  mode. Common default FE_TONEAREST is nearest, ties-to-even (-1.8 -> -2;
+-  2.5 -> 2). `lround(x)` instead rounds ties *away* from zero.
+-* Both are defensible raster quantizers, but the exact DAC response is not
+-  specified as an integer RGB truncation/rounding operation: the real chip
+-  produces analog Y/U/V voltages. Changing the rounding is **not itself a
+-  physical accuracy proof**.
+-* `lrint` builds the 65,536-entry UV offset table once. There is no per-pixel
+-  `lrint` call, so any performance difference is initialization-only.
+-* As it obeys the C floating-point environment, non-default rounding modes
+-  can affect the experimental `lrint` tables. Tests explicitly use
+-  FE_TONEAREST; no cross-compiler bit-identity is claimed for arbitrary
+-  floating-point environments or aggressive fast-math compilation.
+-
+-## v26 diagnostic switch
+-
+-Leave unset for identical v25 output. No additional JPEG-style default was
+-introduced and no RGB matrix was fitted to subjective screenshots.
+-
+-```
+-PCFX_YUV_MATRIX=v25           # v25 rounded/simplified coefficients (DEFAULT)
+-PCFX_YUV_MATRIX=inverse-lrint # complete six-coefficient inverse; nearest
+-PCFX_YUV_MATRIX=inverse-trunc # original six coefficients; C cast toward zero
+-```
+-
+-These modes act **after** mixing KING, VDC/palettes, RAINBOW and optional
+-PC-FXGA graphics, and do not change guest-visible registers, K-BUS timing,
+-RAINBOW Huffman decoding, JPEG MCU interpolation, or saved emulation state.
+-The independent RAINBOW concealment default remains disabled as in v25.
+-
+-## Validation
+-
+-`tests/run_king_v26_yuv_matrix_test.sh`:
+-
+-- Invert the original three-decimal 3x3 forward matrix using long-double
+-  Gauss-Jordan elimination and independently compare all six historic
+-  coefficients, tolerance 1e-11.
+-- For all 65,536 `(U,V)` pairs: `inverse-trunc` exactly matches the C
+-  expression from the original source; the default exactly matches v25's
+-  existing implementation.
+-- With FE_TONEAREST: `inverse-lrint` differs from the simplified v25
+-  offset LUT at 2,693 chroma pairs (R: 278, G: 447, B: 2,002), and
+-  each channel differs by at most one 8-bit code. `inverse-trunc`
+-  differs from `inverse-lrint` at 57,189 chroma pairs.
+-- Existing v24 color and v23 RAINBOW/K-BUS suites, plus concealment test pass.
+-- Linux headless and SDL3 builds pass; offscreen SDL3 `--help` launches using
+-  the bundled offscreen-only SDL3 3.4.18 runtime.
+-
+-*Makeruna! Makendou Z* CHD, official BIOS, cold boot to **frame 1600**,
+-1024-clock horizontal mode, upstream video decoder, concealment off:
+-
+-| v26 reconstruction | Different pixels vs v25, of 491,520 | Mean absolute R / G / B difference | Maximum per-channel difference |
+-|:--|--:|:--|--:|
+-| `v25` (default) | 0 | 0 / 0 / 0 | 0 |
+-| `inverse-lrint` | 1,156 | 0 / 0.000519 / 0.001833 | 1 |
+-| `inverse-trunc` | 366,910 | 0.451223 / 0.463570 / 0.225618 | 1 |
+-
+-These are image deltas in 8-bit RGB channels, *not* errors against an analog
+-capture of a real console. The gameplay/frame timing and output dimensions
+-match across all three modes; both original v25 and v26 default PNG files
+-have identical SHA-256 sums for the selected frame.
+-
+-## What remains to establish KING and RAINBOW accuracy
+-
+-1. Compare the original KING/RAINBOW U/V digital channels **before** RGB
+-   conversion, including v23's known exceptional strips, quantization,
+-   subsampling and chroma interpolation.
+-2. With physical PC-FX hardware, run a ROM which steps known YUV844/YUV888
+-   values through the same mixer. Record linear Y/U/V or controlled capture
+-   through a calibrated encoder and known video range/EOTF. Do not treat a
+-   screenshot, an emulator-to-emulator match, or an independent PC-FX
+-   SDK's fixed-point approximation as silicon calibration.
+-3. Only after such measurements should a new, possibly nonlinear transfer
+-   model or rounded matrix replace the chosen default.
+-
+-Primary hardware specification in the uploaded toolkit:
+-`DOCUMENTATION/ORIGINAL_JPN/C6261.WRI` sec. 2.8, and English translation.
+diff --git a/tests/run_king_v27_yuv_matrix_test.sh b/tests/run_king_v27_yuv_matrix_test.sh
+new file mode 100755
+--- /dev/null
++++ b/tests/run_king_v27_yuv_matrix_test.sh
+@@ -0,0 +1,6 @@
++#!/bin/sh
++set -eu
++cd "$(dirname "$0")/.."
++cc -std=gnu11 -O2 -Wall -Wextra -Werror -I. \
++  -o /tmp/pcfx_v27_yuv_matrix_test tests/king_v27_yuv_matrix_test.c -lm
++/tmp/pcfx_v27_yuv_matrix_test
+diff --git a/tests/king_v27_yuv_matrix_test.c b/tests/king_v27_yuv_matrix_test.c
+new file mode 100644
+--- /dev/null
++++ b/tests/king_v27_yuv_matrix_test.c
+@@ -0,0 +1,78 @@
++/* Tests for the sole PCFXemu v27 final YUV->RGB chroma offset conversion.
++ * Numerical accuracy does not imply measured real-console color accuracy.
++ */
++#include <assert.h>
++#include <fenv.h>
++#include <math.h>
++#include <stdint.h>
++#include <stdio.h>
++#include "mednafen/pcfx/pcfx_yuv_color.h"
++
++static int clamp(int x) { return x < 0 ? 0 : x > 255 ? 255 : x; }
++
++static void invert_forward(long double out[3][3])
++{
++ long double a[3][6] = {
++  { .299L, .587L, .114L, 1, 0, 0 },
++  {-.147L,-.289L, .436L, 0, 1, 0 },
++  { .615L,-.515L,-.100L, 0, 0, 1 }
++ };
++ for(int p=0; p<3; p++)
++ {
++  long double divisor=a[p][p];
++  assert(fabsl(divisor)>0.0001L);
++  for(int j=0;j<6;j++) a[p][j]/=divisor;
++  for(int i=0;i<3;i++) if(i!=p)
++  {
++   long double factor=a[i][p];
++   for(int j=0;j<6;j++) a[i][j]-=factor*a[p][j];
++  }
++ }
++ for(int i=0;i<3;i++) for(int j=0;j<3;j++) out[i][j]=a[i][j+3];
++}
++
++int main(void)
++{
++ assert(fesetround(FE_TONEAREST)==0);
++ assert(lrint(1.8)==2 && lrint(-1.8)==-2);
++ assert(lrint(2.5)==2 && lrint(3.5)==4);
++
++ long double inv[3][3];
++ const long double expected[3][3] = {
++  {1.0L, -0.000039457070707L,  1.139827967171717L},
++  {1.0L, -0.394610164141414L, -0.580500315656566L},
++  {1.0L,  2.031999684343434L, -0.000481376262626L}
++ };
++ invert_forward(inv);
++ for(int i=0;i<3;i++) for(int j=0;j<3;j++)
++  assert(fabsl(inv[i][j]-expected[i][j]) < 1e-11L);
++
++ uint64_t checksum_r=0,checksum_g=0,checksum_b=0;
++ for(int ur=0;ur<256;ur++) for(int vr=0;vr<256;vr++)
++ {
++  const int u=ur-128, v=vr-128;
++  const PCFX_YUVColorOffsets got=PCFX_AnalogYUVOffsets(ur,vr);
++  /* Independent direct reference to the established inverse-lrint formula. */
++  const int r=(int)lrint(-0.000039457070707 * u + 1.139827967171717 * v);
++  const int g=(int)lrint(-0.394610164141414 * u - 0.580500315656566 * v);
++  const int b=(int)lrint(2.031999684343434 * u - 0.000481376262626 * v);
++  assert(got.r==r && got.g==g && got.b==b);
++  if(ur==128 && vr==128) assert(got.r==0 && got.g==0 && got.b==0);
++  for(int y=0;y<256;y+=17)
++  {
++   int cr=clamp(y+got.r), cg=clamp(y+got.g), cb=clamp(y+got.b);
++   assert(cr>=0 && cr<=255 && cg>=0 && cg<=255 && cb>=0 && cb<=255);
++  }
++  checksum_r+=(unsigned)(r+512);
++  checksum_g+=(unsigned)(g+512);
++  checksum_b+=(unsigned)(b+512);
++ }
++ assert(PCFX_YUVPalettePacked(0x8088)==0x808080);
++ assert(PCFX_YUVPalettePacked(0xFF0F)==0xFF00F0);
++ printf("PASS: six inverse-YUV coefficients validated against independent matrix inversion\n");
++ printf("PASS: single lrint transform matches reference on all 65,536 UV pairs\n");
++ printf("PASS: centered U/V remains neutral; palette mapping and clamping verified\n");
++ printf("LUT checksum sums (R,G,B): %llu %llu %llu\n",
++   (unsigned long long)checksum_r,(unsigned long long)checksum_g,(unsigned long long)checksum_b);
++ return 0;
++}
+diff --git a/docs/YUV_INVERSE_MATRIX_V27.md b/docs/YUV_INVERSE_MATRIX_V27.md
+new file mode 100644
+--- /dev/null
++++ b/docs/YUV_INVERSE_MATRIX_V27.md
+@@ -0,0 +1,66 @@
++# PCFXemu v27 — single inverse-YUV transform using lrint()
++
++## Change from v26
++
++The v26 diagnostic profile `inverse-lrint` is now the *only* RGB presentation
++matrix. The v25-simplified matrix, C-cast truncation matrix, runtime mode enum,
++mode parser, and `PCFX_YUV_MATRIX` environment selector were removed.
++The RGB output is produced after TETSU mixes KING, RAINBOW and other graphics.
++
++The floating point offsets used for all 256 x 256 U/V values are:
++
++```c
++const int u = (int)ur - 128;
++const int v = (int)vr - 128;
++r = (int)lrint(0 - 0.000039457070707 * u + 1.139827967171717 * v);
++g = (int)lrint(0 - 0.394610164141414 * u - 0.580500315656566 * v);
++b = (int)lrint(0 + 2.031999684343434 * u - 0.000481376262626 * v);
++```
++
++These numbers invert the conventional rounded forward RGB->analog YUV matrix:
++
++```
++Y =  0.299 R + 0.587 G + 0.114 B
++U = -0.147 R - 0.289 G + 0.436 B
++V =  0.615 R - 0.515 G - 0.100 B
++```
++
++The small U->R and V->B components are numerical effects of rounding the
++forward coefficients, not measured cross-channel coupling in the PC-FX.
++`lrint()` uses the active floating point rounding mode; with the conventional
++FE_TONEAREST mode, half-way values use nearest-even. The LUT is calculated
++once, not per pixel. No hardware RGB fidelity claim is made: accurate PC-FX
++analog gains/encoder/transfer still require real-console measurements.
++
++## Validation and comparison
++
++`tests/run_king_v27_yuv_matrix_test.sh` checks the inverse of the original
++forward matrix, all 65,536 U/V combinations, neutral chroma, clamping, and
++palette encoding. The other existing tests verify RAINBOW and K-BUS behavior.
++
++A fresh, controlled v26 `inverse-lrint` game frame 1600 is supplied as
++`captures/v26_inverse_lrint_reference_f1600.png`. Under the *same*
++BIOS, game, save-directory initialization, frame count and horizontal
++mode, the newly generated `captures/v27_default_f1600.png` is byte-for-byte
++identical (same SHA-256). This is a direct emulator A/B test, not a
++hardware capture.
++Against v25's frame 1600, this produces differences in 1,156 of 491,520
++pixels, with a maximum per-channel RGB change of one. This is a comparison
++between emulator reconstruction algorithms, not a real-hardware calibration.
++
++For a side-by-side reference, `captures/v25_f1600.png` is retained, but
++no historical matrix implementation is included in the production source.
++
++The paired captures were collected with both executables using:
++
++```sh
++--bios-dir /path/to/pcfx.rom --save-dir /path/to/fresh-save-dir \
++--frames 1600 --horizontal clock --screenshot /path/to/capture.png \
++"Makeruna! Makendou Z (Japan).chd"
++```
++
++`PCFX_YUV_MATRIX=inverse-lrint` was set only for v26. Do not set it
++for v27; the environment option no longer exists. The included
++`run-sdl3-offscreen.sh` is an offscreen test launcher, not a desktop
++SDL3 distribution. An external desktop-capable SDL3 build is required
++for a normal SDL3 window.
