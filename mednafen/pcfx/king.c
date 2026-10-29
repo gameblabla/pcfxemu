@@ -46,6 +46,7 @@
 #include "cd_xfer_debug.h"
 #include "pcfx.h"
 #include "king.h"
+#include "pcfx_yuv_color.h"
 #include "interrupt.h"
 #include "rainbow.h"
 #include "soundbox.h"
@@ -3058,15 +3059,12 @@ static void RebuildUVLUT(void)
   for(uint_fast16_t vr = 0; vr < 256; vr++)
   {
    int r, g, b;
-   int u, v;
-   
-   u = ur - 128;
-   v = vr - 128;
 
-   /* RAINBOW carries full-range BT.601 JPEG YCbCr, not analog composite YUV. */
-   r = (int)lrint(1.402000 * v);
-   g = (int)lrint(-0.344136 * u - 0.714136 * v);
-   b = (int)lrint(1.772000 * u);
+   /* All TETSU output planes share the HuC6261 analog YUV DAC. */
+   const PCFX_YUVColorOffsets offset = PCFX_AnalogYUVOffsets(ur, vr);
+   r = offset.r;
+   g = offset.g;
+   b = offset.b;
 
    UVLUT[vr + ur * 256][0] = r;
    UVLUT[vr + ur * 256][1] = g;
@@ -3105,7 +3103,7 @@ static uint32 inline YUV888_TO_RGB888(uint32 yuv)
 MDFN_Pixel FXVCE_GetPaletteNative(uint16 index)
 {
  const uint32 yuv12 = fx_vce.palette_table[index & 0x1FF];
- const uint32 yuv888 = (((yuv12 >> 8) & 0xFF) << 16) | ((yuv12 & 0x00F0) << 8) | ((yuv12 & 0x000F) << 4);
+ const uint32 yuv888 = PCFX_YUVPalettePacked(yuv12);
  return (MDFN_Pixel)YUV888_TO_RGB888(yuv888);
 }
 #endif
