@@ -34,6 +34,22 @@ void RAINBOW_SwapBuffers(void)
  else RAINBOW_Accurate_SwapBuffers();
 }
 
+void RAINBOW_RLEBegin(bool first)
+{
+ if(RAINBOW_UsingFastBackend) RAINBOW_Fast_RLEBegin(first);
+ else RAINBOW_Accurate_RLEBegin(first);
+}
+void RAINBOW_RLEEmit(unsigned x, unsigned count, uint8 color)
+{
+ if(RAINBOW_UsingFastBackend) RAINBOW_Fast_RLEEmit(x,count,color);
+ else RAINBOW_Accurate_RLEEmit(x,count,color);
+}
+void RAINBOW_RLEEnd(void)
+{
+ if(RAINBOW_UsingFastBackend) RAINBOW_Fast_RLEEnd();
+ else RAINBOW_Accurate_RLEEnd();
+}
+
 void RAINBOW_DecodeBlock(bool arg_FirstDecode, bool Skip)
 {
  if(RAINBOW_UsingFastBackend) RAINBOW_Fast_DecodeBlock(arg_FirstDecode, Skip);
@@ -70,4 +86,10 @@ void RAINBOW_Reset(void)
 {
  if(RAINBOW_UsingFastBackend) RAINBOW_Fast_Reset();
  else RAINBOW_Accurate_Reset();
+}
+
+void RAINBOW_CompareLuma(const uint8 *luma, const uint8 *valid, uint32 *count, uint32 *diff)
+{
+ if(RAINBOW_UsingFastBackend) RAINBOW_Fast_CompareLuma(luma,valid,count,diff);
+ else RAINBOW_Accurate_CompareLuma(luma,valid,count,diff);
 }

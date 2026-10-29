@@ -31,6 +31,11 @@ PCFX_RawAudioMixer *SoundBox_GetRawMixer(void);
 
 typedef struct {
     uint16 ADPCMControl;
+    uint16 ADPCMPendingControl; // R10 is sampled at the next falling -HSYNC
+    bool ADPCMPendingValid;
+    uint16 CDDACurrentLevel[2]; // electronic VCA, 0..1023 peak steps
+    uint32 CDDAVolumeAccum[2];  // partial V810 cycles toward the next step
+    uint8 CDDAVolumeStateVersion;
     uint8 ADPCMVolume[2][2]; // ADPCMVolume[channel(0 or 1)][left(0) or right(1)]
     uint8 CDDAVolume[2];
     int32 bigdiv;
@@ -49,6 +54,14 @@ typedef struct {
     uint32 ADPCMWhichNibble[2];
     uint16 ADPCMHalfWord[2];
     bool ADPCMHaveHalfWord[2];
+    /* HuC6230 §4.2: each channel receives a two-byte capture at a shared
+       -HSYNC-synchronized transfer-cycle boundary. The nibble decoder does
+       not directly access KING/KRAM. */
+    uint16 ADPCMInputWord[2];
+    bool ADPCMInputValid[2];
+    uint8 ADPCMTransferPhase;          /* elapsed HSYNCs since the last capture */
+    bool ADPCMTransferEstablished;
+    uint8 ADPCMInputStateVersion;
 
     int32 ADPCM_last[2][2];
 } t_soundbox;
@@ -70,6 +83,10 @@ void SoundBox_Reset(const v810_timestamp_t timestamp);
 int SoundBox_StateAction(StateMem *sm, int load, int data_only);
 
 void SoundBox_SetKINGADPCMControl(uint32);
+void SoundBox_HSync(v810_timestamp_t timestamp);
+/* Invoke after KING has latched new R50 enables on the same -HSYNC edge. */
+void SoundBox_ADPCMTransferHSync(void);
+void SoundBox_ADPCMReceiveWord(int ch, uint16 value);
 
 v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp);
 

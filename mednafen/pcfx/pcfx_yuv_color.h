@@ -3,9 +3,16 @@
  * The DAC receives full-range Y, U and V, with unsigned U/V biased by 128.
  * KING, RAINBOW and palette graphics share this final conversion.
  *
- * These coefficients invert the conventional three-decimal RGB-to-analog
- * YUV matrix. The small U-to-R and V-to-B terms come from rounding the
- * forward coefficients; they are not measurements of hardware crosstalk.
+ * The six constants below are the inverse of the conventional three-decimal
+ * RGB->analog YUV matrix:
+ *   Y =  0.299 R + 0.587 G + 0.114 B
+ *   U = -0.147 R - 0.289 G + 0.436 B
+ *   V =  0.615 R - 0.515 G - 0.100 B
+ *
+ * The small U->R and V->B terms arise from rounding the forward coefficients;
+ * they are NOT hardware measurements of crosstalk. This is an analog-YUV
+ * display approximation, not measured motherboard/encoder colorimetry.
+ * Refer to docs/HARDWARE_TESTS_REQUIRED.md for calibration limitations.
  */
 #ifndef PCFX_YUV_COLOR_H
 #define PCFX_YUV_COLOR_H
@@ -17,7 +24,11 @@ typedef struct
  int r, g, b;
 } PCFX_YUVColorOffsets;
 
-/* Keep the historical expression order for continuity. */
+/* The single supported final-output color transform. For the common default
+ * floating-point mode (FE_TONEAREST), lrint rounds to nearest, ties-to-even.
+ * The 65536-entry chroma offset table is constructed at initialization, not
+ * per pixel. Keep the historical expression evaluation order for continuity.
+ */
 static inline PCFX_YUVColorOffsets PCFX_AnalogYUVOffsets(unsigned ur,
                                                          unsigned vr)
 {
@@ -32,10 +43,9 @@ static inline PCFX_YUVColorOffsets PCFX_AnalogYUVOffsets(unsigned ur,
 
 static inline unsigned PCFX_YUVPalettePacked(unsigned yuv844)
 {
- /* Expand the palette's chroma nibbles by zero-filling their low bits. */
+ /* Palette YUV844: zero-fill low chroma nibbles, not sign-extend or remap. */
  return ((yuv844 & 0xFF00u) << 8) |
         ((yuv844 & 0x00F0u) << 8) |
         ((yuv844 & 0x000Fu) << 4);
 }
-
 #endif

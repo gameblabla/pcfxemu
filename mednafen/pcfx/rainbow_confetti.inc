@@ -1,7 +1,10 @@
-/*
- * Replace clearly corrupt RAINBOW YUV strips with the previous clean strip
- * for the same frame row. Included by both decoder backends, each of which
- * keeps its own history.
+/* Optional historical RAINBOW decoded-strip concealment (NOT hardware emulation).
+ * The 2026-10-04 pcfxemu commit d344a0ad introduced this heuristic.
+ * It can replace correctly decoded 256x16 YUV imagery with a previous-frame
+ * strip based on noise levels rather than a documented HuC6271 status flag.
+ * Normal operation does not run this correction. To compare old behavior, set
+ * PCFX_RAINBOW_CONCEALMENT=1 before launching either frontend.
+ * The producer/decoder and K-BUS timing are not affected by this switch.
  */
 #define RB_STRIPS_PER_FRAME 15
 #define RB_STARVE_THRESHOLD 8
@@ -32,8 +35,22 @@ static void RB_ConfettiAdvanceRow(void)
   rb_row = 0;
 }
 
+/* Stored outside savestates: the mode is a debugging/output choice only. */
+static bool RB_ConfettiEnabled(void)
+{
+ static int enabled = -1;
+ if(enabled < 0)
+ {
+  const char *s = getenv("PCFX_RAINBOW_CONCEALMENT");
+  enabled = (s && s[0] == '1' && s[1] == '\0') ? 1 : 0;
+ }
+ return enabled != 0;
+}
+
 static void RB_ConfettiRepair(uint32 *dest_base, uint32 happy_color, int32 starve_bytes)
 {
+ /* Never conceal detail in the default hardware-specification path. */
+ if(!RB_ConfettiEnabled()) return;
  uint32 colnoise[16];
  uint32 colchroma[16];
  uint32 sorted[16];

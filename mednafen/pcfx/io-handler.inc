@@ -22,8 +22,8 @@ static uint8 MDFN_FASTCALL port_rbyte(v810_timestamp_t *timestamp, uint32 A)
  {
   uint8 v;
   (*timestamp) += 4;
+  (*timestamp) += KING_KRAMReadWaitCycles(*timestamp, A);
   v = KING_Read8((*timestamp), A);
-  (*timestamp) += KING_KRAMReadWaitCycles(A);
   (*timestamp) += KING_DMAWedgeStallCycles();
   return(v);
  }
@@ -86,8 +86,8 @@ static uint16 MDFN_FASTCALL port_rhword(v810_timestamp_t *timestamp, uint32 A)
  {
   uint16 v;
   (*timestamp) += 4;
+  (*timestamp) += KING_KRAMReadWaitCycles(*timestamp, A);
   v = KING_Read16((*timestamp), A);
-  (*timestamp) += KING_KRAMReadWaitCycles(A);
   (*timestamp) += KING_DMAWedgeStallCycles();
   return(v);
  }
@@ -161,7 +161,6 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t *timestamp, uint32 A, uint
    wait = KING_KRAMWriteWaitCycles(*timestamp, A);
    (*timestamp) += wait;
    KING_Write8((*timestamp), A, V);
-   (*timestamp) += KING_KRAMWriteContentionCycles(A);
   }
   else if(A >= 0x700 && A <= 0x7FF)
   {
@@ -231,7 +230,6 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t *timestamp, uint32 A, uin
    wait = KING_KRAMWriteWaitCycles(*timestamp, A);
    (*timestamp) += wait;
    KING_Write16((*timestamp), A, V);
-   (*timestamp) += KING_KRAMWriteContentionCycles(A);
   }
   else if(A >= 0x700 && A <= 0x7FF)
   {

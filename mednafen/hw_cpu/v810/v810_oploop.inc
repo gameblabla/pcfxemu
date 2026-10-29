@@ -678,11 +678,11 @@
              ADDCLOCK(1);
              MemWrite8(&timestamp, sign_16(arg2)+P_REG[arg3], P_REG[arg1] & 0xFF);
 
-             if(lastop == LASTOP_ST)
+             if(lastop == LASTOP_ST_B)
 	     {
 	      ADDCLOCK(1);
 	     }
-	     lastop = LASTOP_ST;
+	     lastop = LASTOP_ST_B;
 	END_OP_SKIPLO();
 
 	// ST.H
@@ -691,11 +691,11 @@
 
              MemWrite16(&timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE, P_REG[arg1] & 0xFFFF);
 
-             if(lastop == LASTOP_ST)
+             if(lastop == LASTOP_ST_H)
 	     {
 	      ADDCLOCK(1);
 	     }
-	     lastop = LASTOP_ST;
+	     lastop = LASTOP_ST_H;
 	END_OP_SKIPLO();
 
 	// ST.W
@@ -707,7 +707,7 @@
 	     {
 	      MemWrite32(&timestamp, tmp2, P_REG[arg1]);
 
-              if(lastop == LASTOP_ST)
+              if(lastop == LASTOP_ST_W)
 	      {
 	       ADDCLOCK(1);
 	      }
@@ -717,12 +717,12 @@
               MemWrite16(&timestamp, tmp2, P_REG[arg1] & 0xFFFF);
               MemWrite16(&timestamp, tmp2 | 2, P_REG[arg1] >> 16);
 
-              if(lastop == LASTOP_ST)
+              if(lastop == LASTOP_ST_W)
 	      {
 	       ADDCLOCK(3);
 	      }
 	     }
-	     lastop = LASTOP_ST;
+	     lastop = LASTOP_ST_W;
 	END_OP_SKIPLO();
 
 	// IN.B
@@ -773,11 +773,11 @@
              ADDCLOCK(1);
              IOWrite8(&timestamp, sign_16(arg2)+P_REG[arg3],P_REG[arg1]&0xFF);
 
-	     if(lastop == LASTOP_OUT)
+	     if(lastop == LASTOP_OUT_B)
 	     {
 	      ADDCLOCK(1);
 	     }
-	     lastop = LASTOP_OUT;
+	     lastop = LASTOP_OUT_B;
 	END_OP_SKIPLO();
 
 
@@ -786,11 +786,11 @@
              ADDCLOCK(1);
              IOWrite16(&timestamp, (sign_16(arg2)+P_REG[arg3])&0xFFFFFFFE,P_REG[arg1]&0xFFFF);
 
-             if(lastop == LASTOP_OUT)
+             if(lastop == LASTOP_OUT_H)
              {
               ADDCLOCK(1);
              }
-	     lastop = LASTOP_OUT;
+	     lastop = LASTOP_OUT_H;
 	END_OP_SKIPLO();
 
 
@@ -807,7 +807,7 @@
               IOWrite16(&timestamp, eff_addr | 2, P_REG[arg1] >> 16);
 	     }
 
-             if(lastop == LASTOP_OUT)
+             if(lastop == LASTOP_OUT_W)
              {
 	      if(IOWrite32)
               {
@@ -818,7 +818,7 @@
 	       ADDCLOCK(3);
 	      }
              }
-	     lastop = LASTOP_OUT;
+	     lastop = LASTOP_OUT_W;
 	END_OP_SKIPLO();
 
 	BEGIN_OP(NOP);

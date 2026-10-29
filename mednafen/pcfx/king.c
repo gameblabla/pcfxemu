@@ -30,7 +30,7 @@
 
 	Raw subchannel reading timing is probably wrong.
 
-	KRAM mode register is not emulated(I'm not even sure what it does exactly).
+	KRAM mode page mapping is implemented; K-BUS arbitration and refresh remain approximate.
 */
 
 #ifdef __MMX__
@@ -46,8 +46,9 @@
 #include "cd_xfer_debug.h"
 #include "pcfx.h"
 #include "king.h"
-#include "pcfx_yuv_color.h"
 #include "interrupt.h"
+#include "rainbow_huffman_stream.h"
+#include "rainbow_mcu_luma.h"
 #include "rainbow.h"
 #include "soundbox.h"
 #include "input.h"
@@ -56,8 +57,12 @@
 #include "huc6273.h"
 #endif
 #include "../cdrom/scsicd.h"
+#include "pcfx_yuv_color.h"
 #include "../clamp.h"
 #include "../state_helpers.h"
+#ifdef V810_PROFILE
+#include "../hw_cpu/v810/v810_profile.h"
+#endif
 
 
 #ifdef _WIN32
@@ -109,7 +114,8 @@ typedef struct
  bool in_hblank;	/* TRUE if we're in H-blank */
  bool in_vdc_hsync;
 
- uint16 picture_mode;
+ uint16 picture_mode;         // CPU-visible CR, written immediately
+ uint16 active_picture_mode;  // CR after separate V/H-period latches
 
  bool dot_clock;	 // Cached from picture_mode in hblank
  uint32 dot_clock_ratio; // Cached from picture mode in hblank
@@ -160,6 +166,13 @@ typedef struct
 
 fx_vce_t fx_vce;
 
+/* Documented HuC6261 reset defaults (C6261 §2.11). */
+static inline void VCE_ResetRegisters(void)
+{
+ memset(&fx_vce, 0, sizeof(fx_vce));
+ fx_vce.SPBL = 0xFFFFu;
+}
+
 //
 // VCE render cache, including registers cached at hblank
 //
@@ -205,6 +218,18 @@ enum
 static int32 HPhase;
 static int32 HPhaseCounter;
 static int32 vdc_lb_pos;
+static uint8 vce_state_latch_version = 1;
+/* C6261 §2.10 does not establish an absolute mixer-to-VDC phase.
+   Keep Mednafen's historical 18-tick offset as default, but expose it for
+   physical-console calibration. Never alter the 3:4 clock relation. */
+static int vdc_hsync_phase_ticks = 18;
+void KING_SetVDCHSyncPhase(int ticks)
+{
+ if(ticks < -64) ticks = -64;
+ if(ticks > 64) ticks = 64;
+ vdc_hsync_phase_ticks = ticks;
+}
+int KING_GetVDCHSyncPhase(void) { return vdc_hsync_phase_ticks; }
 
 static MDFN_ALIGN(8) uint16 vdc_linebuffers[2][512];
 static MDFN_ALIGN(8) uint32 vdc_linebuffer[512];
@@ -214,7 +239,7 @@ static MDFN_ALIGN(8) uint32 rainbow_linebuffer[256];
 // 8 * 2 for left + right padding for scrolling
 static MDFN_ALIGN(8) uint32 bg_linebuffer[256 + 8 + 8];
 #ifdef HAVE_HUC6273
-static MDFN_ALIGN(8) uint8 huc6273_vce_top_prio_line[512];
+static MDFN_ALIGN(8) uint8 huc6273_vce_top_prio_line[1024];
 #endif
 
 
@@ -255,7 +280,7 @@ static inline void RebuildLayerPrioCache(void)
 
  for(int n = 0; n < 4; n++)
  {
-  if(((fx_vce.picture_mode >> (10 + n)) & 1))
+  if(((vce_rendercache.picture_mode >> (10 + n)) & 1))
   {
    vr->LayerPriority[LAYER_BG0 + n] = (((vce_rendercache.priority[1] >> (n * 4)) & 0xF) + 1);
    if(vr->LayerPriority[LAYER_BG0 + n] > 8)
@@ -268,7 +293,7 @@ static inline void RebuildLayerPrioCache(void)
    vr->LayerPriority[LAYER_BG0 + n] = 0;
  }
 
- if(fx_vce.picture_mode & 0x0100)
+ if(vce_rendercache.picture_mode & 0x0100)
  {
   vr->LayerPriority[LAYER_VDC_BG] = ((vce_rendercache.priority[0] & 0xF) + 1);
   if(vr->LayerPriority[LAYER_VDC_BG] > 8)
@@ -280,7 +305,7 @@ static inline void RebuildLayerPrioCache(void)
  else
   vr->LayerPriority[LAYER_VDC_BG] = 0;
 
- if(fx_vce.picture_mode & 0x0200)
+ if(vce_rendercache.picture_mode & 0x0200)
  {
   vr->LayerPriority[LAYER_VDC_SPR] = (((vce_rendercache.priority[0] >> 4) & 0xF) + 1);
   if(vr->LayerPriority[LAYER_VDC_SPR] > 8)
@@ -292,7 +317,7 @@ static inline void RebuildLayerPrioCache(void)
  else 
   vr->LayerPriority[LAYER_VDC_SPR] = 0;
 
- if(fx_vce.picture_mode & 0x4000)
+ if(vce_rendercache.picture_mode & 0x4000)
  {
   vr->LayerPriority[LAYER_RAINBOW] = (((vce_rendercache.priority[0] >> 8) & 0xF) + 1);
   if(vr->LayerPriority[LAYER_RAINBOW] > 8)
@@ -352,10 +377,15 @@ static void DoHBlankVCECaching(void)
  const fx_vce_t *source = &fx_vce;
  vce_rendercache_t *dest = &vce_rendercache;
 
- dest->picture_mode = source->picture_mode;
+ /* C6261 R00: bits 8..14 take effect in the NEXT horizontal period.
+    The scan, clock, colour and sync bits take effect only at V boundary.
+    Preserve the CPU-readable write register separately from the signal. */
+ fx_vce.active_picture_mode = (fx_vce.active_picture_mode & 0x80FFu) |
+                              (fx_vce.picture_mode & 0x7F00u);
+ dest->picture_mode = fx_vce.active_picture_mode;
 
- fx_vce.dot_clock = (bool)(fx_vce.picture_mode & 0x08);
- fx_vce.dot_clock_ratio = (fx_vce.picture_mode & 0x08) ? 3 : 4;
+ fx_vce.dot_clock = (bool)(fx_vce.active_picture_mode & 0x08);
+ fx_vce.dot_clock_ratio = fx_vce.dot_clock ? 3 : 4;
 
  for(uint_fast8_t i = 0; i < 2; i++)
   dest->priority[i] = source->priority[i];
@@ -376,6 +406,14 @@ static void DoHBlankVCECaching(void)
   dest->coefficients[i] = source->coefficients[i];
 
  RebuildLayerPrioCache();
+}
+
+/* Called at the field boundary, BEFORE the next field is clocked. The
+   output mode remains fixed for the current field even if software writes CR. */
+static inline void VCE_LatchVerticalControl(void)
+{
+ fx_vce.active_picture_mode = (fx_vce.active_picture_mode & 0x7F00u) |
+                              (fx_vce.picture_mode & 0x80FFu);
 }
 
 static inline void RedoPaletteCache(int n)
@@ -443,7 +481,10 @@ typedef struct
 	uint16 BGAffinA, BGAffinB, BGAffinC, BGAffinD;
 	uint16 BGAffinCenterX, BGAffinCenterY;
 
-	uint16 ADPCMControl;
+	uint16 ADPCMControl; // effective: READ EN only latches ON at -HSYNC
+    uint16 ADPCMControlWritten; // last CPU write to R50
+    uint8 ADPCMPendingEnable; // channel enables waiting for next falling -HSYNC
+    uint8 ADPCMTransferLatchVersion;
 	uint16 ADPCMBufferMode[2];
 
 	uint16 ADPCMSAL[2];
@@ -457,8 +498,15 @@ typedef struct
 	uint16 RAINBOWTransferControl; // Register 0x40
 	uint32 RAINBOWKRAMA;	       // Register 0x41
         uint16 RAINBOWTransferStartPosition; // Register 0x42, line number(0-262)
-	uint16 RAINBOWTransferBlockCount; // Register 0x43
+	uint16 RAINBOWTransferBlockCount; // Register 0x43 (CPU-written)
 
+    /* C6272_2 3.4: R41 and R43 are I* (deferred while a 16H
+       compressed-image block is in flight). These active copies, unlike
+       the CPU-side registers, only update at the next block boundary. */
+    uint32 RAINBOWActiveKRAMA;
+    uint16 RAINBOWActiveBlockCount;
+    uint8 RAINBOWConfigPending; // bit 0: R41; bit 1: R43
+    uint8 RAINBOWConfigStateVersion;
 
 	bool RAINBOWStartPending;
 	int32 RAINBOWBusyCount, RAINBOWBlockCount;
@@ -467,6 +515,56 @@ typedef struct
 	bool RasterIRQPending;
 
 	uint32 RAINBOWKRAMReadPos;
+        /* HuC6272 §3.4.2: KING reads beyond -REQR deassertion.  The
+         * documented three guard words are represented as grant-time
+         * snapshots, NOT as speculative accesses by the synchronous decoder.
+         * This is a partial prefetch model, not an asynchronous HuC6271. */
+        uint32 RainbowAheadAddress[3];
+        uint32 RainbowAheadGrantAt[3];
+        uint16 RainbowAheadValue[3];
+        uint8 RainbowAheadPage[3];
+        uint8 RainbowAheadStatus[3]; /* 0 empty, 1 requested, 2 delivered */
+        uint8 RainbowAheadStateVersion;
+
+        /* v19: asynchronous HuC6271 compressed-input staging. KRAM bytes are
+         * sampled only after actual modeled grants, not by the JPEG callback.
+         * Parsing waits for a complete declared block before feeding the
+         * existing entropy/RLE backends. This is a block-atomic first stage,
+         * NOT a cycle-accurate resumable Huffman engine. */
+        uint8 RBAsyncStage[131072];
+        uint32 RBAsyncLength, RBAsyncProducerPos, RBAsyncConsumeIndex;
+        uint32 RBAsyncScanIndex, RBAsyncTarget, RBAsyncGrantAt;
+        uint32 RBAsyncHeaderRemaining, RBAsyncSkipRemaining;
+        uint32 RBAsyncWords, RBAsyncWaits, RBAsyncUnderflows;
+        uint8 RBAsyncStageVersion, RBAsyncActive, RBAsyncPending, RBAsyncDecoding;
+        uint8 RBAsyncFirst, RBAsyncSkip, RBAsyncScanState, RBAsyncMarker;
+        uint8 RBAsyncSizeHigh, RBAsyncPage;
+        uint32 RBAsyncAddress;
+        /* v20: RLE token cursor and pixel location survive grant stalls and
+         * mid-block save/load.  The actual decoder output lives in RAINBOW. */
+        uint32 RBAsyncRLECursor, RBAsyncRLEEnd, RBAsyncRLEX;
+        uint32 RBAsyncRLETokenCount, RBAsyncRLETotalTokens, RBAsyncRLEBlocks;
+        uint8 RBAsyncRLEActive, RBAsyncRLEVersion;
+        /* Grant-fed F8/FF quantizer and stuffed-entropy stream. This parser
+         * preserves byte boundaries, but Huffman/IDCT remains block-atomic. */
+        uint8 RBJPEGVersion, RBJPEGActive, RBJPEGQuantExpected, RBJPEGQuantCount;
+        uint8 RBJPEGQuant[128];
+        uint32 RBJPEGCursor, RBJPEGEntropyEnd, RBJPEGEntropyBytes;
+        uint32 RBJPEGStuffedPairs, RBJPEGStalledPairs, RBJPEGBlocks;
+        uint32 RBJPEGDigest;
+        /* v22: grant-fed, transactional JPEG Huffman coefficient tracker.
+         * Parsing state is serialised, but the existing IDCT backend still
+         * renders the completed block. No guesses about silicon FIFO size. */
+        RBH_State RBH;
+        uint8 RBHVersion, RBHStarted;
+        uint32 RBHCompletedBlocks;
+        /* v23 diagnostic IDCT: stores completed 16x16 luma columns until
+         * the legacy backend finishes rendering the corresponding strip. */
+        uint8 RBMCULuma[4096], RBMCUValidColumn[16], RBMCUQuantBase[64];
+        uint8 RBMCUQuantValid, RBMCUScale, RBMCUVersion;
+        uint32 RBMCUColumns, RBMCUCompared, RBMCUDifferences, RBMCUBlocks, RBMCUExactBlocks;
+
+
 
 	bool DMATransferFlipFlop;
 	uint32 DMATransferAddr; // Register 0x09
@@ -563,6 +661,41 @@ typedef struct
 	uint16 MPROGAddress;
 	uint16 MPROGData[0x10];
 	v810_timestamp_t KRAMWriteBusyUntil;
+        /* v13: optional single-entry posted CPU KRAM write: address and data
+         * remain invisible to KRAM consumers until the modeled drain time. */
+        uint8 KRAMWritePending;
+        uint8 KRAMWritePendingPage;
+        uint16 KRAMWritePendingValue;
+        uint32 KRAMWritePendingAddress;
+        v810_timestamp_t KRAMWritePendingAt;
+        uint8 KRAMWritePendingStateVersion;
+        /* K-BUS requester reservations on each independently serviced bank.
+         * Time tags are V810 timestamps aligned to KING dots (4 clocks).
+         * Source value zero means empty; see docs/KBUS_REQUESTS_V15.md. */
+#define KING_KBUS_SLOTS 1024
+        uint32 KBusSlotTime[2][KING_KBUS_SLOTS];
+        uint8 KBusSlotSource[2][KING_KBUS_SLOTS];
+        uint8 KBusStateVersion;
+        /* v16: one transaction per accepted SCSI DMA halfword. The SCSI
+         * handshake can finish before the granted KRAM bus write becomes
+         * visible. Reserve tags follow priority displacement. */
+#define KING_SCSI_PENDING_MAX 128
+        uint32 SCSIPendingAddress[KING_SCSI_PENDING_MAX];
+        uint32 SCSIPendingGrantAt[KING_SCSI_PENDING_MAX];
+        uint16 SCSIPendingValue[KING_SCSI_PENDING_MAX];
+        uint8 SCSIPendingPage[KING_SCSI_PENDING_MAX];
+        uint8 SCSIPendingValid[KING_SCSI_PENDING_MAX];
+        uint16 KBusSlotTag[2][KING_KBUS_SLOTS];
+        uint8 SCSIPendingStateVersion;
+        uint16 SCSIPendingCount;
+        /* HuC6230 receives KRAM words after the ADPCM bus grant, not at
+         * the -HSYNC request time. One in-flight request per channel. */
+        uint32 ADPCMGrantAddress[2];
+        uint32 ADPCMGrantAt[2];
+        uint8 ADPCMGrantPage[2];
+        uint8 ADPCMGrantPending[2];
+        uint8 ADPCMGrantStateVersion;
+
 
 	bool DMAInterrupt;
 	uint8 Reg00;
@@ -721,8 +854,10 @@ static const char *king_reg_name(unsigned r)
 #define KP_RAINBOW_RD(pg,ad) do { kp_hit(4, pg, ad); kx_read(pg, ad, 4); } while(0)
 #define KP_BG(pg,bat,cg,mode) kp_bg_scanline(pg, bat, cg, mode)
 
+static void kbt_report(unsigned long long frames);
 void king_prof_report(unsigned long long frames)
 {
+ kbt_report(frames);
 	double f = frames ? (double)frames : 1.0;
 	fprintf(stderr, "\n================  KING (HuC6272) PROFILE  ================\n");
 	fprintf(stderr, "KRAM bandwidth / field (16-bit words):\n");
@@ -810,20 +945,99 @@ static bool RAINBOWLayerDisable;
 
 static void RedoKINGIRQCheck(void);
 
+/* C6272 §1.3: MOD=0 constrains all KRAM accesses to page zero.
+   Keep the externally programmed page bits readable; mask only physical access. */
+static inline unsigned KING_KRAMPage(unsigned requested)
+{
+ return king->KRAM_Mode ? (requested & 1u) : 0u;
+}
+
 static void RecalcKRAMPagePtrs(void)
 {
- king->RainbowPagePtr = king->KRAM[(king->PageSetting & 0x1000) ? 1 : 0];
- king->DMAPagePtr = king->KRAM[king->PageSetting & 1];
+ king->RainbowPagePtr = king->KRAM[KING_KRAMPage((king->PageSetting & 0x1000) ? 1 : 0)];
+ king->DMAPagePtr = king->KRAM[KING_KRAMPage(king->PageSetting & 1)];
 }
+
+/* Source requests are recorded when a real emulator engine accesses KRAM.
+ * The order and phase of physical grants remain partly undocumented. */
+static uint32 king_gfx_ts;
+static uint32 kbus_event_ts;
+static void KING_KBusReserve(unsigned bank, unsigned source, uint32 timestamp);
+static uint32 KING_KBusReserveTagged(unsigned bank, unsigned source, uint32 timestamp, unsigned tag);
+static void KING_CommitPendingSCSI(uint32 timestamp);
+static void KING_CommitPendingADPCM(uint32 timestamp);
+static bool KING_QueueSCSIWord(unsigned bank, unsigned address, uint16 value, uint32 timestamp);
+static uint64 rainbow_ahead_hits, rainbow_ahead_grants, rainbow_ahead_requests, rainbow_eager_words;
+static uint64 scsi_kbus_backpressure_retries;
+/* Count reads that reach a reserved HuC6271 prefetch address before its
+ * K-BUS grant completed. They still use the synchronous decoder fallback
+ * until the JPEG/RLE parser can truly suspend on an input FIFO. */
+static uint64 rainbow_read_ahead_underflows;
+static void KING_RainbowAheadCommit(uint32 timestamp);
+static void KING_RainbowAheadSchedule(uint32 timestamp);
+static void KING_RainbowAheadDiscard(void);
+static void KING_RainbowAsyncStart(bool first, bool skip, uint32 now);
+static void KING_RainbowAsyncCommit(uint32 now);
+static void KING_RainbowAsyncCancel(void);
+
+
+
+enum { KBUS_SCSI=1, KBUS_RAINBOW=2, KBUS_ADPCM=3, KBUS_REFRESH=4 };
 
 uint8 KING_RB_Fetch(void)
 {
- uint8 ret = king->RainbowPagePtr[(king->RAINBOWKRAMReadPos >> 1) & 0x3FFFF] >> ((king->RAINBOWKRAMReadPos & 1) * 8);
-
- KP_RAINBOW_RD((king->PageSetting & 0x1000) ? 1 : 0, (king->RAINBOWKRAMReadPos >> 1) & 0x3FFFF);
- king->RAINBOWKRAMReadPos = ((king->RAINBOWKRAMReadPos + 1) & 0x3FFFF) | (king->RAINBOWKRAMReadPos & 0x40000);
-
- return(ret);
+ if(king->RBAsyncDecoding)
+ {
+  /* The decoder can only see fully grant-captured input. Do not call KRAM
+   * from Huffman/RLE paths, even for the 0xFF stuffing bytes. */
+  if(king->RBAsyncConsumeIndex >= king->RBAsyncLength)
+  {
+   if(king->RBAsyncUnderflows<12 && getenv("PCFX_RAINBOW_STATS"))
+    fprintf(stderr,"RAINBOW async underflow: len=%u consumed=%u target=%u marker=%02x readpos=%05x stage=%u first=%u\n",
+      king->RBAsyncLength,king->RBAsyncConsumeIndex,king->RBAsyncTarget,
+      king->RBAsyncMarker,king->RAINBOWKRAMReadPos,king->RBAsyncScanState,king->RBAsyncFirst);
+   king->RBAsyncUnderflows++;
+   /* An unexpected overread is a decoder contract bug: log it.  The
+    * completed-block precondition prevents this for valid streams. */
+   return 0;
+  }
+  const uint8 ret=king->RBAsyncStage[king->RBAsyncConsumeIndex++];
+  king->RAINBOWKRAMReadPos=((king->RAINBOWKRAMReadPos+1u)&0x3ffffu) |
+                             (king->RAINBOWKRAMReadPos&0x40000u);
+  return ret;
+ }
+ const uint32 address=(king->RAINBOWKRAMReadPos>>1)&0x3FFFFu;
+ const unsigned page=KING_KRAMPage((king->PageSetting & 0x1000) ? 1u : 0u);
+ uint16 word=king->KRAM[page][address];
+ const unsigned byte_index=king->RAINBOWKRAMReadPos & 1u;
+ bool ahead=false;
+ for(unsigned i=0;i<3;i++)
+ {
+  if(king->RainbowAheadStatus[i]!=2 || king->RainbowAheadPage[i]!=page ||
+     king->RainbowAheadAddress[i]!=address) continue;
+  word=king->RainbowAheadValue[i];
+  ahead=true;
+  if(!byte_index) rainbow_ahead_hits++;
+  if(king->RAINBOWKRAMReadPos & 1u) king->RainbowAheadStatus[i]=0;
+  break;
+ }
+ if(!ahead && !(king->RAINBOWKRAMReadPos & 1u))
+  for(unsigned i=0;i<3;i++)
+   if(king->RainbowAheadStatus[i]==1 && king->RainbowAheadPage[i]==page &&
+      king->RainbowAheadAddress[i]==address)
+   { rainbow_read_ahead_underflows++; break; }
+ /* A grant-time prefetch already paid for its K-BUS read. Other words
+  * continue to use the v16 eager decoder path, until the decoder is
+  * refactored into a resumable, REQR-paced input consumer. */
+ if(!ahead && !(king->RAINBOWKRAMReadPos & 1u))
+ {
+  KP_RAINBOW_RD(page,address);
+  rainbow_eager_words++;
+  KING_KBusReserve(page,KBUS_RAINBOW,king_gfx_ts);
+ }
+ king->RAINBOWKRAMReadPos=((king->RAINBOWKRAMReadPos+1)&0x3FFFFu) |
+                           (king->RAINBOWKRAMReadPos&0x40000u);
+ return (uint8)(word>>(byte_index*8));
 }
 
 /* Is the KING real-DMA "trailing item" erratum being modelled?
@@ -998,7 +1212,10 @@ uint32 KING_DMAWedgeStallCycles(void)
  return king->DMARetirePending ? KING_DMA_WEDGE_STALL_CYCLES : 0;
 }
 
-static void DoRealDMA(uint8 db)
+/* HuC6272 §3.3.4: SCSI REQ must not be ACKed for a second byte
+ * until its completed KRAM halfword can be accepted into the grant queue.
+ * false leaves the bus handshake, DMA counter and byte latch unchanged. */
+static bool DoRealDMA(uint8 db)
 {
  /* The trailing handshake past the programmed count has arrived: it is consumed
   * off the bus and discarded (NOT written to KRAM -- every requested word has
@@ -1012,17 +1229,35 @@ static void DoRealDMA(uint8 db)
   king->DMAInterrupt = TRUE;
   RedoKINGIRQCheck();
   king->DMAStatus &= ~1;
-  return;
+  return true;
  }
 
  if(!king->DMATransferFlipFlop)
+ {
   king->DMALatch = db;
+  /* The hardware DMA counter counts each received SCSI byte, not only
+   * completed KRAM words (HuC6272 §3.3.4 step 7). */
+  king->DMATransferSize = (king->DMATransferSize - 1u) & 0x3FFFFu;
+ }
  else
  {
-  KP_DMA_WR(king->PageSetting & 1, king->DMATransferAddr & 0x3FFFF);
-  king->DMAPagePtr[king->DMATransferAddr & 0x3FFFF] = king->DMALatch | (db << 8);
+
+  /* HuC6272 §3.3.4: two incoming SCSI bytes become one KRAM word.
+   * Capture (bank, address, data) now; only expose it when the bus grant
+   * retires. An exhausted queue must not silently drop a DMA word. */
+  if(!KING_QueueSCSIWord(KING_KRAMPage(king->PageSetting & 1u),
+                         king->DMATransferAddr & 0x3FFFFu,
+                         (uint16)(king->DMALatch | (db << 8)), kbus_event_ts))
+  {
+   scsi_kbus_backpressure_retries++;
+   /* Do not consume the second byte or assert ACK: the drive keeps REQ
+    * raised until a grant/queue entry becomes available. In particular,
+    * no eager KRAM write is ever permitted here. */
+   return false;
+  }
+  KP_DMA_WR(KING_KRAMPage(king->PageSetting & 1), king->DMATransferAddr & 0x3FFFF);
   king->DMATransferAddr = ((king->DMATransferAddr + 1) & 0x1FFFF) | (king->DMATransferAddr & 0x20000);
-  king->DMATransferSize = (king->DMATransferSize - 2) & 0x3FFFF;
+  king->DMATransferSize = (king->DMATransferSize - 1u) & 0x3FFFFu;
   if(!king->DMATransferSize)
   {
    if(king_dma_erratum_enabled() && king->DMACountBounded)
@@ -1044,7 +1279,7 @@ static void DoRealDMA(uint8 db)
     king->DMARetirePending = TRUE;
     king->DMATransferSize = 2;
     king->DMATransferFlipFlop ^= 1;
-    return;
+    return true;
    }
 
    KINGDBG("DMA Done\n");
@@ -1052,10 +1287,11 @@ static void DoRealDMA(uint8 db)
    king->DMAInterrupt = TRUE;
    RedoKINGIRQCheck();
    king->DMAStatus &= ~1;
-   return;
+   return true;
   }
  }
  king->DMATransferFlipFlop ^= 1;
+ return true;
 }
 
 uint16 FXVCE_Read16(uint32 A)
@@ -1083,41 +1319,17 @@ uint16 FXVCE_Read16(uint32 A)
  }
  else
  {
-  switch(fx_vce.AR) // No idea which registers are readable, so make them all readable :b
+  /* C6261 §2.1.3: the palette data read port is R03; R02 is write-only.
+     Other register readback is undocumented. Return the undriven bus sentinel,
+     rather than incorrectly executing the R03 auto-increment side effect. */
+  if(fx_vce.AR == 0x03)
   {
-		default:  break;
-	        case 0x00: return(fx_vce.picture_mode);
-		case 0x01: return(fx_vce.palette_rw_offset);
-		case 0x03: // Boundary Gate reads from 0x03 expecting palette data...
-	        case 0x02: 
-			   {
-				uint16 ret = fx_vce.palette_rw_latch;
-				fx_vce.palette_rw_offset = (fx_vce.palette_rw_offset + 1) & 0x1FF;
-				fx_vce.palette_rw_latch = fx_vce.palette_table[fx_vce.palette_rw_offset];
-				return(ret);
-			   }
-	        case 0x04: return(fx_vce.palette_offset[0]);
-		case 0x05: return(fx_vce.palette_offset[1]);
-		case 0x06: return(fx_vce.palette_offset[2]);
-		case 0x07: return(fx_vce.palette_offset[3]);
-		case 0x08: return(fx_vce.priority[0]);
-		case 0x09: return(fx_vce.priority[1]);
-                case 0x0a: return(fx_vce.ChromaKeyY);
-                case 0x0b: return(fx_vce.ChromaKeyU);
-                case 0x0c: return(fx_vce.ChromaKeyV);
-
-                case 0x0d: return(fx_vce.CCR);
-                case 0x0e: return(fx_vce.BLE);
-                case 0x0f: return(fx_vce.SPBL);
-                case 0x10: return(fx_vce.coefficients[0]);
-                case 0x11: return(fx_vce.coefficients[1]);
-
-                case 0x12: return(fx_vce.coefficients[2]);
-                case 0x13: return(fx_vce.coefficients[3]);
-
-                case 0x14: return(fx_vce.coefficients[4]);
-                case 0x15: return(fx_vce.coefficients[5]);
+   uint16 ret = fx_vce.palette_rw_latch;
+   fx_vce.palette_rw_offset = (fx_vce.palette_rw_offset + 1) & 0x1FF;
+   fx_vce.palette_rw_latch = fx_vce.palette_table[fx_vce.palette_rw_offset];
+   return ret;
   }
+  return 0xFFFF;  /* Unknown open-bus electrical value, not hardware-guaranteed. */
  }
 
  return(0);
@@ -1258,6 +1470,45 @@ void KING_EndFrame(v810_timestamp_t timestamp)
   king->KRAMWriteBusyUntil -= timestamp;
  else
   king->KRAMWriteBusyUntil = 0;
+ if(king->KRAMWritePending)
+  king->KRAMWritePendingAt = king->KRAMWritePendingAt > timestamp ?
+                              king->KRAMWritePendingAt - timestamp : 0;
+ for(unsigned i=0;i<KING_SCSI_PENDING_MAX;i++)
+  if(king->SCSIPendingValid[i])
+   king->SCSIPendingGrantAt[i] = king->SCSIPendingGrantAt[i] > (uint32)timestamp ?
+                                 king->SCSIPendingGrantAt[i] - (uint32)timestamp : 0;
+ for(unsigned ch=0;ch<2;ch++)
+  if(king->ADPCMGrantPending[ch])
+   king->ADPCMGrantAt[ch] = king->ADPCMGrantAt[ch] > (uint32)timestamp ?
+                             king->ADPCMGrantAt[ch] - (uint32)timestamp : 0;
+ for(unsigned j=0;j<3;j++)
+  if(king->RainbowAheadStatus[j]==1)
+   king->RainbowAheadGrantAt[j] = king->RainbowAheadGrantAt[j] > (uint32)timestamp ?
+       king->RainbowAheadGrantAt[j] - (uint32)timestamp : 0;
+ if(king->RBAsyncPending)
+  king->RBAsyncGrantAt=king->RBAsyncGrantAt > (uint32)timestamp ?
+     king->RBAsyncGrantAt-(uint32)timestamp : 0;
+ /* Relative time rebasing may not be a multiple of four, so rehash
+  * retained future reservations instead of changing just their tags. */
+ for(unsigned b=0;b<2;b++)
+ {
+  uint32 times[KING_KBUS_SLOTS] = {0};
+  uint8 sources[KING_KBUS_SLOTS] = {0};
+  uint16 tags[KING_KBUS_SLOTS] = {0};
+  for(unsigned i=0;i<KING_KBUS_SLOTS;i++)
+   if(king->KBusSlotSource[b][i] && king->KBusSlotTime[b][i] >= (uint32)timestamp)
+   {
+    const uint32 ts = king->KBusSlotTime[b][i] - (uint32)timestamp;
+    const unsigned slot = (ts/4u) & (KING_KBUS_SLOTS-1u);
+    times[slot] = ts;
+    sources[slot] = king->KBusSlotSource[b][i];
+    tags[slot] = king->KBusSlotTag[b][i];
+   }
+  memcpy(king->KBusSlotTime[b],times,sizeof(times));
+  memcpy(king->KBusSlotSource[b],sources,sizeof(sources));
+  memcpy(king->KBusSlotTag[b],tags,sizeof(tags));
+ }
+
 
 }
 
@@ -1319,11 +1570,575 @@ static int32 CalcNextExternalEvent(int32 next_event)
  return(next_event);
 }
 
+/* Post-drain KRAM visibility, enabled by the default slot model.  The CPU-side write address advances at acceptance;
+ * the captured (page,address,value) is committed at the deadline. */
+static void KING_CommitPendingKRAM(v810_timestamp_t now)
+{
+ if(king->KRAMWritePending && king->KRAMWritePendingAt <= now)
+ {
+  king->KRAM[king->KRAMWritePendingPage & 1u]
+            [king->KRAMWritePendingAddress & 0x3FFFFu] = king->KRAMWritePendingValue;
+  king->KRAMWritePending = 0;
+ }
+}
+
+/* HuC6272 §3.2.2 specifies the priority relations, not electrical
+ * arbitration phase or a 4-clock service duration. Preserve the existing
+ * KING-dot-sized grant model as an explicitly uncalibrated quantum.
+ * Internal source values are 1=SCSI, 2=HuC6271, 3=ADPCM, 4=REF. */
+static unsigned KING_KBusPriority(unsigned source, bool hblank)
+{
+ if(hblank)
+ {
+  if(source == KBUS_REFRESH) return 4;
+  if(source == KBUS_ADPCM) return 3;
+  if(source == KBUS_RAINBOW) return 2;
+  if(source == KBUS_SCSI) return 1;
+ }
+ else
+ {
+  if(source == KBUS_RAINBOW) return 2;
+  if(source == KBUS_SCSI) return 1;
+  /* No REF or ADPCM requests are specified for active video. */
+ }
+ return 0;
+}
+
+static bool KING_KBusBGAt(unsigned bank, uint32 when, uint32 origin)
+{
+ if(HPhase != HPHASE_ACTIVE || fx_vce.in_hblank || !(king->MPROGControl & 1u)) return false;
+ const uint32 remaining = HPhaseCounter > 0 ? (uint32)HPhaseCounter : 0;
+ if(when < origin || when - origin >= remaining) return false;
+ const uint32 elapsed = HPhaseCounter <= 1024 ? 1024u - (uint32)HPhaseCounter : 0;
+ const unsigned slot = ((elapsed + when - origin) / 4u) & 7u;
+ const uint16 mp = king->MPROGData[(bank & 1u) * 8u + slot];
+ return !(mp & 0x100u) && ((king->priority >> (((mp >> 6) & 3u) * 3u)) & 7u);
+}
+
+/* v16: grant reservations carry an optional SCSI-word token. If a later
+ * higher-priority requester displaces the word, update its completion time;
+ * otherwise the earlier deadline would commit data before the bus grant. */
+static uint32 KING_KBusReserveTagged(unsigned bank, unsigned source, uint32 now, unsigned tag)
+{
+ bank = KING_KRAMPage(bank);
+ const bool blank = HPhase != HPHASE_ACTIVE || fx_vce.in_hblank;
+ if(!KING_KBusPriority(source, blank)) return now;
+ uint32 candidate = (now + 3u) & ~3u;
+ for(unsigned tries=0;tries<KING_KBUS_SLOTS;tries++,candidate+=4u)
+ {
+  if(KING_KBusBGAt(bank,candidate,now)) continue;
+  const unsigned i = (candidate/4u) & (KING_KBUS_SLOTS-1u);
+  const unsigned previous = king->KBusSlotSource[bank][i];
+  if(previous && king->KBusSlotTime[bank][i] == candidate)
+  {
+   if(KING_KBusPriority(source,blank) <= KING_KBusPriority(previous,blank)) continue;
+   /* Higher priority wins; carry lower-priority request and its token. */
+   const unsigned previous_tag=king->KBusSlotTag[bank][i];
+   king->KBusSlotSource[bank][i]=(uint8)source;
+   king->KBusSlotTag[bank][i]=(uint16)tag;
+   if(tag && tag <= KING_SCSI_PENDING_MAX)
+    king->SCSIPendingGrantAt[tag-1]=candidate+4u;
+   else if(tag > KING_SCSI_PENDING_MAX && tag <= KING_SCSI_PENDING_MAX+2u)
+    king->ADPCMGrantAt[tag-KING_SCSI_PENDING_MAX-1u]=candidate+4u;
+   else if(tag > KING_SCSI_PENDING_MAX+2u && tag <= KING_SCSI_PENDING_MAX+5u)
+    king->RainbowAheadGrantAt[tag-KING_SCSI_PENDING_MAX-3u]=candidate+4u;
+   else if(tag==KING_SCSI_PENDING_MAX+6u)
+    king->RBAsyncGrantAt=candidate+4u;
+   source=previous;
+   tag=previous_tag;
+   continue;
+  }
+  king->KBusSlotTime[bank][i]=candidate;
+  king->KBusSlotSource[bank][i]=(uint8)source;
+  king->KBusSlotTag[bank][i]=(uint16)tag;
+  if(tag && tag <= KING_SCSI_PENDING_MAX)
+   king->SCSIPendingGrantAt[tag-1]=candidate+4u;
+  else if(tag > KING_SCSI_PENDING_MAX && tag <= KING_SCSI_PENDING_MAX+2u)
+   king->ADPCMGrantAt[tag-KING_SCSI_PENDING_MAX-1u]=candidate+4u;
+  else if(tag > KING_SCSI_PENDING_MAX+2u && tag <= KING_SCSI_PENDING_MAX+5u)
+   king->RainbowAheadGrantAt[tag-KING_SCSI_PENDING_MAX-3u]=candidate+4u;
+  else if(tag==KING_SCSI_PENDING_MAX+6u)
+   king->RBAsyncGrantAt=candidate+4u;
+  return candidate+4u;
+ }
+ /* The manuals do not define a queue overflow policy; test and report it. */
+ return UINT32_MAX;
+}
+
+static void KING_KBusReserve(unsigned bank, unsigned source, uint32 timestamp)
+{
+ (void)KING_KBusReserveTagged(bank, source, timestamp, 0);
+}
+
+static bool KING_QueueSCSIWord(unsigned bank, unsigned address, uint16 value, uint32 timestamp)
+{
+ for(unsigned n=0;n<KING_SCSI_PENDING_MAX;n++)
+ {
+  if(king->SCSIPendingValid[n]) continue;
+  king->SCSIPendingValid[n]=1;
+  king->SCSIPendingCount++;
+  king->SCSIPendingAddress[n]=address & 0x3FFFFu;
+  king->SCSIPendingPage[n]=(uint8)KING_KRAMPage(bank);
+  king->SCSIPendingValue[n]=value;
+  const uint32 deadline=KING_KBusReserveTagged(bank,KBUS_SCSI,timestamp,n+1);
+  if(deadline==UINT32_MAX)
+  {
+   king->SCSIPendingValid[n]=0;
+   king->SCSIPendingCount--;
+   return false;
+  }
+  /* Deadline may have been moved during priority arbitration. */
+  return true;
+ }
+ return false;
+}
+
+static void KING_CommitPendingSCSI(uint32 timestamp)
+{
+ if(!king->SCSIPendingCount) return;
+ for(unsigned n=0;n<KING_SCSI_PENDING_MAX;n++)
+ {
+  if(!king->SCSIPendingValid[n] || king->SCSIPendingGrantAt[n]>timestamp) continue;
+  const unsigned bank=king->SCSIPendingPage[n]&1u;
+  king->KRAM[bank][king->SCSIPendingAddress[n]&0x3FFFFu]=king->SCSIPendingValue[n];
+  king->SCSIPendingValid[n]=0;
+  king->SCSIPendingCount--;
+  const uint32 slot_time=king->SCSIPendingGrantAt[n]-4u;
+  const unsigned slot=(slot_time/4u)&(KING_KBUS_SLOTS-1u);
+  if(king->KBusSlotTag[bank][slot]==n+1 &&
+     king->KBusSlotTime[bank][slot]==slot_time)
+   king->KBusSlotTag[bank][slot]=0;
+ }
+}
+
+static void KING_CommitPendingADPCM(uint32 timestamp)
+{
+ for(unsigned ch=0;ch<2;ch++)
+ {
+  if(!king->ADPCMGrantPending[ch] || king->ADPCMGrantAt[ch]>timestamp) continue;
+  const unsigned page=king->ADPCMGrantPage[ch]&1u;
+  const uint32 address=king->ADPCMGrantAddress[ch]&0x3FFFFu;
+  const uint16 value=king->KRAM[page][address];
+  KP_ADPCM_RD(page,address);
+  king->ADPCMGrantPending[ch]=0;
+  /* A final word must still arrive even if its address hit the end and
+   * R50 auto-disabled the channel on this very request. An explicit CPU
+   * disable, by contrast, cancels any pending word below. */
+  SoundBox_ADPCMReceiveWord(ch,value);
+  const uint32 grant=king->ADPCMGrantAt[ch]-4u;
+  const unsigned slot=(grant/4u)&(KING_KBUS_SLOTS-1u);
+  if(king->KBusSlotTag[page][slot]==KING_SCSI_PENDING_MAX+ch+1u &&
+     king->KBusSlotTime[page][slot]==grant)
+   king->KBusSlotTag[page][slot]=0;
+ }
+}
+
+/* Stage exactly three post-block words, as required by HuC6272's
+ * documented 0x0000 guard.  Capture bytes at K-BUS grant, not request.
+ * No assumption is made about the HuC6271's internal FIFO depth beyond
+ * these three documented over-read words. */
+static void KING_RainbowAheadDiscard(void)
+{
+ for(unsigned j=0;j<3;j++)
+ {
+  if(king->RainbowAheadStatus[j]==1)
+  {
+   const unsigned bank=king->RainbowAheadPage[j]&1u;
+   const uint32 grant=king->RainbowAheadGrantAt[j]-4u;
+   const unsigned slot=(grant/4u)&(KING_KBUS_SLOTS-1u);
+   if(king->KBusSlotTime[bank][slot]==grant &&
+      king->KBusSlotTag[bank][slot]==KING_SCSI_PENDING_MAX+3u+j)
+   {
+    king->KBusSlotTag[bank][slot]=0;
+    king->KBusSlotSource[bank][slot]=0;
+   }
+  }
+  king->RainbowAheadStatus[j]=0;
+ }
+}
+
+static void KING_RainbowAheadSchedule(uint32 timestamp)
+{
+ KING_RainbowAheadDiscard();
+ const unsigned bank=KING_KRAMPage((king->PageSetting & 0x1000u)?1u:0u);
+ const uint32 addr=(king->RAINBOWKRAMReadPos>>1)&0x3FFFFu;
+ for(unsigned j=0;j<3;j++)
+ {
+  king->RainbowAheadAddress[j]=(addr+j)&0x3FFFFu;
+  king->RainbowAheadPage[j]=bank;
+  king->RainbowAheadStatus[j]=1;
+  rainbow_ahead_requests++;
+  const uint32 grant=KING_KBusReserveTagged(bank,KBUS_RAINBOW,timestamp,
+                                           KING_SCSI_PENDING_MAX+3u+j);
+  if(grant==UINT32_MAX) king->RainbowAheadStatus[j]=0;
+ }
+}
+
+static void KING_RainbowAheadCommit(uint32 timestamp)
+{
+ for(unsigned j=0;j<3;j++)
+ {
+  if(king->RainbowAheadStatus[j]!=1 || king->RainbowAheadGrantAt[j]>timestamp) continue;
+  const unsigned bank=king->RainbowAheadPage[j]&1u;
+  const uint32 grant=king->RainbowAheadGrantAt[j]-4u;
+  king->RainbowAheadValue[j]=king->KRAM[bank][king->RainbowAheadAddress[j]&0x3FFFFu];
+  king->RainbowAheadStatus[j]=2;
+  rainbow_ahead_grants++;
+  const unsigned slot=(grant/4u)&(KING_KBUS_SLOTS-1u);
+  if(king->KBusSlotTime[bank][slot]==grant &&
+     king->KBusSlotTag[bank][slot]==KING_SCSI_PENDING_MAX+3u+j)
+   king->KBusSlotTag[bank][slot]=0;
+ }
+}
+
+/* HuC6272 §3.4: RAINBOW requests words through the K-BUS. RLE tokens are
+ * decoded incrementally as their complete bytes are captured. JPEG Huffman
+ * decoding remains block-atomic pending a resumable bit-reservoir backend. */
+/* Incremental JPEG F8/FF input parser. A trailing FF is a two-byte
+ * operation, so its successor must arrive at a K-BUS grant before either
+ * byte is committed. The 128 quantization bytes of FF are separate and
+ * are not subject to entropy byte stuffing. This is deliberately not a
+ * substitute for the still-block-atomic Huffman/IDCT backend. */
+/* Optional diagnostic: default rendering avoids a second IDCT workload. */
+static int KING_RainbowMCUCompareEnabled(void)
+{
+ static int value=-1;
+ if(value<0)
+ {
+  const char *p=getenv("PCFX_RAINBOW_MCU_COMPARE");
+  value=(p && *p && strcmp(p,"0"))?1:0;
+ }
+ return value;
+}
+
+static void KING_RainbowMCUColumn(void *opaque,const RBH_State *state,unsigned column)
+{
+ if(!KING_RainbowMCUCompareEnabled() || !king->RBMCUQuantValid || column>=16) return;
+ uint8 luma[256];
+ RBM_ReconstructLuma(state,king->RBMCUQuantBase,luma,RAINBOW_IsFastBackend());
+ for(unsigned y=0;y<16;y++)
+  memcpy(&king->RBMCULuma[y*256+column*16],luma+y*16,16);
+ king->RBMCUValidColumn[column]=1;
+ king->RBMCUColumns++;
+ (void)opaque;
+}
+
+static void KING_RainbowJPEGProgress(void)
+{
+ if(!king->RBAsyncActive || !king->RBAsyncTarget ||
+    (king->RBAsyncMarker!=0xf8 && king->RBAsyncMarker!=0xff)) return;
+ if(!king->RBJPEGActive)
+ {
+  king->RBJPEGActive=1;
+  king->RBJPEGCursor=king->RBAsyncScanIndex;
+  king->RBJPEGEntropyEnd=king->RBAsyncTarget-8u;
+  king->RBJPEGQuantExpected=(king->RBAsyncMarker==0xff)?128:0;
+  king->RBJPEGQuantCount=0;
+  king->RBJPEGDigest=2166136261u;
+  memset(king->RBMCUValidColumn,0,sizeof(king->RBMCUValidColumn));
+ }
+ const uint32 end=king->RBJPEGEntropyEnd;
+ while(king->RBJPEGCursor<end && king->RBJPEGCursor<king->RBAsyncLength)
+ {
+  uint32 at=king->RBJPEGCursor;
+  uint8 b=king->RBAsyncStage[at];
+  if(king->RBJPEGQuantCount<king->RBJPEGQuantExpected)
+  {
+   king->RBJPEGQuant[king->RBJPEGQuantCount++]=b;
+   king->RBJPEGCursor++;
+   continue;
+  }
+  /* The decoder drops the stuffed byte following a literal FF. Preserve
+   * the original FF and its companion atomically across grant boundaries. */
+  if(b==0xff && at+1u<end && at+1u>=king->RBAsyncLength)
+  {
+   king->RBJPEGStalledPairs++;
+   break;
+  }
+  king->RBJPEGCursor++;
+  if(b==0xff && king->RBJPEGCursor<end)
+  {
+   king->RBJPEGCursor++;
+   king->RBJPEGStuffedPairs++;
+  }
+  king->RBJPEGDigest=(king->RBJPEGDigest^b)*16777619u;
+  king->RBJPEGEntropyBytes++;
+ }
+ if(king->RBJPEGQuantCount==king->RBJPEGQuantExpected)
+ {
+  if(king->RBJPEGQuantExpected==128 && !king->RBHStarted)
+  {
+   memcpy(king->RBMCUQuantBase,king->RBJPEGQuant,64);
+   king->RBMCUQuantValid=1;
+  }
+  if(!king->RBHStarted)
+  {
+   RBH_Start(&king->RBH, king->RBAsyncScanIndex+king->RBJPEGQuantExpected,
+             king->RBJPEGEntropyEnd);
+   king->RBHStarted=1;
+   /* An FF block loads fresh quant tables, so discard the previous
+    * block's effective rescale; F8 inherits it. */
+   if(king->RBJPEGQuantExpected==128) king->RBMCUScale=4;
+   king->RBH.quant_scale=king->RBMCUScale;
+  }
+  RBH_AdvanceColumns(&king->RBH,king->RBAsyncStage,king->RBAsyncLength,
+                     4096,KING_RainbowMCUColumn,NULL);
+  RBH_DrainTrailingRescales(&king->RBH,king->RBAsyncStage,king->RBAsyncLength);
+  king->RBMCUScale=king->RBH.quant_scale;
+ }
+}
+
+static void KING_RainbowAsyncCancel(void)
+{
+ if(king->RBAsyncPending)
+ {
+  const unsigned bank=king->RBAsyncPage&1u;
+  const uint32 grant=king->RBAsyncGrantAt>=4?king->RBAsyncGrantAt-4:0;
+  const unsigned slot=(grant/4u)&(KING_KBUS_SLOTS-1u);
+  if(king->KBusSlotTag[bank][slot]==KING_SCSI_PENDING_MAX+6u &&
+     king->KBusSlotTime[bank][slot]==grant)
+  {
+   king->KBusSlotTag[bank][slot]=0;
+   king->KBusSlotSource[bank][slot]=0;
+  }
+ }
+ king->RBAsyncActive=king->RBAsyncPending=king->RBAsyncDecoding=0;
+ king->RBAsyncRLEActive=0;
+ king->RBJPEGActive=0;
+ king->RBHStarted=0;
+ king->RBAsyncLength=king->RBAsyncConsumeIndex=0;
+ king->RBAsyncScanIndex=king->RBAsyncTarget=0;
+ king->RBAsyncProducerPos=king->RAINBOWKRAMReadPos;
+}
+
+/* Scan the same 0xff marker, type and 16-bit length as DecodeBlock(),
+ * without interpreting Huffman coefficients or prematurely sampling KRAM.
+ * Includes FF stuffing/quant tables as bytes of the declared payload. */
+static void KING_RainbowAsyncScan(void)
+{
+ while(king->RBAsyncScanIndex<king->RBAsyncLength && !king->RBAsyncTarget)
+ {
+  const uint8 b=king->RBAsyncStage[king->RBAsyncScanIndex++];
+  switch(king->RBAsyncScanState)
+  {
+   case 0:
+    if(b==0xff) king->RBAsyncScanState=1;
+    else if(king->RBAsyncHeaderRemaining) king->RBAsyncHeaderRemaining--;
+    break;
+   case 1:
+    king->RBAsyncMarker=b;
+    if(b==0xf0 || b==0xf1 || b==0xf2 || b==0xf3 || b==0xf8 || b==0xff)
+     king->RBAsyncScanState=2;
+    else { king->RBAsyncScanState=0; if(king->RBAsyncHeaderRemaining) king->RBAsyncHeaderRemaining--; }
+    break;
+   case 2: king->RBAsyncSizeHigh=b; king->RBAsyncScanState=3; break;
+   case 3:
+   {
+    const int32 length=(int32)((king->RBAsyncSizeHigh<<8)|b)-2;
+    if(length>0)
+    {
+     /* The declared block length includes the two inner dummy bytes,
+      * and HuC6272 §3.4.2(4) requires three additional zero guard
+      * words after the block. Grant all eight bytes before decoding. */
+     king->RBAsyncTarget=king->RBAsyncScanIndex+(uint32)length+8u;
+     king->RBAsyncScanState=5;
+    }
+    else if(king->RBAsyncMarker==0xff)
+    {
+     king->RBAsyncScanState=4;
+     king->RBAsyncSkipRemaining=128;
+    }
+    else king->RBAsyncScanState=0;
+    break;
+   }
+   case 4:
+    if(--king->RBAsyncSkipRemaining==0) king->RBAsyncScanState=0;
+    break;
+   default: break;
+  }
+  if(!king->RBAsyncTarget && king->RBAsyncScanIndex>=512u+256u)
+  {
+   /* A corrupt block cannot monopolize the producer forever. */
+   king->RBAsyncTarget=king->RBAsyncScanIndex;
+  }
+ }
+}
+
+static void KING_RainbowAsyncRequest(uint32 now)
+{
+ if(!king->RBAsyncActive || king->RBAsyncPending ||
+    (king->RBAsyncTarget && king->RBAsyncLength>=king->RBAsyncTarget)) return;
+ if(king->RBAsyncLength+2>=sizeof(king->RBAsyncStage)) return;
+ const unsigned bank=KING_KRAMPage((king->PageSetting&0x1000u)?1u:0u);
+ king->RBAsyncAddress=(king->RBAsyncProducerPos>>1)&0x3ffffu;
+ king->RBAsyncPage=(uint8)bank;
+ const uint32 deadline=KING_KBusReserveTagged(bank,KBUS_RAINBOW,now,
+                                             KING_SCSI_PENDING_MAX+6u);
+ if(deadline==UINT32_MAX) { king->RBAsyncWaits++; return; }
+ king->RBAsyncPending=1;
+ king->RBAsyncGrantAt=deadline;
+}
+
+/* A complete RLE token is an atomic HuC6271 decoder operation.  A run may
+ * cross one or several delayed K-BUS grants; do not consume its first byte
+ * until all of its stuffed/count bytes are present. */
+static void KING_RainbowAsyncProgressRLE(void)
+{
+ if(!king->RBAsyncActive || !king->RBAsyncTarget ||
+    king->RBAsyncMarker<0xf0 || king->RBAsyncMarker>0xf3) return;
+ if(!king->RBAsyncRLEActive)
+ {
+  king->RBAsyncRLEActive=1;
+  king->RBAsyncRLECursor=king->RBAsyncScanIndex;
+  king->RBAsyncRLEEnd=king->RBAsyncTarget-8u;
+  king->RBAsyncRLEX=0;
+  king->RBAsyncRLETokenCount=0;
+  RAINBOW_RLEBegin(king->RBAsyncFirst!=0);
+  /* The header scanner never consumes decoder bytes.  Commit its position
+   * separately when switching to the incremental decoder. */
+  const uint32 consumed=king->RBAsyncRLECursor;
+  king->RAINBOWKRAMReadPos=((king->RAINBOWKRAMReadPos+consumed)&0x3ffffu) |
+                              (king->RAINBOWKRAMReadPos&0x40000u);
+ }
+ const unsigned shift=4u-(king->RBAsyncMarker&3u);
+ const unsigned mask=(1u<<shift)-1u;
+ while(king->RBAsyncRLECursor<king->RBAsyncRLEEnd)
+ {
+  const uint32 cursor=king->RBAsyncRLECursor;
+  if(cursor>=king->RBAsyncLength) break;
+  const uint8 boot=king->RBAsyncStage[cursor];
+  uint32 need=1, count;
+  if(boot==0xff) ++need; /* byte stuffing */
+  if(!(boot&mask))
+  {
+   if(cursor+need>=king->RBAsyncLength) break;
+   const uint8 count_byte=king->RBAsyncStage[cursor+need];
+   ++need;
+   if(count_byte==0xff) ++need;
+   count=(unsigned)count_byte+1u;
+  }
+  else count=boot&mask;
+  if(cursor+need>king->RBAsyncLength) break;
+  /* Declared lengths include the two dummy bytes but exclude the external
+   * guard words.  Do not allow a malformed RLE token to consume either. */
+  if(cursor+need>king->RBAsyncRLEEnd+2u) break;
+  RAINBOW_RLEEmit(king->RBAsyncRLEX,count,boot>>shift);
+  king->RBAsyncRLEX+=count;
+  king->RBAsyncRLECursor+=need;
+  king->RBAsyncRLETokenCount++;
+  king->RBAsyncRLETotalTokens++;
+  king->RAINBOWKRAMReadPos=((king->RAINBOWKRAMReadPos+need)&0x3ffffu) |
+                               (king->RAINBOWKRAMReadPos&0x40000u);
+ }
+}
+
+static void KING_RainbowAsyncFinish(uint32 now)
+{
+ if(!king->RBAsyncActive || !king->RBAsyncTarget) return;
+ KING_RainbowAsyncProgressRLE();
+ if(king->RBAsyncLength<king->RBAsyncTarget) return;
+ if(king->RBAsyncRLEActive)
+ {
+  if(king->RBAsyncRLECursor<king->RBAsyncRLEEnd)
+  {
+   /* A truncated token is invalid even after the two inner dummy bytes;
+    * never fabricate extra input that has not arrived through K-BUS. */
+   king->RBAsyncUnderflows++;
+   KING_RainbowAsyncCancel();
+   return;
+  }
+  RAINBOW_RLEEnd();
+  king->RBAsyncRLEBlocks++;
+  king->RBAsyncConsumeIndex=king->RBAsyncRLECursor;
+  king->RBAsyncRLEActive=0;
+ }
+ else
+ {
+  king->RBAsyncDecoding=1;
+  king->RBAsyncConsumeIndex=0;
+  RAINBOW_DecodeBlock(king->RBAsyncFirst!=0,king->RBAsyncSkip!=0);
+  if(KING_RainbowMCUCompareEnabled() && !king->RBAsyncSkip && king->RBHStarted && king->RBH.finished &&
+     king->RBMCUQuantValid && king->RBAsyncMarker>=0xf8)
+  {
+   uint32 compared=0,diff=0;
+   RAINBOW_CompareLuma(king->RBMCULuma,king->RBMCUValidColumn,&compared,&diff);
+   king->RBMCUCompared+=compared;
+   king->RBMCUDifferences+=diff;
+   king->RBMCUBlocks++;
+   if(!diff) king->RBMCUExactBlocks++;
+  }
+  king->RBAsyncDecoding=0;
+  if(king->RBJPEGActive) king->RBJPEGBlocks++;
+  if(king->RBHStarted && king->RBH.finished) king->RBHCompletedBlocks++;
+ }
+ const uint32 used=king->RBAsyncConsumeIndex;
+ if(used>king->RBAsyncLength) { king->RBAsyncUnderflows++; KING_RainbowAsyncCancel(); return; }
+ memmove(king->RBAsyncStage,king->RBAsyncStage+used,king->RBAsyncLength-used);
+ king->RBAsyncLength-=used;
+ /* Producer remains ahead of the consumer if the parser used fewer bytes. */
+ king->RBAsyncActive=0;
+ king->RBAsyncRLEActive=0;
+ king->RBJPEGActive=0;
+ king->RBHStarted=0;
+ king->RBAsyncScanIndex=king->RBAsyncTarget=0;
+ /* The producer already captured the two dummy bytes and three guard
+  * words at K-BUS grant. Never double-reserve them. */
+}
+
+static void KING_RainbowAsyncStart(bool first, bool skip, uint32 now)
+{
+ if(king->RBAsyncActive) return;
+ king->RBAsyncActive=1;
+ king->RBAsyncFirst=(uint8)first;
+ king->RBAsyncSkip=(uint8)skip;
+ king->RBAsyncRLEActive=0;
+ king->RBJPEGActive=0;
+ king->RBHStarted=0;
+ king->RBAsyncScanIndex=king->RBAsyncTarget=0;
+ king->RBAsyncScanState=0;
+ king->RBAsyncHeaderRemaining=512;
+ king->RBAsyncSkipRemaining=0;
+ KING_RainbowAsyncScan();
+ KING_RainbowJPEGProgress();
+ KING_RainbowAsyncFinish(now);
+ KING_RainbowAsyncRequest(now);
+}
+
+static void KING_RainbowAsyncCommit(uint32 now)
+{
+ if(king->RBAsyncPending && king->RBAsyncGrantAt<=now)
+ {
+  const unsigned bank=king->RBAsyncPage&1u;
+  const uint32 grant=king->RBAsyncGrantAt-4u;
+  const unsigned slot=(grant/4u)&(KING_KBUS_SLOTS-1u);
+  /* Sampling at the grant sees the KRAM contents *after* older writes
+   * committed, not the contents at the time of the request. */
+  const uint16 word=king->KRAM[bank][king->RBAsyncAddress&0x3ffffu];
+  const unsigned odd=king->RBAsyncProducerPos&1u;
+  if(king->RBAsyncLength+2u<=sizeof(king->RBAsyncStage))
+  {
+   if(!odd) king->RBAsyncStage[king->RBAsyncLength++]=(uint8)word;
+   king->RBAsyncStage[king->RBAsyncLength++]=(uint8)(word>>8);
+   king->RBAsyncProducerPos=((king->RBAsyncProducerPos+(odd?1u:2u))&0x3ffffu) |
+                              (king->RBAsyncProducerPos&0x40000u);
+   king->RBAsyncWords++;
+  }
+  if(king->KBusSlotTime[bank][slot]==grant &&
+     king->KBusSlotTag[bank][slot]==KING_SCSI_PENDING_MAX+6u)
+  {
+   king->KBusSlotTag[bank][slot]=0;
+   king->KBusSlotSource[bank][slot]=0;
+  }
+  king->RBAsyncPending=0;
+  KING_RainbowAsyncScan();
+  KING_RainbowJPEGProgress();
+  KING_RainbowAsyncFinish(now);
+ }
+ KING_RainbowAsyncRequest(now);
+}
+
 static void MDFN_FASTCALL KING_RunGfx(int32 clocks);
 
-#ifdef HAVE_HUC6273
-static uint32 king_gfx_ts;
-#endif
 
 v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
 {
@@ -1334,10 +2149,42 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
 
  king->lastts = timestamp;
 
-#ifdef HAVE_HUC6273
  king_gfx_ts = running_timestamp;
-#endif
- KING_RunGfx(clocks);
+ /* Do not expose accepted CPU or SCSI words to BG/RAINBOW/ADPCM before the
+  * reserved bus-grant completion. Split long graphics callbacks at all
+  * pending completions, preserving the old exact 1024-clock video path. */
+ while(running_timestamp < (uint32)timestamp)
+ {
+  KING_CommitPendingKRAM(running_timestamp);
+  KING_CommitPendingSCSI(running_timestamp);
+  KING_CommitPendingADPCM(running_timestamp);
+  KING_RainbowAheadCommit(running_timestamp);
+  KING_RainbowAsyncCommit(running_timestamp);
+  uint32 next=(uint32)timestamp;
+  if(king->KRAMWritePending && (uint32)king->KRAMWritePendingAt>running_timestamp &&
+     (uint32)king->KRAMWritePendingAt<next) next=(uint32)king->KRAMWritePendingAt;
+  for(unsigned n=0;king->SCSIPendingCount && n<KING_SCSI_PENDING_MAX;n++)
+   if(king->SCSIPendingValid[n] && king->SCSIPendingGrantAt[n]>running_timestamp &&
+      king->SCSIPendingGrantAt[n]<next) next=king->SCSIPendingGrantAt[n];
+  for(unsigned ch=0;ch<2;ch++)
+   if(king->ADPCMGrantPending[ch] && king->ADPCMGrantAt[ch]>running_timestamp &&
+      king->ADPCMGrantAt[ch]<next) next=king->ADPCMGrantAt[ch];
+  for(unsigned j=0;j<3;j++)
+   if(king->RainbowAheadStatus[j]==1 &&
+      king->RainbowAheadGrantAt[j]>running_timestamp &&
+      king->RainbowAheadGrantAt[j]<next) next=king->RainbowAheadGrantAt[j];
+  if(king->RBAsyncPending && king->RBAsyncGrantAt>running_timestamp &&
+     king->RBAsyncGrantAt<next) next=king->RBAsyncGrantAt;
+  KING_RunGfx((int32)(next-running_timestamp));
+  running_timestamp=next;
+ }
+ KING_CommitPendingKRAM(timestamp);
+ KING_CommitPendingSCSI(timestamp);
+ KING_CommitPendingADPCM(timestamp);
+ KING_RainbowAheadCommit(timestamp);
+ KING_RainbowAsyncCommit(timestamp);
+ /* Device timing / SCSI pump traverses the same time interval below. */
+ running_timestamp=king->lastts-(uint32)clocks;
 
  while(clocks > 0)
  {
@@ -1384,10 +2231,22 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
 
        if(king->DMAStatus & 0x1)
        {
-        king->DRQ = FALSE;
-        DoRealDMA(king->data_cache);
-        SCSICD_SetACK(TRUE);
-        scsicd_ne = SCSICD_Run(running_timestamp);
+        kbus_event_ts = running_timestamp;
+        /* A complete SCSI halfword cannot be ACKed until the KING K-BUS
+         * accepts its scheduled write. Leaving REQ asserted applies
+         * protocol backpressure instead of the old eager-write fallback. */
+        if(DoRealDMA(king->data_cache))
+        {
+         king->DRQ = FALSE;
+         SCSICD_SetACK(TRUE);
+         scsicd_ne = SCSICD_Run(running_timestamp);
+        }
+        else
+        {
+         /* REQ remains asserted; retry this same byte on the next DMA
+          * clock after outstanding bus transactions have retired. */
+         king->DRQ = FALSE;
+        }
        }
        else
        {
@@ -1436,6 +2295,77 @@ v810_timestamp_t MDFN_FASTCALL KING_Update(const v810_timestamp_t timestamp)
  } // end while(clocks > 0)
 
  return(timestamp + CalcNextExternalEvent(0x4FFFFFFF));
+}
+
+/* HuC6272 C6272_2 §3.4.1/3.4.2: R41/R43 settings written during
+   a transfer take effect only when its current 16-raster block has ended.
+   R40 enable and R42 raster timing remain immediate per register table. */
+static void KING_RainbowCommitPending(void)
+{
+ if(king->RAINBOWConfigPending & 1u)
+  king->RAINBOWActiveKRAMA = king->RAINBOWKRAMA;
+ if(king->RAINBOWConfigPending & 2u)
+  king->RAINBOWActiveBlockCount = king->RAINBOWTransferBlockCount;
+ king->RAINBOWConfigPending = 0;
+}
+
+static void KING_RainbowWriteSourceAddress(uint32 addr)
+{
+ king->RAINBOWKRAMA = addr & 0x3FFFFu;
+ if(king->RAINBOWBusyCount > 0)
+  king->RAINBOWConfigPending |= 1u;
+ else
+ {
+  king->RAINBOWActiveKRAMA = king->RAINBOWKRAMA;
+  king->RAINBOWConfigPending &= (uint8)~1u;
+ }
+}
+
+static void KING_RainbowWriteBlockCount(uint16 count)
+{
+ king->RAINBOWTransferBlockCount = count & 0x1Fu;
+ if(king->RAINBOWBusyCount > 0)
+  king->RAINBOWConfigPending |= 2u;
+ else
+ {
+  king->RAINBOWActiveBlockCount = king->RAINBOWTransferBlockCount;
+  king->RAINBOWConfigPending &= (uint8)~2u;
+ }
+}
+
+/* HuC6272 C6272_1 register 50 / C6272_2 §3.5.4:
+   READ EN = 0 stops KRAM->HuC6230 transfer immediately, while new READ EN
+   enables begin on the following -HSYNC. Rates are only specified to be
+   changed while both channels are disabled; invalid combinations are not
+   silently reinterpreted as a supported hardware mode. */
+static void KING_WriteADPCMTransferControl(uint16 value)
+{
+ const uint16 written = value & 0xFu;
+ const uint16 old = king->ADPCMControl;
+ king->ADPCMControlWritten = written;
+ /* An explicit disable invalidates the old in-flight input request. The
+  * automatic end-address disable in KING_AdvanceADPCMAddress does not. */
+ for(unsigned ch=0;ch<2;ch++)
+  if(!(written & (1u<<ch))) king->ADPCMGrantPending[ch]=0;
+ /* Clear disabled channels NOW; retain enabled channels while still set. */
+ king->ADPCMControl = (written & 0xCu) | ((old & written) & 3u);
+ king->ADPCMPendingEnable = (uint8)((written & 3u) & ~old);
+ if(king->ADPCMControl != old)
+  SoundBox_SetKINGADPCMControl(king->ADPCMControl);
+}
+
+static void KING_ADPCMEnableAtHSync(void)
+{
+ const uint16 pending = king->ADPCMPendingEnable & 3u;
+ king->ADPCMPendingEnable = 0;
+ if(!pending) return;
+ for(unsigned ch = 0; ch < 2; ch++)
+ {
+  if((pending & (1u << ch)) && !(king->ADPCMControl & (1u << ch)))
+   king->ADPCMPlayAddress[ch] = (uint32)king->ADPCMSAL[ch] << 8;
+ }
+ king->ADPCMControl |= pending;
+ SoundBox_SetKINGADPCMControl(king->ADPCMControl);
 }
 
 uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
@@ -1637,7 +2567,7 @@ uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
 
 		case 0x0E:
 			{
-                         unsigned int page = (king->KRAMRA & 0x80000000) ? 1 : 0;
+                         unsigned int page = KING_KRAMPage((king->KRAMRA & 0x80000000) ? 1 : 0);
                          int32 inc_amount = ((int32)((king->KRAMRA & (0x3FF << 18)) << 4)) >> 22; // Convert from 10-bit signed 2's complement 
 
                          KP_CPU_RD(page, king->KRAMRA & 0x3FFFF);
@@ -1756,114 +2686,205 @@ static inline void SCSI_Reg3_Write(uint8 V, bool delay_run)
  }
 }
 
-/* --- CPU->KRAM write/microprogram-fetch bus contention ------------------
- *
- * Real hardware measurements (024_king_mprog_bench, examples/libpcfx),
- * burst-writing BENCH_WORDS=30720 halfwords to KRAM via a tight
- * out.h/add/bne loop, timed with the free-running timer (tick = CPUclk/15,
- * ~0.698us at the PC-FX's 21.477272MHz V810 clock, i.e. 1 tick = 15
- * V810 cycles). First-pass headless measurements (matching upstream
- * mednafen's "+2 cycles" write-port base cost) undershot every real
- * number, INCLUDING the 0-busy-slot case, by a consistent ~3.19
- * cycles/word -- i.e. real KRAM writes have a flat per-word cost beyond
- * what the existing V810/port-write timing model already charges, on top
- * of which busy microprogram slots add further, slot-count-dependent
- * cost. Real ticks for the 30720-word bench, and the resulting extra
- * cycles/word this model targets (flat baseline + slot-dependent part):
- *
- *   MPROGData busy slots (of 16)   ticks   flat   +slot-dependent
- *   0  (all NOP)                   24968   3.187  +0.000
- *   1  (single CG or BATCG fetch)  26086,  3.187  +0.546 (two opcode kinds
- *                                  26088                  agree)
- *   2  (two CG/BAT fetches)        29957,  3.187  +2.436 (BAT+CG separate
- *                                  29959                  and BG0+BG1 CG
- *                                                          agree)
- *   16 (every slot busy)           76005   3.187  +24.920
- *
- * This is a real, measured *throughput* effect -- contended CPU writes to
- * KRAM take longer while the display's own microprogram-scheduled fetches
- * are competing for the bus; they still land correctly, just slower. It
- * is NOT a data-loss/corruption effect (see libpcfx/examples/025's
- * README for the investigation that established this).
- *
- * The slot-dependent part above is for "narrow" (<=4bpp) BG fetches. 8bpp
- * ("wide") fetches were also measured (2/4/8 busy slots, BG0 in
- * KING_BGMODE_256_PAL) and do NOT fit the narrow busy-count curve -- e.g.
- * 2 busy 8bpp CG slots cost about as much as 1 busy narrow slot, and cost
- * barely rises at all from 4 to 8 busy slots (a real saturation/plateau,
- * not modeled further here -- there's no data past 8 busy wide slots).
- * The 2-busy reading in particular is noisy (real-hardware bars made the
- * digits hard to read; the ROM author's best guess is used):
- *
- *   wide (8bpp) busy slots   ticks   slot-dependent extra cycles/word
- *   2   (CGx2)               26033   0.520 (uncertain reading)
- *   4   (CGx4)                29966   2.441
- *   8   (CGx8)                30263   2.586
- *
- * Both curves share the same flat 0-busy baseline (no fetch of any width
- * is happening at 0 busy slots, so width is moot there) and are
- * selected per-write by whether any currently-busy MPROGData slot targets
- * a BG in BGMODE_256 (8bpp) or wider -- 16bpp/16M were never measured and
- * are assumed to use the wide curve too (more data per fetch, so at least
- * as costly, not less). Both curves are linearly interpolated between
- * their measured anchors; busy counts beyond the last anchor hold that
- * anchor's value rather than extrapolating further. This is a
- * calibrated fit to the anchors above, not a validated cycle-accurate
- * model of KING bus arbitration -- slot *adjacency* (not just count)
- * clearly also matters on real hardware and isn't captured here.
- *
- * Known gap: the bench's $61 (KRAM_MODE) sweep reuses the same busy=1
- * narrow microprogram as the "BG0 CG" row, so this model (keyed only on
- * busy slot count/width) necessarily scores them identically -- but on
- * real hardware the $61 sweep measured ~26033-26036 ticks versus "BG0
- * CG"'s ~26086-26088, a ~53-tick gap between two configurations that are
- * supposedly the same as far as microprogram contention goes. Cause
- * unknown (possibly a real, undocumented cost of writing KRAM_MODE
- * itself, or some other difference between the two bench phases); not
- * modeled here for lack of data to isolate it. */
-static uint32 kram_contention_frac_x256;
+/* The aggregate empirical KRAM contention fit has been retired. The
+ * single supported path is the per-bank posted-write drain scheduler.
+ * Historical throughput measurements are preserved in docs, not code. */
 
-#define KRAM_CONTENTION_FLAT_X256 816 /* 3.1875 cycles/word, busy=0 baseline */
+/* Optional, observational-only KING bus timing ledger.  These counters do not
+ * affect the simulated bus, CPU timestamps, or any guest-visible state.  The
+ * phase bins are V810-clock modulo 8 (NOT calibrated K-BUS access slots). */
+#ifdef V810_PROFILE
+static uint64_t kbt_write_count, kbt_posted_waits, kbt_posted_cycles;
+static uint64_t kbt_contention_cycles, kbt_contention_writes;
+static uint64_t kbt_read_count, kbt_read_cycles;
+static uint64_t kbt_cpu_phase[8], kbt_wait_hist[9];
+static uint64_t kbt_slot_writes[17], kbt_slot_cycles[17];
+static uint64_t kbt_wide_writes, kbt_narrow_writes, kbt_idle_writes;
+static uint64_t kbt_active_writes, kbt_hblank_writes;
+static uint64_t kbt_busy_duration_max;
+static uint64_t kbt_cpu_bank_writes[2];
+static uint64_t kbt_micro_bank_hist[2][9];
+/* 3.6.7: 8 successive KING 5.37MHz dot slots per independently serviced
+ * KRAM bank.  The ACTIVE phase starts at the model's 1024-clock window;
+ * the true silicon-to-V810 bus phase offset is NOT known.  Counts below
+ * observe the programmed 8-slot sequence and never modify scheduling. */
+static uint64_t kbt_phase_writes[2][8];
+static uint64_t kbt_phase_nonnop[2][8];
+static uint64_t kbt_phase_visible[2][8];
+static uint64_t kbt_phase_hblank[2];
+static uint64_t kbt_phase_disabled_mprog[2];
 
-/* Slot-dependent part only (flat baseline above is added separately). */
-static const int32 kram_contention_narrow_x256[3] = { 0, 140, 624 }; /* busy=0,1,2 */
-#define KRAM_CONTENTION_NARROW_16BUSY_X256 6380
-#define KRAM_CONTENTION_NARROW_2BUSY_X256  624
-#define KRAM_CONTENTION_NARROW_SLOPE_X256  ((KRAM_CONTENTION_NARROW_16BUSY_X256 - KRAM_CONTENTION_NARROW_2BUSY_X256) / 14) /* busy=3..15 */
-
-static const int32 kram_contention_wide_x256[9] = /* index = busy slots, 0..8 */
+/* The guest V810 PC is recorded at dispatch, before each I/O write.
+ * The 32-byte buckets are observational only: no timing changes. */
+static uint64_t kbt_pc_write_count[V810_PROF_NBUCKET];
+static uint64_t kbt_pc_latch_wait[V810_PROF_NBUCKET];
+static uint64_t kbt_pc_contention[V810_PROF_NBUCKET];
+static unsigned kbt_source_bucket(void)
 {
- 0, 67, 133, 379, 625, 634, 644, 653, 662
-};
-
-static inline int KING_CountBusyMprogSlots(void)
-{
- int i, n = 0;
- for(i = 0; i < 16; i++)
- {
-  if(!(king->MPROGData[i] & 0x100))
-   n++;
- }
- return n;
+ return v810p_prev_pc < V810_PROF_RAMSIZE ?
+     v810p_prev_pc >> V810_PROF_BSHIFT : V810_PROF_NBUCKET;
 }
 
-/* True if any currently-busy (non-NOP) microprogram slot targets a BG
- * whose current colour mode is 8bpp (BGMODE_256) or wider. */
-static inline bool KING_AnyBusySlotIsWide(void)
+
+static void kbt_report(unsigned long long frames)
 {
- int i;
- for(i = 0; i < 16; i++)
+ const double f = frames ? (double)frames : 1.0;
+ fprintf(stderr,"\n==== KING K-BUS / CPU STALL ATTRIBUTION (modeled; NOT hardware measurement) ====\n");
+ fprintf(stderr,"KRAM data writes/field: %.2f; display=%llu blank=%llu\n",kbt_write_count/f,
+     (unsigned long long)kbt_active_writes,(unsigned long long)kbt_hblank_writes);
+ fprintf(stderr,"Posted-latch waits: %llu (%.2f/field); cycles: %llu (%.2f/field), max wait=%llu\n",
+    (unsigned long long)kbt_posted_waits,kbt_posted_waits/f,
+    (unsigned long long)kbt_posted_cycles,kbt_posted_cycles/f,
+    (unsigned long long)kbt_busy_duration_max);
+ fprintf(stderr,"Modeled microprogram contention: %llu cycles (%.2f/field), charged writes=%llu\n",
+    (unsigned long long)kbt_contention_cycles,kbt_contention_cycles/f,
+    (unsigned long long)kbt_contention_writes);
+ fprintf(stderr,"KRAM data reads: %llu (%.2f/field); read wait: %llu cycles (%.2f/field)\n",
+    (unsigned long long)kbt_read_count,kbt_read_count/f,
+    (unsigned long long)kbt_read_cycles,kbt_read_cycles/f);
+ fprintf(stderr,"Microprogram load classes: idle=%llu narrow=%llu wide=%llu\n",
+    (unsigned long long)kbt_idle_writes,(unsigned long long)kbt_narrow_writes,(unsigned long long)kbt_wide_writes);
+ fprintf(stderr,"K-BUS pressure by active microprogram slots (count: writes / charged cycles):\n");
+ for(int n=0;n<=16;n++) if(kbt_slot_writes[n])
+    fprintf(stderr,"  %2d slots: %10llu / %10llu\n",n,
+      (unsigned long long)kbt_slot_writes[n],(unsigned long long)kbt_slot_cycles[n]);
+ fprintf(stderr,"KRAM write bank A=%llu, bank B=%llu; active BG fetch-slot count by bank (8-slot group):\n",
+     (unsigned long long)kbt_cpu_bank_writes[0], (unsigned long long)kbt_cpu_bank_writes[1]);
+ for(int b=0;b<2;b++) {
+  fprintf(stderr,"  bank %c:",'A'+b);
+  for(int n=0;n<=8;n++) if(kbt_micro_bank_hist[b][n])
+     fprintf(stderr," %d:%llu",n,(unsigned long long)kbt_micro_bank_hist[b][n]);
+  fprintf(stderr,"\n");
+ }
+ fprintf(stderr,"KING active-display microprogram phase (observational; phase offset uncalibrated):\n");
+ fprintf(stderr,"  bank  slot    CPU_writes   nonNOP_at_slot   enabled_BG_at_slot\n");
+ for(int b=0;b<2;b++) for(int slot=0;slot<8;slot++)
+  fprintf(stderr,"  %c     %d     %10llu %16llu %20llu\n",'A'+b,slot,
+    (unsigned long long)kbt_phase_writes[b][slot],
+    (unsigned long long)kbt_phase_nonnop[b][slot],
+    (unsigned long long)kbt_phase_visible[b][slot]);
+ fprintf(stderr,"  HBlank writes: bank A=%llu, B=%llu; MPSW-off active writes: A=%llu B=%llu\n",
+    (unsigned long long)kbt_phase_hblank[0],
+    (unsigned long long)kbt_phase_hblank[1],
+    (unsigned long long)kbt_phase_disabled_mprog[0],
+    (unsigned long long)kbt_phase_disabled_mprog[1]);
+ const char *phase_csv = getenv("PCFX_KBUS_PHASE_CSV");
+ if(phase_csv && *phase_csv)
  {
-  uint16 mpd = king->MPROGData[i];
-  if(!(mpd & 0x100))
+  FILE *fp = fopen(phase_csv, "w");
+  if(fp)
   {
-   int bg = (mpd >> 6) & 0x3;
-   int mode = (king->bgmode >> (bg * 4)) & 0xF;
-   if((mode & 0x7) >= BGMODE_256)
-    return TRUE;
+   fprintf(fp,"bank,slot,issued_writes,programmed_non_nop,enabled_bg_slot,phase_origin\n");
+   for(int b=0;b<2;b++) for(int slot=0;slot<8;slot++)
+    fprintf(fp,"%c,%d,%llu,%llu,%llu,active_window_start\n",'A'+b,slot,
+      (unsigned long long)kbt_phase_writes[b][slot],
+      (unsigned long long)kbt_phase_nonnop[b][slot],
+      (unsigned long long)kbt_phase_visible[b][slot]);
+   fclose(fp);
+   fprintf(stderr,"Wrote K-BUS microprogram-phase histogram: %s\n",phase_csv);
   }
  }
- return FALSE;
+ fprintf(stderr,"CPU issue clock phase (mod 8; NOT a calibrated K-BUS phase):");
+ for(int i=0;i<8;i++) fprintf(stderr," %llu",(unsigned long long)kbt_cpu_phase[i]);
+ fprintf(stderr,"\nPosted-write wait histogram, bins 0..7, >=8 cycles:");
+ for(int i=0;i<9;i++) fprintf(stderr," %llu",(unsigned long long)kbt_wait_hist[i]);
+ /* Attribute KRAM write costs to the calling V810 instruction, not an
+  * assumed symbol/guest. This makes inlined framebuffer clears visible. */
+ fprintf(stderr,"\nKRAM writer hot PCs (32-byte buckets, most modeled stall cycles):\n");
+ fprintf(stderr,"%-10s %12s %14s %14s\n", "PC", "writes", "latch_wait", "contention");
+ unsigned selected[16]; unsigned nsel=0;
+ for(unsigned rank=0;rank<16;rank++)
+ {
+  unsigned best=V810_PROF_NBUCKET; uint64_t top=0;
+  for(unsigned i=0;i<V810_PROF_NBUCKET;i++)
+  {
+   const uint64_t cost=kbt_pc_latch_wait[i]+kbt_pc_contention[i];
+   if(cost<=top) continue;
+   int seen=0; for(unsigned j=0;j<nsel;j++) if(selected[j]==i) {seen=1;break;}
+   if(!seen) {best=i;top=cost;}
+  }
+  if(best==V810_PROF_NBUCKET) break;
+  selected[nsel++]=best;
+  fprintf(stderr,"0x%06x %12llu %14llu %14llu\n",
+      best<<V810_PROF_BSHIFT,
+      (unsigned long long)kbt_pc_write_count[best],
+      (unsigned long long)kbt_pc_latch_wait[best],
+      (unsigned long long)kbt_pc_contention[best]);
+ }
+ const char *csv=getenv("PCFX_KBUS_PC_CSV");
+ if(csv && *csv)
+ {
+  FILE *fp=fopen(csv,"w");
+  if(fp) {
+   fprintf(fp,"pc_bucket,writes,latch_wait_cycles,contention_cycles\n");
+   for(unsigned i=0;i<V810_PROF_NBUCKET;i++) if(kbt_pc_write_count[i])
+    fprintf(fp,"0x%06x,%llu,%llu,%llu\n",i<<V810_PROF_BSHIFT,
+      (unsigned long long)kbt_pc_write_count[i],
+      (unsigned long long)kbt_pc_latch_wait[i],
+      (unsigned long long)kbt_pc_contention[i]);
+   fclose(fp);
+   fprintf(stderr,"Wrote KING write-PC histogram: %s\n",csv);
+  }
+ }
+ fprintf(stderr,"\nCAUTION: uncalibrated grant phase and missing cross-device bus-service slots\n"
+                "mean these cycles cannot be interpreted as a physical arbitration schedule.\n");
+}
+#endif
+
+
+/* HuC6272 §§3.1–3.2: one CPU write latch; a new write waits until the
+ * previous one drains. This is now the sole timing path.
+ * Source-defined request categories are tracked below; exact silicon phase
+ * and request-to-grant latency are not in the manual. */
+static v810_timestamp_t KING_KBusGrantDeadline(v810_timestamp_t accepted,
+                                               v810_timestamp_t now,
+                                               unsigned bank, unsigned required_grants)
+{
+ /* Each KING dot lasts four V810 clocks. Estimate completion after four
+  * grantable KING dots. HPhaseCounter is the remaining active-picture
+  * clock count at `now`, as updated by KING_Update(). */
+ const bool active = HPhase == HPHASE_ACTIVE && !fx_vce.in_hblank;
+ const uint32 remaining = active && HPhaseCounter > 0 ? (uint32)HPhaseCounter : 0u;
+ const uint32 elapsed = active && remaining <= 1024u ? 1024u - remaining : 0u;
+ const uint32 start = (uint32)(accepted - now);
+ uint32 delta = start;
+ unsigned grants = 0;
+ /* Advance to a KING-dot boundary on the current active-line clock grid.
+  * Outside active video no BG fetch slots are reserved in this model. */
+ if(active)
+  delta += (4u - ((elapsed + start) & 3u)) & 3u;
+ else
+  delta += (4u - (start & 3u)) & 3u;
+ for(unsigned guard = 0; guard < 512 && grants < required_grants; guard++, delta += 4)
+ {
+  bool bg_request = false;
+  if(active && delta < remaining && (king->MPROGControl & 1u))
+  {
+   const unsigned slot = ((elapsed + delta) / 4u) & 7u;
+   const uint16 mp = king->MPROGData[(bank & 1u) * 8u + slot];
+   if(!(mp & 0x100u))
+   {
+    const unsigned bg = (mp >> 6) & 3u;
+    bg_request = ((king->priority >> (bg * 3u)) & 7u) != 0;
+   }
+  }
+  if(!bg_request)
+  {
+   const uint32 grant_time = now + delta;
+   const unsigned i = (grant_time / 4u) & (KING_KBUS_SLOTS - 1u);
+   const bool peripheral = king->KBusSlotSource[bank & 1u][i] &&
+      king->KBusSlotTime[bank & 1u][i] == grant_time;
+   if(!peripheral) grants++;
+  }
+ }
+ /* Last grant consumes the dot interval, not merely its leading edge. */
+ return now + delta;
+}
+
+static v810_timestamp_t KING_KRAMSlotDrainDeadline(v810_timestamp_t accepted,
+                                                      v810_timestamp_t now, unsigned bank)
+{
+ return KING_KBusGrantDeadline(accepted, now, bank, 4);
 }
 
 /* A KRAM write enters KING's input latch and releases the CPU while that
@@ -1872,7 +2893,6 @@ static inline bool KING_AnyBusySlotIsWide(void)
  * already charged four clocks by the time this callback sees the write, so
  * 12 remain in this timestamp domain.  A second write before then holds the
  * CPU in WAIT until the latch is free. */
-#define KRAM_WRITE_DRAIN_REMAINDER 12
 
 uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A)
 {
@@ -1887,66 +2907,79 @@ uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A)
  if(ready > timestamp)
   wait = (uint32)(ready - timestamp);
 
- king->KRAMWriteBusyUntil = timestamp + wait + KRAM_WRITE_DRAIN_REMAINDER;
+ king->KRAMWriteBusyUntil = KING_KRAMSlotDrainDeadline(timestamp + wait, timestamp,
+                                                     KING_KRAMPage((king->KRAMWA >> 31) & 1u));
+#ifdef V810_PROFILE
+ kbt_write_count++;
+ { unsigned b=kbt_source_bucket();
+   if(b<V810_PROF_NBUCKET) { kbt_pc_write_count[b]++; kbt_pc_latch_wait[b]+=wait; }
+ }
+ kbt_posted_cycles += wait;
+ if(wait) kbt_posted_waits++;
+ if(wait > kbt_busy_duration_max) kbt_busy_duration_max = wait;
+ kbt_wait_hist[(wait < 8) ? wait : 8]++;
+ kbt_cpu_phase[(unsigned)timestamp & 7u]++;
+ kbt_cpu_bank_writes[KING_KRAMPage((king->KRAMWA >> 31) & 1u)]++;
+ {
+  const unsigned bank = KING_KRAMPage((king->KRAMWA >> 31) & 1u);
+  if(fx_vce.in_hblank || HPhase != HPHASE_ACTIVE)
+   kbt_phase_hblank[bank]++;
+  else if(!(king->MPROGControl & 1u))
+   kbt_phase_disabled_mprog[bank]++;
+  else
+  {
+   /* HPhaseCounter counts *remaining master clocks* in the active
+    * 1024-clock picture interval; one KING dot = four clocks. */
+   const unsigned elapsed = HPhaseCounter >= 1024 ? 0u :
+                            1024u - (unsigned)HPhaseCounter;
+   const unsigned slot = (elapsed / 4u) & 7u;
+   const uint16 mp = king->MPROGData[bank * 8u + slot];
+   kbt_phase_writes[bank][slot]++;
+   if(!(mp & 0x100u))
+   {
+    kbt_phase_nonnop[bank][slot]++;
+    if((king->priority >> (((mp >> 6) & 3u) * 3u)) & 7u)
+     kbt_phase_visible[bank][slot]++;
+   }
+  }
+ }
+
+ {
+  int per_bank[2] = {0,0};
+  if(king->MPROGControl & 1)
+   for(int i=0;i<16;i++) if(!(king->MPROGData[i] & 0x100)) {
+    int bg=(king->MPROGData[i] >> 6) & 3;
+    if((king->priority >> (bg * 3)) & 7u) per_bank[i >> 3]++;
+   }
+  for(int b=0;b<2;b++) kbt_micro_bank_hist[b][per_bank[b]]++;
+ }
+ if(fx_vce.in_hblank) kbt_hblank_writes++; else kbt_active_writes++;
+#endif
  return wait;
 }
 
-/* Called for every write to KING's KRAM-data port (register 0x0E, i.e. the
- * "0x604"-style port write with the AR already selected to 0x0E). Returns
- * measured display microprogram contention on top of the latch WAIT above,
- * accumulating sub-cycle fractions across calls so the average matches the
- * measured per-word rate rather than rounding every call down to zero. */
-uint32 KING_KRAMWriteContentionCycles(uint32 A)
+/* HuC6272 §3.1.2: a CPU KRAM data read waits for an outstanding
+ * posted access, then joins the same per-bank arbitration as a writer.
+ * A read consumes one model KING-dot grant. The final one-clock return
+ * overhead retains the earlier approximate free-bus five-clock total;
+ * the manual does not specify that return overhead. */
+uint32 KING_KRAMReadWaitCycles(v810_timestamp_t timestamp, uint32 A)
 {
- int busy;
- int32 extra_x256;
-
- if(!(A & 0x4) || king->AR != 0x0E || !(king->MPROGControl & 0x1))
-  return 0;
-
- busy = KING_CountBusyMprogSlots();
-
- if(busy == 0)
-  extra_x256 = 0;
- else if(KING_AnyBusySlotIsWide())
-  extra_x256 = kram_contention_wide_x256[(busy > 8) ? 8 : busy];
- else if(busy <= 2)
-  extra_x256 = kram_contention_narrow_x256[busy];
- else if(busy >= 16)
-  extra_x256 = KRAM_CONTENTION_NARROW_16BUSY_X256;
- else
-  extra_x256 = KRAM_CONTENTION_NARROW_2BUSY_X256 + (busy - 2) * KRAM_CONTENTION_NARROW_SLOPE_X256;
-
- extra_x256 += KRAM_CONTENTION_FLAT_X256;
-
- kram_contention_frac_x256 += (uint32)extra_x256;
-
- {
-  uint32 whole = kram_contention_frac_x256 >> 8;
-  kram_contention_frac_x256 &= 0xFF;
-  return whole;
- }
+ if(!(A & 0x4) || king->AR != 0x0E) return 0;
+ KING_Update(timestamp);
+ const unsigned bank=KING_KRAMPage((king->KRAMRA >> 31) & 1u);
+ const v810_timestamp_t ready=king->KRAMWriteBusyUntil > timestamp ?
+                                 king->KRAMWriteBusyUntil : timestamp;
+ const v810_timestamp_t completed=KING_KBusGrantDeadline(ready,timestamp,bank,1);
+ const uint32 wait=(uint32)(completed-timestamp+1);
+#ifdef V810_PROFILE
+ kbt_read_count++;
+ kbt_read_cycles += wait;
+#endif
+ return wait;
 }
 
-/* KRAM reads complete synchronously after a short KING busy interval.  The
- * hardware probe bounds this at 4-6 V810 cycles; use the midpoint.  Reading
- * KRAMWA is also the documented drain/fence for a posted KRAM write. */
-uint32 KING_KRAMReadWaitCycles(uint32 A)
-{
- if(!(A & 0x4))
-  return 0;
-
- if(king->AR == 0x0D)
- {
-  king->KRAMWriteBusyUntil = 0;
-  return 0;
- }
-
- if(king->AR == 0x0E)
-  return 5;
-
- return 0;
-}
+static void KING_RefreshBGModeAtCurrentDot(void);
 
 void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 {
@@ -2121,11 +3154,20 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
                 case 0x0D: REGSETHW(king->KRAMWA, V, msh); break;
 		case 0x0E: 
 			  {
-			   unsigned int page = (king->KRAMWA & 0x80000000) ? 1 : 0;
+			   unsigned int page = KING_KRAMPage((king->KRAMWA & 0x80000000) ? 1 : 0);
 			   int32 inc_amount = ((int32)((king->KRAMWA & (0x3FF << 18)) << 4)) >> 22; // Convert from 10-bit signed 2's complement
 
 			   KP_CPU_WR(page, king->KRAMWA & 0x3FFFF);
-			   king->KRAM[page][king->KRAMWA & 0x3FFFF] = V;
+                           {
+                            /* KING_Update(timestamp) above has retired the
+                             * preceding latch if its WAIT has elapsed. */
+                            KING_CommitPendingKRAM(timestamp);
+                            king->KRAMWritePendingPage = (uint8)page;
+                            king->KRAMWritePendingAddress = king->KRAMWA & 0x3FFFFu;
+                            king->KRAMWritePendingValue = V;
+                            king->KRAMWritePendingAt = king->KRAMWriteBusyUntil;
+                            king->KRAMWritePending = 1;
+                           }
 			   king->KRAMWA = (king->KRAMWA &~ 0x1FFFF) | ((king->KRAMWA + inc_amount) & 0x1FFFF);
 			  }
 			  break;
@@ -2138,8 +3180,13 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 
 
 		// Background Modes
-		case 0x10: { const uint8 om=king->bgmode&0xF; REGSETHW(king->bgmode, V, msh);
-			   { const uint8 nm=king->bgmode&0xF; if(nm!=om&&(nm&0x7)&&(om&0x7)) king->BG0FetchRehomed=FALSE; } break; }
+		case 0x10: { const uint16 oldmode = king->bgmode;
+                           const uint8 om=oldmode&0xF;
+                           REGSETHW(king->bgmode, V, msh);
+                           { const uint8 nm=king->bgmode&0xF;
+                             if(nm!=om&&(nm&0x7)&&(om&0x7)) king->BG0FetchRehomed=FALSE; }
+                           if(oldmode != king->bgmode) KING_RefreshBGModeAtCurrentDot();
+                           break; }
 
 
 		// Background priorities and affine transform master enable.
@@ -2235,8 +3282,10 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			   break;
 
 		// Rainbow transfer address
-                case 0x41: REGSETHW(king->RAINBOWKRAMA, V, msh); 
-			   king->RAINBOWKRAMA &= 0x3FFFF;
+                case 0x41: { uint32 next = king->RAINBOWKRAMA;
+                           REGSETHW(next, V, msh);
+                           KING_RainbowWriteSourceAddress(next);
+                           }
 			   //printf("KRAM Transfer Addr: %d, %08x\n", fx_vce.raster_counter,  king->RAINBOWKRAMA);
 			   break;
 
@@ -2249,8 +3298,10 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			   }
 			   break;
 
-		case 0x43: REGSETHW(king->RAINBOWTransferBlockCount, V, msh);
-			   king->RAINBOWTransferBlockCount &= 0x1F;
+		case 0x43: { uint32 next = king->RAINBOWTransferBlockCount;
+                           REGSETHW(next, V, msh);
+                           KING_RainbowWriteBlockCount((uint16)next);
+                           }
                            //printf("KRAM Transfer Block Count: %d, %08x\n", fx_vce.raster_counter,  king->RAINBOWTransferBlockCount);
 			   break;
 
@@ -2262,21 +3313,16 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 			   }
 			   break;
 
-		case 0x50: 
-			   if(!msh)
-			   {
-			    for(uint_fast8_t ch = 0; ch < 2; ch++)
-			    {
-			     if(!(king->ADPCMControl & (1 << ch)) && (V & (1 << ch)))
-			     { 
-			      king->ADPCMPlayAddress[ch] = king->ADPCMSAL[ch] * 256;
-			     }
-			    }
-			    king->ADPCMControl = V; 
-			    RedoKINGIRQCheck();
-			    SoundBox_SetKINGADPCMControl(king->ADPCMControl);
-			   }
-			   break;
+		case 0x50:
+                           if(!msh)
+                           {
+                            /* Drain the decoder through the CPU write timestamp
+                               under OLD transfer enables before altering R50. */
+                            SoundBox_ADPCMUpdate(timestamp);
+                            KING_WriteADPCMTransferControl(V);
+                            RedoKINGIRQCheck();
+                           }
+                           break;
 
 		case 0x51: REGSETHW(king->ADPCMBufferMode[0], V, msh);
 			   RedoKINGIRQCheck();
@@ -2295,10 +3341,11 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 		case 0x5E: REGSETHW(king->ADPCMIntermediateAddress[1], V, msh); king->ADPCMIntermediateAddress[1] &= 0xFFF; break;
 
  
-		case 0x61: if(king->KRAM_Mode ^ V)
+		case 0x61: if(king->KRAM_Mode != (V & 1))
 			   {
 			    KINGDBG("KRAM Mode Change To: %02x\n", V & 1);
-			    king->KRAM_Mode = V & 0x1; 
+			    king->KRAM_Mode = V & 0x1;
+                RecalcKRAMPagePtrs();
 			   }
 			   break;
 	      }
@@ -2307,12 +3354,11 @@ void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
  }
 }
 
-uint16 KING_GetADPCMHalfWord(int ch)
+/* HuC6272 R50/51/52/53: the address and end/intermediate events
+ * advance once per requested ADPCM word; its *data* arrives only when the
+ * word is granted on the K-BUS. These two operations are no longer conflated. */
+static void KING_AdvanceADPCMAddress(int ch)
 {
- int page = (king->PageSetting & 0x0100) ? 1 : 0;
- uint16 ret = king->KRAM[page][king->ADPCMPlayAddress[ch] & 0x3FFFF];
-
- KP_ADPCM_RD(page, king->ADPCMPlayAddress[ch] & 0x3FFFF);
  king->ADPCMPlayAddress[ch] = (king->ADPCMPlayAddress[ch] & 0x20000) | ((king->ADPCMPlayAddress[ch] + 1) & 0x1FFFF);
 
  if(!(king->ADPCMPlayAddress[ch] & 0x1FFFF))
@@ -2354,7 +3400,43 @@ uint16 KING_GetADPCMHalfWord(int ch)
   }
  }
 
- return(ret);
+
+}
+
+/* Compatibility/diagnostic synchronous accessor, not used by the v16 sound
+ * transfer engine. The production -HSYNC request is asynchronous below. */
+uint16 KING_GetADPCMHalfWord(int ch)
+{
+ const unsigned page=KING_KRAMPage((king->PageSetting & 0x0100)?1u:0u);
+ const uint32 address=king->ADPCMPlayAddress[ch]&0x3FFFFu;
+ const uint16 result=king->KRAM[page][address];
+ KING_KBusReserve(page,KBUS_ADPCM,king_gfx_ts);
+ KING_AdvanceADPCMAddress(ch);
+ return result;
+}
+
+void KING_RequestADPCMHalfWord(int ch)
+{
+ if((unsigned)ch>=2u) return;
+ const unsigned page=KING_KRAMPage((king->PageSetting & 0x0100)?1u:0u);
+ const uint32 address=king->ADPCMPlayAddress[ch]&0x3FFFFu;
+ if(king->ADPCMGrantPending[ch])
+ {
+  /* A new capture supersedes a still-unconsumed previous request; this
+   * cannot normally occur at the documented 2+ HSYNC transfer period. */
+  king->ADPCMGrantPending[ch]=0;
+ }
+ king->ADPCMGrantAddress[ch]=address;
+ king->ADPCMGrantPage[ch]=(uint8)page;
+ king->ADPCMGrantPending[ch]=1;
+ const uint32 deadline=KING_KBusReserveTagged(page,KBUS_ADPCM,king_gfx_ts,
+                                              KING_SCSI_PENDING_MAX+(unsigned)ch+1u);
+ if(deadline==UINT32_MAX)
+ {
+  king->ADPCMGrantPending[ch]=0;
+  fprintf(stderr,"KING K-BUS: ADPCM grant overflow at %u\n",king_gfx_ts);
+ }
+ KING_AdvanceADPCMAddress(ch);
 }
 
 
@@ -2429,6 +3511,32 @@ bool KING_Init(void)
 
 void KING_Close(void)
 {
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0"))
+  fprintf(stderr,"RAINBOW read-ahead: requests=%llu granted=%llu consumed=%llu eager-words=%llu\n",
+   (unsigned long long)rainbow_ahead_requests,(unsigned long long)rainbow_ahead_grants,
+   (unsigned long long)rainbow_ahead_hits,(unsigned long long)rainbow_eager_words);
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0"))
+  fprintf(stderr,"RAINBOW reads before pending prefetch grant=%llu (synchronous fallback)\n",
+          (unsigned long long)rainbow_read_ahead_underflows);
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
+  fprintf(stderr,"RAINBOW async: granted-words=%u grant-retries=%u decoder-underflows=%u buffered-bytes=%u active=%u\n",
+          king->RBAsyncWords,king->RBAsyncWaits,king->RBAsyncUnderflows,
+          king->RBAsyncLength,king->RBAsyncActive);
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
+  fprintf(stderr,"RAINBOW Huffman tracker: complete=%u current_columns=%u stalls=%u bad=%u\n",
+         king->RBHCompletedBlocks,king->RBH.completed_columns,king->RBH.stalls,king->RBH.invalid);
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
+  fprintf(stderr,"RAINBOW v23 MCU luma: columns=%u compare-blocks=%u exact-blocks=%u pixels=%u mismatches=%u\n",
+          king->RBMCUColumns,king->RBMCUBlocks,king->RBMCUExactBlocks,king->RBMCUCompared,king->RBMCUDifferences);
+ fprintf(stderr,"RAINBOW incremental RLE: blocks=%u tokens=%u\n",
+          king->RBAsyncRLEBlocks,king->RBAsyncRLETotalTokens);
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
+  fprintf(stderr,"RAINBOW grant-fed JPEG input: blocks=%u entropy-bytes=%u stuffed-pairs=%u split-pair-waits=%u\n",
+          king->RBJPEGBlocks,king->RBJPEGEntropyBytes,
+          king->RBJPEGStuffedPairs,king->RBJPEGStalledPairs);
+ if(getenv("PCFX_SCSI_BACKPRESSURE_STATS") && strcmp(getenv("PCFX_SCSI_BACKPRESSURE_STATS"),"0"))
+  fprintf(stderr,"SCSI K-BUS backpressure: rejected second-byte attempts=%llu\n",
+          (unsigned long long)scsi_kbus_backpressure_retries);
  memset(&fx_vce, 0, sizeof(fx_vce));
  if(king)
  {
@@ -2442,8 +3550,11 @@ void KING_Close(void)
 void KING_Reset(const v810_timestamp_t timestamp)
 {
  KING_Update(timestamp);
+ rainbow_ahead_hits=rainbow_ahead_grants=rainbow_ahead_requests=rainbow_eager_words=0;
+ scsi_kbus_backpressure_retries=0;
+ rainbow_read_ahead_underflows=0;
 
- memset(&fx_vce, 0, sizeof(fx_vce));
+ VCE_ResetRegisters();
 
  int32 ltssave = king->lastts;
  memset(king, 0, sizeof(king_t));
@@ -2460,7 +3571,14 @@ void KING_Reset(const v810_timestamp_t timestamp)
  king->PIOReadSeen = FALSE;
  king->PIOBusWedged = FALSE;
  king->BG0FetchRehomed = TRUE;
-
+ king->RAINBOWConfigStateVersion = 1;
+ king->ADPCMTransferLatchVersion = 1;
+ king->KRAMWritePendingStateVersion = 1;
+ king->SCSIPendingStateVersion = 1;
+ king->ADPCMGrantStateVersion = 1;
+ king->RainbowAheadStateVersion=1;
+ king->RBAsyncStageVersion=1;
+ king->RBAsyncRLEVersion=1;
 
  RecalcKRAMPagePtrs();
 
@@ -2597,9 +3715,9 @@ static void DrawBG(uint32 *target, int n)
 #endif
  const uint32 layer_or = (LAYER_BG0 + n) << 28;
 
- const uint32 palette_offset = ((fx_vce.palette_offset[1 + (n >> 1)] >> ((n & 1) ? 8 : 0)) << 1) & 0x1FF;
+ const uint32 palette_offset = ((vce_rendercache.palette_offset[1 + (n >> 1)] >> ((n & 1) ? 8 : 0)) << 1) & 0x1FF;
  const uint32 *palette_ptr = &vce_rendercache.palette_table_cache[palette_offset];
- const uint32 bat_and_cg_page = (king->PageSetting & 0x0010) ? 1 : 0;
+ const uint32 bat_and_cg_page = KING_KRAMPage((king->PageSetting & 0x0010) ? 1 : 0);
 
  const uint16 bgmode = (king->bgmode >> (n * 4)) & 0xF;
  const bool endless = (king->BGScrollMode >> n) & 0x1;
@@ -3054,12 +4172,12 @@ static uint32 CbCrLUT[65536];
 
 static void RebuildUVLUT(void)
 {
+ /* One color reconstruction for all TETSU output: KING, RAINBOW, palettes. */
  for(uint_fast16_t ur = 0; ur < 256; ur++)
  {
   for(uint_fast16_t vr = 0; vr < 256; vr++)
   {
    int r, g, b;
-
    /* All TETSU output planes share the HuC6261 analog YUV DAC. */
    const PCFX_YUVColorOffsets offset = PCFX_AnalogYUVOffsets(ur, vr);
    r = offset.r;
@@ -3122,7 +4240,7 @@ static uint32 inline YUV888_TO_YCbCr888(uint32 yuv)
 #ifndef PCFX_HIGH_DOTCLOCK_WIDTH
 #define PCFX_HIGH_DOTCLOCK_WIDTH 0
 #endif
-static uint32 HighDotClockWidth = PCFX_HIGH_DOTCLOCK_WIDTH;
+static uint32 HighDotClockWidth = PCFX_HIGH_DOTCLOCK_WIDTH ? PCFX_HIGH_DOTCLOCK_WIDTH : 1024;
 static VDC **vdc_chips;
 
 static inline uint32 ClampOutputWidth(uint32 width)
@@ -3131,8 +4249,8 @@ static inline uint32 ClampOutputWidth(uint32 width)
   width = 256;
  if(width > internal_pitch)
   width = internal_pitch;
- if(width > 512)
-  width = 512;
+ if(width > 1024)
+  width = 1024;
  return width;
 }
 
@@ -3262,7 +4380,7 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
 #ifdef PCFX_HEADLESS
  /* Change the headless crop at frame entry, not after the field is drawn.
     In 480i, the two 240-line scanouts weave into separate parity rows. */
- pcfx_headless_video_set_interlaced((fx_vce.picture_mode & 0x2u) != 0);
+ pcfx_headless_video_set_interlaced((fx_vce.active_picture_mode & 0x2u) != 0);
 #endif
 
  // These 2 should be overwritten in the big loop below.
@@ -3275,6 +4393,56 @@ void KING_StartFrame(VDC **arg_vdc_chips, EmulateSpecStruct *espec)	//MDFN_Surfa
 
 static int rb_type;
 //  unsigned int width = (fx_vce.picture_mode & 0x08) ? 341 : 256;
+
+/* KING R10 BG mode takes effect immediately (C6272 §2.3.5).
+   Build a complete candidate line in the current register state, but only
+   replace the remaining dots after a mid-line write. This accounts for the
+   visible raster split; sub-dot KRAM fetch arbitration is not modeled. */
+static void RenderKINGBackgroundLine(uint32 *dest)
+{
+   MDFN_FastU32MemsetM8(dest + 8, 0, 256);
+
+    // Only bother to draw the BGs if the microprogram is enabled.
+   if(king->MPROGControl & 0x1)
+   {
+    for(uint_fast8_t prio = 1; prio <= 7; prio++)
+    {
+     for(uint_fast8_t x = 0; x < 4; x++)
+     {
+      int thisprio = (king->priority >> (x * 3)) & 0x7;
+
+      if(BGLayerDisable & (1 << x)) continue;
+
+      if(thisprio == prio)
+      {
+       //if(fx_vce.raster_counter == 50)
+        // CanDrawBG_Fast(x);
+
+       // TODO/FIXME: TEST MORE
+       if(CanDrawBG_Fast(x)) // && (rand() & 1))
+	DrawBG_Fast(dest, x);
+       else
+        DrawBG(dest, x);
+      }
+     }
+    }
+   }
+
+}
+
+static void KING_RefreshBGModeAtCurrentDot(void)
+{
+ if(skip || HPhase != HPHASE_ACTIVE || fx_vce.in_hblank ||
+    fx_vce.raster_counter < 22 || fx_vce.raster_counter >= 262)
+  return;
+ const unsigned elapsed = HPhaseCounter >= 1024 ? 0u : 1024u - (unsigned)HPhaseCounter;
+ const unsigned first_dot = elapsed / 4u;
+ if(first_dot >= 256) return;
+ uint32 updated[256 + 8 + 8] = {0};
+ RenderKINGBackgroundLine(updated);
+ memcpy(bg_linebuffer + 8 + first_dot, updated + 8 + first_dot,
+        (256u - first_dot) * sizeof(uint32));
+}
 
 static void DrawActive(void)
 {
@@ -3294,9 +4462,17 @@ static void DrawActive(void)
  {
   if(king->RAINBOWBusyCount)
   {
-   king->RAINBOWBusyCount--;
+   /* Keep the read buffer pending until its grant-fed compressed input is
+    * complete; no fabricated zero bytes from an empty KRAM FIFO. */
+   if(king->RAINBOWBusyCount>1 || !king->RBAsyncActive)
+    king->RAINBOWBusyCount--;
    if(!king->RAINBOWBusyCount)
+   {
     RAINBOW_SwapBuffers();
+    /* Now the old 16-raster block is finished. Activate any deferred
+       REG 41/43 settings before considering the next block. */
+    KING_RainbowCommitPending();
+   }
   }
 
   if(!king->RAINBOWBusyCount)
@@ -3307,10 +4483,13 @@ static void DrawActive(void)
    if(!king->RAINBOWBlockCount && king->RAINBOWStartPending)
    {
     //printf("Rainbow start real: %d %d\n", fx_vce.raster_counter, king->RAINBOWTransferBlockCount);
-    king->RAINBOWBlockCount = king->RAINBOWTransferBlockCount;
+    king->RAINBOWBlockCount = king->RAINBOWActiveBlockCount;
     if(king->RAINBOWBlockCount)
     {
-     king->RAINBOWKRAMReadPos = king->RAINBOWKRAMA << 1;
+     KING_RainbowAheadDiscard();
+     KING_RainbowAsyncCancel();
+     king->RAINBOWKRAMReadPos = king->RAINBOWActiveKRAMA << 1;
+     king->RBAsyncProducerPos=king->RAINBOWKRAMReadPos;
      FirstDecode = TRUE;
     }
    }
@@ -3331,11 +4510,12 @@ static void DrawActive(void)
     // If we ever change the emulation time range from the current 0 through 262/263, we will need to readjust this
     // statement to prevent the previous frame's skip value to mess up the current frame's graphics data, since
     // RAINBOW data is delayed by 16 scanlines from when it's decoded(16 + 15 maximum delay).
-    RAINBOW_DecodeBlock(FirstDecode, skip && fx_vce.raster_counter < 246);
+    KING_RainbowAsyncStart(FirstDecode, skip && fx_vce.raster_counter < 246,
+                           king_gfx_ts);
    }
   }
 
-  rb_type = RAINBOW_FetchRaster(skip ? NULL : rainbow_linebuffer, LAYER_RAINBOW << 28, &vce_rendercache.palette_table_cache[((fx_vce.palette_offset[3] >> 0) & 0xFF) << 1]);
+  rb_type = RAINBOW_FetchRaster(skip ? NULL : rainbow_linebuffer, LAYER_RAINBOW << 28, &vce_rendercache.palette_table_cache[((vce_rendercache.palette_offset[3] >> 0) & 0xFF) << 1]);
 
   king->RAINBOWStartPending = FALSE;
  } // end   if(fx_vce.raster_counter < 262)
@@ -3347,16 +4527,16 @@ static void DrawActive(void)
    if(rb_type == 1) // YUV
    {
     // Only chroma key when we're not in 7.16MHz pixel mode
-    if(!(fx_vce.picture_mode & 0x08))
+    if(!(fx_vce.active_picture_mode & 0x08))
     {
-     const unsigned int ymin = fx_vce.ChromaKeyY & 0xFF;
-     const unsigned int ymax = fx_vce.ChromaKeyY >> 8;
-     const unsigned int umin = fx_vce.ChromaKeyU & 0xFF;
-     const unsigned int umax = fx_vce.ChromaKeyU >> 8;
-     const unsigned int vmin = fx_vce.ChromaKeyV & 0xFF;
-     const unsigned int vmax = fx_vce.ChromaKeyV >> 8;
+     const unsigned int ymin = vce_rendercache.ChromaKeyY & 0xFF;
+     const unsigned int ymax = vce_rendercache.ChromaKeyY >> 8;
+     const unsigned int umin = vce_rendercache.ChromaKeyU & 0xFF;
+     const unsigned int umax = vce_rendercache.ChromaKeyU >> 8;
+     const unsigned int vmin = vce_rendercache.ChromaKeyV & 0xFF;
+     const unsigned int vmax = vce_rendercache.ChromaKeyV >> 8;
 
-     if((fx_vce.ChromaKeyY | fx_vce.ChromaKeyU | fx_vce.ChromaKeyV) == 0)
+     if((vce_rendercache.ChromaKeyY | vce_rendercache.ChromaKeyU | vce_rendercache.ChromaKeyV) == 0)
      {
       //puts("Opt: 0 chroma key");
       for(uint_fast16_t x = 0; x < 256; x++)
@@ -3411,33 +4591,7 @@ static void DrawActive(void)
         0 = Hidden
     */
 
-   MDFN_FastU32MemsetM8(bg_linebuffer + 8, 0, 256);
-
-    // Only bother to draw the BGs if the microprogram is enabled.
-   if(king->MPROGControl & 0x1)
-   {
-    for(uint_fast8_t prio = 1; prio <= 7; prio++)
-    {
-     for(uint_fast8_t x = 0; x < 4; x++)
-     {
-      int thisprio = (king->priority >> (x * 3)) & 0x7;
-
-      if(BGLayerDisable & (1 << x)) continue;
-
-      if(thisprio == prio)
-      {
-       //if(fx_vce.raster_counter == 50)
-        // CanDrawBG_Fast(x);
-
-       // TODO/FIXME: TEST MORE
-       if(CanDrawBG_Fast(x)) // && (rand() & 1))
-	DrawBG_Fast(bg_linebuffer, x);
-       else
-        DrawBG(bg_linebuffer, x);
-      }
-     }
-    }
-   }
+   RenderKINGBackgroundLine(bg_linebuffer);
 
   } // end if(!skip)
  } // end if(fx_vce.raster_counter >= 22 && fx_vce.raster_counter < 262)
@@ -3447,8 +4601,8 @@ static inline void VDC_PIXELMIX(bool SPRCOMBO_ON, bool BGCOMBO_ON)
 {
     static const uint32 vdc_layer_num[2] = { LAYER_VDC_BG << 28, LAYER_VDC_SPR << 28};
     const uint32 vdc_poffset[2] = {
-                                (((uint32)fx_vce.palette_offset[0] >> 0) & 0xFF) << 1, // BG
-                                (((uint32)fx_vce.palette_offset[0] >> 8) & 0xFF) << 1 // SPR
+                                (((uint32)vce_rendercache.palette_offset[0] >> 0) & 0xFF) << 1, // BG
+                                (((uint32)vce_rendercache.palette_offset[0] >> 8) & 0xFF) << 1 // SPR
                                };
 
     const uint_fast16_t width = fx_vce.dot_clock ? GetHighDotClockVDCWidth() : 256;
@@ -3492,7 +4646,7 @@ static void MixVDC(void)
     {
      MDFN_FastU32MemsetM8(vdc_linebuffer_yuved, 0, 512);
     }
-    else switch(fx_vce.picture_mode & 0xC0)
+    else switch(vce_rendercache.picture_mode & 0xC0)
     {
      case 0x00: VDC_PIXELMIX(0, 0); break;      // None on
      case 0x40: VDC_PIXELMIX(0, 1); break;      // BG combo on
@@ -3501,6 +4655,68 @@ static void MixVDC(void)
     }
 }
 
+
+/* C6261 §2.6.3: alternate scanlines offset horizontally by half a dot.
+   In the 7MHz clock domain that is 1.5/3 mixer clocks; in the 5MHz
+   domain it is 0.5/1 output dot. The output is discrete RGB, so half
+   samples are represented by filtered samples (not an analog sync waveform).
+   Only the second field's rows shift, keeping the first field as an anchor.
+   Rightmost half-dot is masked, as described in the manual.
+   This is deliberately downstream of compositing and upstream of frontend
+   downsampling, so the 1024-clock mixed waveform is preserved up to here. */
+static void VCE_ApplyHalfDotShift(MDFN_Pixel *line, unsigned width, bool high_clock)
+{
+ if(width < 2) return;
+ /* 7MHz: +1.5 mixer samples; 5MHz: +0.5 pixel sample.
+    Sample the original line at x - shift, moving content to the right. */
+ const unsigned whole = high_clock ? 1 : 0;
+ const MDFN_Pixel left = line[0];
+ MDFN_Pixel scratch[1024];
+ for(unsigned x = 0; x < width; x++)
+ {
+   MDFN_Pixel a = x > whole ? line[x - whole - 1] : left;
+   MDFN_Pixel b = x >= whole ? line[x - whole] : left;
+   /* RGB channel-wise average; MAKECOLOR respects active output format. */
+#if defined(MDFN_PIXEL_FORMAT_RGB565)
+   unsigned ar = ((a >> 11)&31), ag = ((a >> 5)&63), ab=(a&31);
+   unsigned br = ((b >> 11)&31), bg = ((b >> 5)&63), bb=(b&31);
+   MDFN_Pixel shifted = ((ar+br+1)/2<<11) | ((ag+bg+1)/2<<5) | ((ab+bb+1)/2);
+#elif defined(MDFN_PIXEL_FORMAT_RGB555)
+   unsigned ar = ((a >> 10)&31), ag = ((a >> 5)&31), ab=(a&31);
+   unsigned br = ((b >> 10)&31), bg = ((b >> 5)&31), bb=(b&31);
+   MDFN_Pixel shifted = ((ar+br+1)/2<<10) | ((ag+bg+1)/2<<5) | ((ab+bb+1)/2);
+#else
+   MDFN_Pixel shifted = MAKECOLOR((((a >> RED_SHIFT)&255)+((b >> RED_SHIFT)&255)+1)/2,
+                                  (((a >> GREEN_SHIFT)&255)+((b >> GREEN_SHIFT)&255)+1)/2,
+                                  (((a >> BLUE_SHIFT)&255)+((b >> BLUE_SHIFT)&255)+1)/2, 255);
+#endif
+   scratch[x] = shifted;
+ }
+ /* Hardware masks half of the rightmost nominal 5MHz dot. In the 7MHz
+    1024-tick representation this is one complete tick and half another.
+    The digital approximation integrates the half-covered end sample. */
+ const unsigned edge = high_clock ? width-2 : width-1;
+ MDFN_Pixel p = scratch[edge];
+#if defined(MDFN_PIXEL_FORMAT_RGB565)
+ scratch[edge] = (p & 0xF7DEu) >> 1;
+#elif defined(MDFN_PIXEL_FORMAT_RGB555)
+ scratch[edge] = (p & 0x7BDEu) >> 1;
+#else
+ scratch[edge] = MAKECOLOR(((p>>RED_SHIFT)&255)/2,
+                           ((p>>GREEN_SHIFT)&255)/2,
+                           ((p>>BLUE_SHIFT)&255)/2, 255);
+#endif
+ if(high_clock) scratch[width-1] = MAKECOLOR(0, 0, 0, 255);
+ memcpy(line, scratch, width * sizeof(*line));
+}
+
+/* Packed C6261 YUV (8:4:4) to 8:8:8 at the digital mixer input. */
+static inline uint32 VCE_ExpandYUV16(uint16 packed)
+{
+ return ((uint32)(packed & 0xFF00u) << 8) |
+        ((uint32)(packed & 0x00F0u) << 8) |
+        ((uint32)(packed & 0x000Fu) << 4);
+}
 
 static void MixLayers(void)
 {
@@ -3560,7 +4776,7 @@ static void MixLayers(void)
 #ifdef PCFX_HEADLESS
         /* C6261 section 2.6: odd field first, even field vertically offset.
            Weave *different* decoded field lines, never copy/scale the prior field. */
-        if(fx_vce.picture_mode & 0x2u)
+        if(fx_vce.active_picture_mode & 0x2u)
           target = pXBuf + internal_pitch * (2u * (fx_vce.raster_counter - 22u) + (fx_vce.odd_field ? 0u : 1u));
         else
 #endif
@@ -3712,7 +4928,10 @@ static void MixLayers(void)
        else	\
         zeout = pixel[2];	\
       }	\
-      DOCELLOSPECIALFRONT();	\
+      if(!pixel[0] && !pixel[1] && !pixel[2]) \
+       zeout = VCE_ExpandYUV16(vce_rendercache.CCR); \
+      else \
+       DOCELLOSPECIALFRONT(); \
       HUC6273_STORE_VCE_TOP_PRIO(); \
        target[x] = YUV888_TO_xxx(zeout);	\
      }
@@ -3765,6 +4984,11 @@ static void MixLayers(void)
     }
 #endif
 
+    /* Apply documented mode-3 displacement AFTER HuC6273 priority and
+       TETSU colour compositing, so any replacement VDC layer shifts too. */
+    if((vce_rendercache.picture_mode & 3u) == 3u && !fx_vce.odd_field)
+     VCE_ApplyHalfDotShift(target, DisplayRect->w, fx_vce.dot_clock);
+
 	// FIXME
 	LineWidths[fx_vce.raster_counter - 22] = DisplayRect->w;
 }
@@ -3808,9 +5032,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 
   clocks -= chunk_clocks;
   HPhaseCounter -= chunk_clocks;
-#ifdef HAVE_HUC6273
   king_gfx_ts += chunk_clocks;
-#endif
 
   if(skip)
    RunVDCs(chunk_clocks, NULL, NULL);
@@ -3844,7 +5066,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
                          if(fx_vce.raster_counter >= 22 && fx_vce.raster_counter < 262)
                          {
 #ifdef PCFX_HEADLESS
-                          if(fx_vce.raster_counter == 22 && (fx_vce.picture_mode & 2u))
+                          if(fx_vce.raster_counter == 22 && (fx_vce.active_picture_mode & 2u))
                            pcfx_headless_video_note_field(fx_vce.odd_field);
 #endif
                           MixVDC();
@@ -3852,7 +5074,22 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
                          }
                         }
 			fx_vce.in_hblank = true;
+                        /* §3.2.3: five refreshes per HBlank. Both banks are
+                         * reserved together; placing them at HBlank entry is
+                         * a modelling assumption, not a documented phase. */
+                        for(unsigned refresh=0;refresh<5;refresh++)
+                         for(unsigned bank=0;bank<2;bank++)
+                          KING_KBusReserve(bank, KBUS_REFRESH, king_gfx_ts);
                         fx_vce.in_vdc_hsync = true;
+                        SoundBox_HSync(king_gfx_ts);
+                        /* Pending R50 enables must not retroactively decode the
+                           elapsed pre-HSYNC interval with their new value. */
+                        if(king->ADPCMPendingEnable)
+                         SoundBox_ADPCMUpdate(king_gfx_ts);
+                        KING_ADPCMEnableAtHSync();
+                        /* HuC6230's two-byte capture is synchronized to the
+                           same falling -HSYNC, after new R50 enables latch. */
+                        SoundBox_ADPCMTransferHSync();
 
                         for(uint_fast8_t chip = 0; chip < 2; chip++)
                          VDC_HSync(vdc_chips[chip], true);
@@ -3864,16 +5101,23 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
                         /* HuC6261 C6261 §2.6: 525 scanlines over two NTSC
                            interlace fields, with odd/even status on SR bit 14.
                            Mode 2 alternates 263/262 scanlines.  Mode 3 also
-                           asks for half-dot shift (not simulated here yet). */
-                        const unsigned mode = fx_vce.picture_mode & 3u;
+                           adds half-dot shift on alternate scanlines. */
+                        const unsigned mode = fx_vce.active_picture_mode & 3u;
                         const unsigned lines = (mode & 2u)
                           ? (fx_vce.odd_field ? 263u : 262u)
                           : ((mode & 1u) ? 262u : 263u);
                         fx_vce.raster_counter = (fx_vce.raster_counter + 1u) % lines;
                         if(fx_vce.raster_counter == 0)
                         {
-                          if(mode & 2u) fx_vce.odd_field = !fx_vce.odd_field;
-                          else fx_vce.odd_field = false;
+                          VCE_LatchVerticalControl();
+                          /* The manual specifies O/E=odd for the FIRST field
+                             after entering interlace, then odd/even alternation. */
+                          if(!(mode & 2u) && (fx_vce.active_picture_mode & 2u))
+                           fx_vce.odd_field = true;
+                          else if(mode & 2u)
+                           fx_vce.odd_field = !fx_vce.odd_field;
+                          else
+                           fx_vce.odd_field = false;
                         }
 
                         if(fx_vce.raster_counter == 0)
@@ -3910,11 +5154,11 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			 }
 			}
 
-			// This -18(and +18) may or may not be correct in regards to how a real PC-FX adjusts the VDC layer horizontal position
-			// versus the KING and RAINBOW layers.
+            // Preserve total line timing: 173+120 is constant in high clock.
+            // The adjustable VDC HSYNC edge is an uncalibrated alignment parameter.
 
 			if(fx_vce.dot_clock)
-			 HPhaseCounter += 173 - 18;
+			 HPhaseCounter += 173 - vdc_hsync_phase_ticks;
 			else
 			 HPhaseCounter += 165;
 			break;
@@ -3925,7 +5169,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 			 VDC_HSync(vdc_chips[chip], false);
 
 			if(fx_vce.dot_clock)
-			 HPhaseCounter += 120 + 18;
+			 HPhaseCounter += 120 + vdc_hsync_phase_ticks;
 			else
  		  	 HPhaseCounter += 128;
 			break;
@@ -3996,6 +5240,9 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->BGAffinCenterY, "BGAffinCenterY"),
 
   SFVARN(king->ADPCMControl, "ADPCMControl"),
+  SFVARN(king->ADPCMControlWritten, "ADPCMControlWritten"),
+  SFVARN(king->ADPCMPendingEnable, "ADPCMPendingEnable"),
+  SFVARN(king->ADPCMTransferLatchVersion, "ADPCMTransferLatchVersion"),
   SFARRAY16N(king->ADPCMBufferMode, 2, "ADPCMBufferMode"),
   SFARRAY16N(king->ADPCMSAL, 2, "ADPCMSAL"),
   SFARRAY32N(king->ADPCMEndAddress, 2, "ADPCMEndAddress"),
@@ -4007,6 +5254,10 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->RAINBOWKRAMA, "RAINBOWKRAMA"),
   SFVARN(king->RAINBOWTransferStartPosition, "RAINBOWTransferStartPosition"),
   SFVARN(king->RAINBOWTransferBlockCount, "RAINBOWTransferBlockCount"),
+  SFVARN(king->RAINBOWActiveKRAMA, "RAINBOWActiveKRAMA"),
+  SFVARN(king->RAINBOWActiveBlockCount, "RAINBOWActiveBlockCount"),
+  SFVARN(king->RAINBOWConfigPending, "RAINBOWConfigPending"),
+  SFVARN(king->RAINBOWConfigStateVersion, "RAINBOWConfigStateVersion"),
 
   SFVARN(king->RAINBOWStartPending, "RAINBOWStartPending"),
   SFVARN(king->RAINBOWBusyCount, "RAINBOWBusyCount"),
@@ -4015,6 +5266,70 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->RasterIRQLine, "RasterIRQLine"),
   SFVARN(king->RasterIRQPending, "RasterIRQPending"),
   SFVARN(king->RAINBOWKRAMReadPos, "RAINBOWKRAMReadPos"),
+  SFARRAY32N(king->RainbowAheadAddress,3,"RainbowAheadAddress"),
+  SFARRAY32N(king->RainbowAheadGrantAt,3,"RainbowAheadGrantAt"),
+  SFARRAY16N(king->RainbowAheadValue,3,"RainbowAheadValue"),
+  SFARRAYN(king->RainbowAheadPage,3,"RainbowAheadPage"),
+  SFARRAYN(king->RainbowAheadStatus,3,"RainbowAheadStatus"),
+  SFVARN(king->RainbowAheadStateVersion,"RainbowAheadStateVersion"),
+  SFARRAYN(king->RBAsyncStage,131072,"RBAsyncStage"),
+  SFVARN(king->RBAsyncLength,"RBAsyncLength"),
+  SFVARN(king->RBAsyncProducerPos,"RBAsyncProducerPos"),
+  SFVARN(king->RBAsyncConsumeIndex,"RBAsyncConsumeIndex"),
+  SFVARN(king->RBAsyncScanIndex,"RBAsyncScanIndex"),
+  SFVARN(king->RBAsyncTarget,"RBAsyncTarget"),
+  SFVARN(king->RBAsyncGrantAt,"RBAsyncGrantAt"),
+  SFVARN(king->RBAsyncHeaderRemaining,"RBAsyncHeaderRemaining"),
+  SFVARN(king->RBAsyncSkipRemaining,"RBAsyncSkipRemaining"),
+  SFVARN(king->RBAsyncWords,"RBAsyncWords"),
+  SFVARN(king->RBAsyncWaits,"RBAsyncWaits"),
+  SFVARN(king->RBAsyncUnderflows,"RBAsyncUnderflows"),
+  SFVARN(king->RBAsyncStageVersion,"RBAsyncStageVersion"),
+  SFVARN(king->RBAsyncActive,"RBAsyncActive"),
+  SFVARN(king->RBAsyncPending,"RBAsyncPending"),
+  SFVARN(king->RBAsyncDecoding,"RBAsyncDecoding"),
+  SFVARN(king->RBAsyncFirst,"RBAsyncFirst"),
+  SFVARN(king->RBAsyncSkip,"RBAsyncSkip"),
+  SFVARN(king->RBAsyncScanState,"RBAsyncScanState"),
+  SFVARN(king->RBAsyncMarker,"RBAsyncMarker"),
+  SFVARN(king->RBAsyncSizeHigh,"RBAsyncSizeHigh"),
+  SFVARN(king->RBAsyncPage,"RBAsyncPage"),
+  SFVARN(king->RBAsyncAddress,"RBAsyncAddress"),
+  SFVARN(king->RBAsyncRLEVersion,"RBAsyncRLEVersion"),
+  SFVARN(king->RBAsyncRLEActive,"RBAsyncRLEActive"),
+  SFVARN(king->RBAsyncRLECursor,"RBAsyncRLECursor"),
+  SFVARN(king->RBAsyncRLEEnd,"RBAsyncRLEEnd"),
+  SFVARN(king->RBAsyncRLEX,"RBAsyncRLEX"),
+  SFVARN(king->RBAsyncRLETokenCount,"RBAsyncRLETokenCount"),
+  SFVARN(king->RBAsyncRLETotalTokens,"RBAsyncRLETotalTokens"),
+  SFVARN(king->RBAsyncRLEBlocks,"RBAsyncRLEBlocks"),
+  SFVARN(king->RBJPEGVersion,"RBJPEGVersion"),
+  SFVARN(king->RBJPEGActive,"RBJPEGActive"),
+  SFVARN(king->RBJPEGQuantExpected,"RBJPEGQuantExpected"),
+  SFVARN(king->RBJPEGQuantCount,"RBJPEGQuantCount"),
+  SFARRAYN(king->RBJPEGQuant,128,"RBJPEGQuant"),
+  SFVARN(king->RBJPEGCursor,"RBJPEGCursor"),
+  SFVARN(king->RBJPEGEntropyEnd,"RBJPEGEntropyEnd"),
+  SFVARN(king->RBJPEGEntropyBytes,"RBJPEGEntropyBytes"),
+  SFVARN(king->RBJPEGStuffedPairs,"RBJPEGStuffedPairs"),
+  SFVARN(king->RBJPEGStalledPairs,"RBJPEGStalledPairs"),
+  SFVARN(king->RBJPEGBlocks,"RBJPEGBlocks"),
+  SFVARN(king->RBJPEGDigest,"RBJPEGDigest"),
+  SFVARN(king->RBHVersion,"RBHVersion"),
+  SFVARN(king->RBHStarted,"RBHStarted"),
+  SFVARN(king->RBHCompletedBlocks,"RBHCompletedBlocks"),
+  SFARRAYN((uint8*)&king->RBH,sizeof(king->RBH),"RBHState"),
+  SFARRAYN(king->RBMCULuma,4096,"RBMCULuma"),
+  SFARRAYN(king->RBMCUValidColumn,16,"RBMCUValidColumn"),
+  SFARRAYN(king->RBMCUQuantBase,64,"RBMCUQuantBase"),
+  SFVARN(king->RBMCUQuantValid,"RBMCUQuantValid"),
+  SFVARN(king->RBMCUScale,"RBMCUScale"),
+  SFVARN(king->RBMCUVersion,"RBMCUVersion"),
+  SFVARN(king->RBMCUColumns,"RBMCUColumns"),
+  SFVARN(king->RBMCUCompared,"RBMCUCompared"),
+  SFVARN(king->RBMCUDifferences,"RBMCUDifferences"),
+  SFVARN(king->RBMCUBlocks,"RBMCUBlocks"),
+  SFVARN(king->RBMCUExactBlocks,"RBMCUExactBlocks"),
   SFVARN(king->DMATransferFlipFlop, "DMATransferFlipFlop"),
   SFVARN(king->DMATransferAddr, "DMATransferAddr"),
   SFVARN(king->DMATransferSize, "DMATransferSize"),
@@ -4038,6 +5353,28 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->dma_send_active, "dma_send_active"),
   SFVARN(king->dma_cycle_counter, "dma_cycle_counter"),
   SFVARN(king->KRAMWriteBusyUntil, "KRAMWriteBusyUntil"),
+  SFVARN(king->KRAMWritePending, "KRAMWritePending"),
+  SFVARN(king->KRAMWritePendingPage, "KRAMWritePendingPage"),
+  SFVARN(king->KRAMWritePendingAddress, "KRAMWritePendingAddress"),
+  SFVARN(king->KRAMWritePendingAt, "KRAMWritePendingAt"),
+  SFARRAY32N(&king->KBusSlotTime[0][0], 2*KING_KBUS_SLOTS, "KBusSlotTime"),
+  SFARRAYN(&king->KBusSlotSource[0][0], 2*KING_KBUS_SLOTS, "KBusSlotSource"),
+  SFVARN(king->KBusStateVersion, "KBusStateVersion"),
+  SFARRAY16N(&king->KBusSlotTag[0][0],2*KING_KBUS_SLOTS,"KBusSlotTag"),
+  SFARRAY32N(king->SCSIPendingAddress,KING_SCSI_PENDING_MAX,"SCSIPendingAddress"),
+  SFARRAY32N(king->SCSIPendingGrantAt,KING_SCSI_PENDING_MAX,"SCSIPendingGrantAt"),
+  SFARRAY16N(king->SCSIPendingValue,KING_SCSI_PENDING_MAX,"SCSIPendingValue"),
+  SFARRAYN(king->SCSIPendingPage,KING_SCSI_PENDING_MAX,"SCSIPendingPage"),
+  SFARRAYN(king->SCSIPendingValid,KING_SCSI_PENDING_MAX,"SCSIPendingValid"),
+  SFVARN(king->SCSIPendingStateVersion,"SCSIPendingStateVersion"),
+  SFVARN(king->SCSIPendingCount,"SCSIPendingCount"),
+  SFARRAY32N(king->ADPCMGrantAddress,2,"ADPCMGrantAddress"),
+  SFARRAY32N(king->ADPCMGrantAt,2,"ADPCMGrantAt"),
+  SFARRAYN(king->ADPCMGrantPage,2,"ADPCMGrantPage"),
+  SFARRAYN(king->ADPCMGrantPending,2,"ADPCMGrantPending"),
+  SFVARN(king->ADPCMGrantStateVersion,"ADPCMGrantStateVersion"),
+  SFVARN(king->KRAMWritePendingValue, "KRAMWritePendingValue"),
+  SFVARN(king->KRAMWritePendingStateVersion, "KRAMWritePendingStateVersion"),
 
   SFVARN(king->SubChannelBuf, "SubChannelBuf"),
   SFVARN(king->SubChannelInterrupt, "SubChannelInterrupt"),
@@ -4056,6 +5393,8 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(fx_vce.in_hblank, "in_hblank"),
   SFVARN(fx_vce.in_vdc_hsync, "in_vdc_hsync"),
   SFVARN(fx_vce.picture_mode, "picture_mode"),
+  SFVARN(fx_vce.active_picture_mode, "active_picture_mode"),
+  SFVARN(vce_state_latch_version, "vce_latch_version"),
 
   SFVARN(HPhase, "HPhase"),
   SFVARN(HPhaseCounter, "HPhaseCounter"),
@@ -4096,12 +5435,144 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
 
+ /* Older save states lack the separately latched VCE mode register. Do not
+    display a black field merely because that field was absent. */
+ vce_state_latch_version = load ? 0 : 1;
+ king->RAINBOWConfigStateVersion = load ? 0 : 1;
+ king->ADPCMTransferLatchVersion = load ? 0 : 1;
+ king->KRAMWritePendingStateVersion = load ? 0 : 1;
+ king->KBusStateVersion = load ? 0 : 1;
+ king->SCSIPendingStateVersion = load ? 0 : 1;
+ king->ADPCMGrantStateVersion = load ? 0 : 1;
+ king->RainbowAheadStateVersion=load?0:1;
+ king->RBAsyncStageVersion=load?0:1;
+ king->RBAsyncRLEVersion=load?0:1;
+ king->RBJPEGVersion=load?0:1;
+ king->RBHVersion=load?0:1;
+ king->RBMCUVersion=load?0:1;
  int ret = MDFNSS_StateAction(sm, load, data_only, KINGStateRegs, "KING", false);
  
  ret &= MDFNSS_StateAction(sm, load, data_only, VCEStateRegs, "VCE", false);
 
  if(load)
  {
+  if(!king->RBAsyncStageVersion)
+  {
+   king->RBAsyncActive=king->RBAsyncPending=king->RBAsyncDecoding=0;
+   king->RBAsyncLength=king->RBAsyncScanIndex=king->RBAsyncTarget=0;
+   king->RBAsyncProducerPos=king->RAINBOWKRAMReadPos;
+  }
+  king->RBAsyncStageVersion=1;
+  if(!king->RBAsyncRLEVersion) king->RBAsyncRLEActive=0;
+  king->RBAsyncRLEVersion=1;
+  if(!king->RBJPEGVersion) king->RBJPEGActive=0;
+  if(!king->RBHVersion) { king->RBHStarted=0; memset(&king->RBH,0,sizeof(king->RBH)); }
+  king->RBHVersion=1;
+  if(!king->RBMCUVersion)
+  {
+   king->RBMCUQuantValid=0;
+   king->RBMCUScale=4;
+   memset(king->RBMCUValidColumn,0,sizeof(king->RBMCUValidColumn));
+  }
+  king->RBMCUVersion=1;
+  if(king->RBHStarted && (king->RBH.cursor>king->RBAsyncLength ||
+       king->RBH.end>sizeof(king->RBAsyncStage) || king->RBH.bits>24 ||
+       king->RBH.component>=6 || king->RBH.column>16 ||
+       king->RBH.ac_index>63)) king->RBHStarted=0;
+
+  king->RBJPEGVersion=1;
+  if(king->RBJPEGCursor>king->RBAsyncLength ||
+     king->RBJPEGEntropyEnd>sizeof(king->RBAsyncStage) ||
+     king->RBJPEGQuantCount>128 ||
+     (king->RBJPEGQuantExpected!=0 && king->RBJPEGQuantExpected!=128))
+    king->RBJPEGActive=0;
+  if(!king->RBAsyncActive) king->RBJPEGActive=0;
+  if(king->RBAsyncRLECursor>king->RBAsyncLength ||
+     king->RBAsyncRLEEnd>sizeof(king->RBAsyncStage) ||
+     king->RBAsyncRLEX>0x2000) king->RBAsyncRLEActive=0;
+  if(king->RBAsyncLength>sizeof(king->RBAsyncStage)) king->RBAsyncLength=0;
+  if(king->RBAsyncScanIndex>king->RBAsyncLength) king->RBAsyncScanIndex=0;
+  king->RBAsyncActive&=1;
+  king->RBAsyncPending&=1;
+  king->RBAsyncDecoding=0;
+  king->RBAsyncPage&=1;
+  if(!king->RainbowAheadStateVersion)
+   memset(king->RainbowAheadStatus,0,sizeof(king->RainbowAheadStatus));
+  king->RainbowAheadStateVersion=1;
+  for(unsigned j=0;j<3;j++)
+  {
+   if(king->RainbowAheadStatus[j]>2) king->RainbowAheadStatus[j]=0;
+   king->RainbowAheadPage[j]&=1;
+   king->RainbowAheadAddress[j]&=0x3FFFFu;
+  }
+  if(!king->ADPCMGrantStateVersion)
+  {
+   memset(king->ADPCMGrantPending,0,sizeof(king->ADPCMGrantPending));
+  }
+  king->ADPCMGrantStateVersion=1;
+  for(unsigned ch=0;ch<2;ch++)
+  {
+   king->ADPCMGrantPending[ch]&=1;
+   king->ADPCMGrantPage[ch]&=1;
+   king->ADPCMGrantAddress[ch]&=0x3FFFFu;
+  }
+  if(!king->SCSIPendingStateVersion)
+  {
+   memset(king->SCSIPendingValid,0,sizeof(king->SCSIPendingValid));
+   memset(king->KBusSlotTag,0,sizeof(king->KBusSlotTag));
+  }
+  king->SCSIPendingStateVersion=1;
+  king->SCSIPendingCount=0;
+  for(unsigned n=0;n<KING_SCSI_PENDING_MAX;n++)
+  {
+   king->SCSIPendingValid[n]&=1;
+   king->SCSIPendingCount+=king->SCSIPendingValid[n];
+   king->SCSIPendingPage[n]&=1;
+   king->SCSIPendingAddress[n]&=0x3FFFFu;
+  }
+  if(!king->KBusStateVersion)
+  {
+   memset(king->KBusSlotTime,0,sizeof(king->KBusSlotTime));
+   memset(king->KBusSlotSource,0,sizeof(king->KBusSlotSource));
+  }
+  king->KBusStateVersion = 1;
+  if(!king->KRAMWritePendingStateVersion)
+  {
+   /* Older states already committed their KRAM writes eagerly. */
+   king->KRAMWritePending = 0;
+  }
+  king->KRAMWritePendingStateVersion = 1;
+  king->KRAMWritePending &= 1u;
+  king->KRAMWritePendingPage &= 1u;
+  king->KRAMWritePendingAddress &= 0x3FFFFu;
+  if(!king->ADPCMTransferLatchVersion)
+  {
+   king->ADPCMControlWritten = king->ADPCMControl;
+   king->ADPCMPendingEnable = 0;
+  }
+  king->ADPCMTransferLatchVersion = 1;
+  king->ADPCMControl &= 0xFu;
+  king->ADPCMControlWritten &= 0xFu;
+  king->ADPCMPendingEnable &= 3u;
+  if(!king->RAINBOWConfigStateVersion)
+  {
+   /* Pre-v5 states only have the CPU-facing REG 41/43 values. */
+   king->RAINBOWActiveKRAMA = king->RAINBOWKRAMA;
+   king->RAINBOWActiveBlockCount = king->RAINBOWTransferBlockCount;
+   king->RAINBOWConfigPending = 0;
+  }
+  king->RAINBOWConfigStateVersion = 1;
+  king->RAINBOWKRAMA &= 0x3FFFFu;
+  king->RAINBOWActiveKRAMA &= 0x3FFFFu;
+  king->RAINBOWTransferBlockCount &= 0x1Fu;
+  king->RAINBOWActiveBlockCount &= 0x1Fu;
+  king->RAINBOWConfigPending &= 3u;
+  if(!vce_state_latch_version)
+  {
+   fx_vce.active_picture_mode = fx_vce.picture_mode;
+   vce_rendercache.picture_mode = fx_vce.active_picture_mode;
+  }
+  vce_state_latch_version = 1;
   RecalcKRAMPagePtrs();
 
   fx_vce.dot_clock_ratio = fx_vce.dot_clock ? 3 : 4;

@@ -1250,13 +1250,13 @@ static void VDC_CheckAndCommitPending(VDC *vdc)
 {
  if(sat_dma_counter <= 0 && !DMARunning /* && sprite_cg_fetch_counter <= 0*/ && !mystery_phase)
  {
-  if(pending_write)
-  {
-   if(pending_write_addr < VRAM_Size)
+   if(pending_write)
    {
-    VRAM[pending_write_addr] = pending_write_latch;
-    VDC_FixTileCache(vdc, pending_write_addr);
-   }
+    if(pending_write_addr < VRAM_Size)
+    {
+     VRAM[pending_write_addr] = pending_write_latch;
+     VDC_FixTileCache(vdc, pending_write_addr);
+    }
    //else
    // VDC_UNDEFINED("Unmapped VRAM write");
 
@@ -1277,7 +1277,7 @@ static void VDC_CheckAndCommitPending(VDC *vdc)
 
 void VDC_Write(VDC *vdc, uint32 A, uint8 V)
 {
- int msb = A & 1;
+  int msb = A & 1;
 
  A &= 0x3;
 
@@ -1297,8 +1297,8 @@ void VDC_Write(VDC *vdc, uint32 A, uint8 V)
 
            switch(select & 0x1F)
            {
-            case 0x00: VDC_REGSETP(MAWR, V, msb);
-		       break;
+             case 0x00: VDC_REGSETP(MAWR, V, msb);
+			       break;
 
             case 0x01: VDC_REGSETP(MARR, V, msb);
        	               if(msb)
@@ -1322,18 +1322,26 @@ void VDC_Write(VDC *vdc, uint32 A, uint8 V)
 			// We must call CommitPendingWrite at the end of SAT/VRAM DMA for this to work!
 			VDC_DoWaitStates(vdc);
 
-			pending_write = TRUE;
-			pending_write_addr = MAWR;
-			pending_write_latch = write_latch | (V << 8);
-	                MAWR += vram_inc_tab[(CR >> 11) & 0x3];
+                        pending_write = TRUE;
+                        pending_write_addr = MAWR;
+                        pending_write_latch = write_latch | (V << 8);
+                        MAWR += vram_inc_tab[(CR >> 11) & 0x3];
 
-			VDC_CheckAndCommitPending(vdc);
+                        VDC_CheckAndCommitPending(vdc);
                        }
                        break;
 
-            case 0x05: VDC_REGSETP(CR, V, msb);
-			//printf("CR: %04x, %d\n", CR, msb);
-                       break;
+            case 0x05:
+            {
+                const uint16 old_cr = CR;
+                VDC_REGSETP(CR, V, msb);
+                if(!(old_cr & 0x80) && (CR & 0x80))
+                {
+                    for(int x = 0; x < VRAM_Size; x++)
+                        VDC_FixTileCache(vdc, x);
+                }
+                break;
+            }
 
             case 0x06: VDC_REGSETP(RCR, V, msb);
 		       RCR &= 0x3FF;
@@ -1424,7 +1432,7 @@ void VDC_Write(VDC *vdc, uint32 A, uint8 V)
 
 void VDC_Write16(VDC *vdc, bool A, uint16 V)
 {
- if(!A)
+  if(!A)
   select = V & 0x1F;
  else
  {
@@ -1450,16 +1458,25 @@ void VDC_Write16(VDC *vdc, bool A, uint16 V)
             case 0x02: // We must call CommitPendingWrite at the end of SAT/VRAM DMA for this to work!
 			VDC_DoWaitStates(vdc);
 
-			pending_write = TRUE;
-			pending_write_addr = MAWR;
-			pending_write_latch = V;
-	                MAWR += vram_inc_tab[(CR >> 11) & 0x3];
+		pending_write = TRUE;
+		pending_write_addr = MAWR;
+                pending_write_latch = V;
+                MAWR += vram_inc_tab[(CR >> 11) & 0x3];
 
-			VDC_CheckAndCommitPending(vdc);
+                VDC_CheckAndCommitPending(vdc);
                        break;
 
-            case 0x05: CR = V;
-                       break;
+            case 0x05:
+            {
+                const uint16 old_cr = CR;
+                CR = V;
+                if(!(old_cr & 0x80) && (CR & 0x80))
+                {
+                    for(int x = 0; x < VRAM_Size; x++)
+                        VDC_FixTileCache(vdc, x);
+                }
+                break;
+            }
 
             case 0x06: RCR = V & 0x3FF;
 		       break;

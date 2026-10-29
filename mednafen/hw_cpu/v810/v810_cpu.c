@@ -72,9 +72,20 @@ static uint8 MemReadBus32[256];
 static uint8 MemWriteBus32[256];
 static int32 lastop;
 #define LASTOP_LD 0x100
+/* V810 Family Architecture UM, table 5-11 note 3: the extra minimum
+ * cycle applies to consecutive executions of the SAME store/output
+ * instruction, not a change of transfer width (e.g. OUT.B -> OUT.H).
+ * Keep the old class constants reserved so older save-state history remains
+ * safe (an unknown previous width does not incur a fabricated extra cycle). */
 #define LASTOP_ST 0x200
+#define LASTOP_ST_B 0x201
+#define LASTOP_ST_H 0x202
+#define LASTOP_ST_W 0x203
 #define LASTOP_IN 0x400
 #define LASTOP_OUT 0x800
+#define LASTOP_OUT_B 0x801
+#define LASTOP_OUT_H 0x802
+#define LASTOP_OUT_W 0x803
 enum { HALT_NONE = 0, HALT_HALT = 1, HALT_FATAL_EXCEPTION = 2 };
 static uint8 Halted;
 static bool Running;
@@ -1278,6 +1289,9 @@ int V810_StateAction(StateMem *sm, int load, int data_only)
   SFVAR(Halted),
 
   SFVAR(lastop),
+#ifndef V810_NO_FLAG_STALL
+  SFVARN(v810_flagset, "FlagHistoryV8"),
+#endif
 
   SFARRAY32(cache_tag_temp, 128),
   SFARRAY32(cache_data_temp, 128 * 2),
@@ -1297,6 +1311,9 @@ int V810_StateAction(StateMem *sm, int load, int data_only)
   SFEND
  };
 
+#ifndef V810_NO_FLAG_STALL
+ if(load) v810_flagset = 0;  /* fallback for pre-v8 states with no flag history */
+#endif
  int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, "V810", false);
 
  if(load)

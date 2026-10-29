@@ -472,6 +472,30 @@ void RAINBOW_Accurate_SwapBuffers(void)
  RasterReadPos = 0;
 }
 
+/* RLE tokens are committed as soon as their complete compressed bytes have
+ * arrived through K-BUS.  This uses the same output format and buffer as the
+ * original block-atomic RLE decoder; no KRAM reads occur in this backend. */
+void RAINBOW_Accurate_RLEBegin(bool first)
+{
+ if(first)
+ {
+  FirstDecode = true;
+  GarbageData = false;
+  RB_ConfettiBeginFrame();
+ }
+ DecodeFormat[DecodeBufferWhichRead ^ 1] = 0;
+}
+void RAINBOW_Accurate_RLEEmit(unsigned x, unsigned count, uint8 color)
+{
+ if(x>=0x2000u) return;
+ if(count>0x2000u-x) count=0x2000u-x;
+ memset(DecodeBuffer[DecodeBufferWhichRead ^ 1]+x,color,count);
+}
+void RAINBOW_Accurate_RLEEnd(void)
+{
+ RB_ConfettiAdvanceRow();
+}
+
 void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
 {
    uint8 block_type;
@@ -638,7 +662,6 @@ void RAINBOW_Accurate_DecodeBlock(bool arg_FirstDecode, bool Skip)
       IDCT(&dct_y[0xC0]);
       IDCT(&dct_u[0x00]);
       IDCT(&dct_v[0x00]);
-
       for(int y = 0; y < 16; y++)
        for(int x = 0; x < 16; x++)
         dest_base_column[y * 256 + x] = clamp_to_u8(dct_y[y * 8 + (x & 0x7) + ((x & 0x8) << 4)] + 0x80) << 16;
@@ -899,4 +922,22 @@ int RAINBOW_Accurate_StateAction(StateMem *sm, int load, int data_only)
  }
 
  return ret;
+}
+
+/* v23: compare complete, K-BUS-fed MCU luma against the existing pixel
+ * renderer without allowing the diagnostic path to affect the picture. */
+void RAINBOW_Accurate_CompareLuma(const uint8 *luma, const uint8 *valid, uint32 *count, uint32 *diff)
+{
+ const uint32 *actual=(const uint32*)DecodeBuffer[DecodeBufferWhichRead^1];
+ for(unsigned col=0;col<16;col++)
+ {
+  if(!valid[col]) continue;
+  for(unsigned y=0;y<16;y++)
+   for(unsigned x=0;x<16;x++)
+   {
+    unsigned index=y*256+col*16+x;
+    ++*count;
+    if(((actual[index]>>16)&255)!=luma[index]) ++*diff;
+   }
+ }
 }

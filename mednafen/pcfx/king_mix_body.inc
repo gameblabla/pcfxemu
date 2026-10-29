@@ -4,10 +4,17 @@
      const unsigned int vdcw = GetHighDotClockVDCWidth();
      for(unsigned int x = 0; x < outw; x++)
      {
-      unsigned int vdc_x = (x * vdcw) / outw;
+      /* C6261, sections 2.7 and 2.10: HuC6270 = 3 TETSU cycles,
+       * HuC6272/HuC6271 = 4 TETSU cycles. Never interpolate across
+       * independently composited source-pixel boundaries: that invents
+       * colors and destroys the single-master-cycle edge pulses under test.
+       * Horizontal blanking and phase are supplied by the source devices. */
+      unsigned int vdc_x = outw == 1024 ? x / 3u : (x * vdcw) / outw;
       if(vdc_x > 511) vdc_x = 511;
-      const uint32 king_bg = (outw == 256) ? (bg_linebuffer + 8)[x] : SampleKING256Sharp(bg_linebuffer + 8, x, outw);
-      const uint32 king_rb = (outw == 256) ? rainbow_linebuffer[x] : SampleKING256Sharp(rainbow_linebuffer, x, outw);
+      const uint32 king_bg = outw == 1024 ? (bg_linebuffer + 8)[x / 4u]
+                                               : (outw == 256 ? (bg_linebuffer + 8)[x] : SampleKING256Sharp(bg_linebuffer + 8, x, outw));
+      const uint32 king_rb = outw == 1024 ? rainbow_linebuffer[x / 4u]
+                                               : (outw == 256 ? rainbow_linebuffer[x] : SampleKING256Sharp(rainbow_linebuffer, x, outw));
       LAYER_MIX_BODY_PIX(king_bg, king_rb, vdc_x);
       LAYER_MIX_FINAL_NOCELLO;
      }

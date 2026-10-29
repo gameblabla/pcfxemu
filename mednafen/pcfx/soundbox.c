@@ -143,6 +143,10 @@ void SoundBox_Kill(void)
 	PCFX_RawAudio_Kill(&FXRawMixer);
 }
 
+/* VCA runs in the CPU timestamp domain (also advanced at -HSYNC). */
+static v810_timestamp_t last_pcm_hsync_ts = 0;
+static void SoundBox_PCMAdvance(v810_timestamp_t elapsed);
+
 /* Macro to access currently selected PSG channel */
 void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp)
 {
@@ -153,28 +157,18 @@ void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp)
     }
 	else
     {
+         /* Keep CPU audio writes ordered against previously elapsed TETSU
+            -HSYNC edges. Otherwise a deferred R10 write could incorrectly
+            latch on an older edge when KING next catches up. */
+         PCFX_SetEvent(PCFX_EVENT_KING, KING_Update(timestamp));
 		 switch(A & 0x3F)
 		 {
-			case 0x20:
-				SoundBox_ADPCMUpdate(timestamp);
-				for(uint_fast8_t ch = 0; ch < 2; ch++)
-				{
-					if(!(psg.ADPCMControl & (0x10 << ch)) && (V & (0x10 << ch)))
-					{
-						if(ResetAntiClickEnabled)
-						{
-							psg.ResetAntiClick[ch] += (int64)((uint64)psg.ADPCMPredictor[ch] << 32);
-							if(psg.ResetAntiClick[ch] > ((int64)0x3FFF << 32))
-								psg.ResetAntiClick[ch] = (int64)0x3FFF << 32;
-							if(psg.ResetAntiClick[ch] < -((int64)0x4000 << 32))
-								psg.ResetAntiClick[ch] = -((int64)0x4000 << 32);
-						}
-						psg.ADPCMPredictor[ch] = 0;
-						psg.StepSizeIndex[ch] = 0;
-					}
-				}
-				psg.ADPCMControl = V; 
-				break;
+            case 0x20:
+                /* HuC6230 §2.3: R10 is sampled on the falling edge of the
+                   NEXT -HSYNC. Last write within a horizontal period wins. */
+                psg.ADPCMPendingControl = V;
+                psg.ADPCMPendingValid = true;
+                break;
 
 			case 0x22:
 				SoundBox_ADPCMUpdate(timestamp);
@@ -196,14 +190,19 @@ void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp)
 				psg.ADPCMVolume[1][1] = V & 0x3F; 
 			break;
 
-			case 0x2A:
+            case 0x2A:
+                /* Advance the previous VCA target up to this exact CPU write. */
+                SoundBox_PCMAdvance(timestamp - last_pcm_hsync_ts);
+                last_pcm_hsync_ts = timestamp;
 				psg.CDDAVolume[0] = V & 0x3F;
-				SCSICD_SetCDDAVolume(0.50f * psg.CDDAVolume[0] / 63, 0.50f * psg.CDDAVolume[1] / 63);
+                /* Electronic VCA target only; actual level advances at HSYNC. */
 			break;
 
-			case 0x2C:
+            case 0x2C:
+                SoundBox_PCMAdvance(timestamp - last_pcm_hsync_ts);
+                last_pcm_hsync_ts = timestamp;
 				psg.CDDAVolume[1] = V & 0x3F;
-				SCSICD_SetCDDAVolume(0.50f * psg.CDDAVolume[0] / 63, 0.50f * psg.CDDAVolume[1] / 63);
+                /* Electronic VCA target only; actual level advances at HSYNC. */
 			break;
 		}
 	}
@@ -211,9 +210,152 @@ void SoundBox_Write(uint32 A, uint16 V, const v810_timestamp_t timestamp)
 
 static uint32 KINGADPCMControl;
 
+/* The decoder's sample divider and the HuC6230's incoming 16-bit latch are
+   different devices. A 16-bit transfer supplies four nibbles; the fastest
+   31.47kHz nibble rate therefore needs a transfer every two 15.73kHz
+   horizontal periods. Both channels share the same phase; R50 controls
+   whether a channel supplies a word at that boundary. */
+void SoundBox_ADPCMTransferHSync(void)
+{
+ const unsigned period = 2u << ((KINGADPCMControl >> 2) & 3u);
+ /* R10 software reset holds the respective decoder and invalidates the
+    captured transfer. A reset of both channels restarts the common phase. */
+ unsigned eligible = KINGADPCMControl & 3u;
+ for(unsigned ch = 0; ch < 2; ch++)
+  if(psg.ADPCMControl & (0x10u << ch))
+  {
+   eligible &= ~(1u << ch);
+   psg.ADPCMInputValid[ch] = false;
+  }
+ if(!psg.ADPCMTransferEstablished)
+ {
+  if(!eligible)
+   return;
+  psg.ADPCMTransferEstablished = true;
+  psg.ADPCMTransferPhase = 0;
+ }
+ else
+ {
+  psg.ADPCMTransferPhase++;
+  if(psg.ADPCMTransferPhase < period)
+   return;
+  psg.ADPCMTransferPhase = 0;
+ }
+ for(unsigned ch = 0; ch < 2; ch++)
+ {
+  if(eligible & (1u << ch))
+  {
+   /* Each channel has precisely one word latch. If the source supplies
+      more than the decoder consumed, the latest captured word wins. */
+   KING_RequestADPCMHalfWord(ch);
+  }
+ }
+}
+
+void SoundBox_ADPCMReceiveWord(int ch, uint16 value)
+{
+ if((unsigned)ch >= 2u) return;
+ psg.ADPCMInputWord[ch]=value;
+ psg.ADPCMInputValid[ch]=true;
+}
+
 void SoundBox_SetKINGADPCMControl(uint32 value)
 {
 	KINGADPCMControl = value;
+}
+
+/* HuC6230 §2.2.2: the PCM VCA advances in 1023 peak steps. Its
+   step period doubles at each lower amplitude range. 32 V810 clocks are
+   approximately 1.49us, matching the documented 3Dh->3Fh example.
+   This is an HSYNC-quantized envelope, NOT an analog waveform simulation. */
+static unsigned SoundBox_PCMTarget(uint8 reg)
+{
+ return reg == 0 ? 0u : (unsigned)reg * 16u + 15u;
+}
+
+static uint32 SoundBox_PCMPeriod(unsigned level)
+{
+ if(level >= 512u) return 32u;
+ if(level >= 256u) return 64u;
+ if(level >= 128u) return 128u;
+ if(level >=  64u) return 256u;
+ if(level >=  32u) return 512u;
+ if(level >=  16u) return 1024u;
+ return 4096u;  // special end-step region; approx. 7.5ms for full-scale fade
+}
+
+static void SoundBox_PCMAdvance(v810_timestamp_t elapsed)
+{
+ if(elapsed <= 0) return;
+ bool changed = false;
+ for(unsigned ch = 0; ch < 2; ch++)
+ {
+  const unsigned target = SoundBox_PCMTarget(psg.CDDAVolume[ch]);
+  if(psg.CDDACurrentLevel[ch] == target)
+  {
+   psg.CDDAVolumeAccum[ch] = 0;
+   continue;
+  }
+  uint32 accum = psg.CDDAVolumeAccum[ch] + (uint32)elapsed;
+  unsigned current = psg.CDDACurrentLevel[ch];
+  while(current != target)
+  {
+   const unsigned next = current < target ? current + 1u : current - 1u;
+   const uint32 delay = SoundBox_PCMPeriod(current > next ? current : next);
+   if(accum < delay) break;
+   accum -= delay;
+   current = next;
+  }
+  changed |= current != psg.CDDACurrentLevel[ch];
+  psg.CDDACurrentLevel[ch] = (uint16)current;
+  psg.CDDAVolumeAccum[ch] = current == target ? 0 : accum;
+ }
+ if(changed)
+  SCSICD_SetCDDAVolume(0.50f * psg.CDDACurrentLevel[0] / 1023.0f,
+                        0.50f * psg.CDDACurrentLevel[1] / 1023.0f);
+}
+
+/* Called at TETSU start-of-HBlank, the falling edge of active-low HSYNC.
+   The V810 clock timestamp comes from the SAME timeline as register writes. */
+void SoundBox_HSync(v810_timestamp_t timestamp)
+{
+ SoundBox_PCMAdvance(timestamp - last_pcm_hsync_ts);
+ last_pcm_hsync_ts = timestamp;
+ if(!psg.ADPCMPendingValid) return;
+
+ SoundBox_ADPCMUpdate(timestamp);
+ const uint16 V = psg.ADPCMPendingControl;
+ psg.ADPCMPendingValid = false;
+ for(unsigned ch = 0; ch < 2; ch++)
+ {
+  if(!(psg.ADPCMControl & (0x10u << ch)) && (V & (0x10u << ch)))
+  {
+   if(ResetAntiClickEnabled)
+   {
+    psg.ResetAntiClick[ch] += (int64)((uint64)psg.ADPCMPredictor[ch] << 32);
+    SoundBox_Clamp64(&psg.ResetAntiClick[ch], -((int64)0x4000 << 32), ((int64)0x3FFF << 32));
+   }
+   psg.ADPCMPredictor[ch] = 0;
+   psg.StepSizeIndex[ch] = 0;
+   /* Reset the in-flight decompression/interpolation state as well as the
+      scale and predictor. Otherwise a pre-reset delta can leak into the
+      first held output or the next unrelated sound. */
+   psg.ADPCMDelta[ch] = 0;
+   psg.ADPCMHaveDelta[ch] = 0;
+   psg.ADPCMWhichNibble[ch] = 0;
+   psg.ADPCMHaveHalfWord[ch] = false;
+   psg.ADPCMInputValid[ch] = false;
+  }
+ }
+ /* HuC6230 §4.2: resetting both channels re-establishes the common
+    input cycle. Single-channel reset must not rephase the other one. */
+ if((V & 0x30u) == 0x30u && (psg.ADPCMControl & 0x30u) != 0x30u)
+ {
+  psg.ADPCMTransferEstablished = false;
+  psg.ADPCMTransferPhase = 0;
+  psg.ADPCMInputValid[0] = psg.ADPCMInputValid[1] = false;
+ }
+ psg.ADPCMControl = V;
 }
 
 /* Digital filter designed by mkfilter/mkshape/gencode   A.J. Fisher
@@ -243,12 +385,15 @@ v810_timestamp_t SoundBox_ADPCMUpdate(const v810_timestamp_t timestamp)
 			for(uint_fast8_t ch = 0; ch < 2; ch++)
 			{
 				// Keep playing our last halfword fetched even if KING ADPCM is disabled
-				if(psg.ADPCMHaveHalfWord[ch] || KINGADPCMControl & (1 << ch)) 
+				if(psg.ADPCMHaveHalfWord[ch] || psg.ADPCMInputValid[ch])
 				{
 						if(!psg.ADPCMWhichNibble[ch])
 						{
-							psg.ADPCMHalfWord[ch] = KING_GetADPCMHalfWord(ch);
-							psg.ADPCMHaveHalfWord[ch] = TRUE;
+						 if(!psg.ADPCMInputValid[ch])
+						  continue; /* no valid two-byte capture: output-level hold */
+						 psg.ADPCMHalfWord[ch] = psg.ADPCMInputWord[ch];
+						 psg.ADPCMInputValid[ch] = false;
+						 psg.ADPCMHaveHalfWord[ch] = TRUE;
 						}
 
 						// If the channel's reset bit is set, don't update its ADPCM state.
@@ -371,6 +516,7 @@ void SoundBox_ResetTS(const v810_timestamp_t ts_base)
 	PCE_PSG_ResetTS(pce_psg, ts_base / 3);
 	PCFX_RawAudio_ResetTS(&FXRawMixer, ts_base / 3);
 	adpcm_lastts = 0;
+ last_pcm_hsync_ts = 0;
 }
 
 void SoundBox_Reset(const v810_timestamp_t timestamp)
@@ -379,6 +525,12 @@ void SoundBox_Reset(const v810_timestamp_t timestamp)
 	PCE_PSG_Power(pce_psg, timestamp / 3);
 	PCFX_RawAudio_ResetLevels(&FXRawMixer);
 	psg.ADPCMControl = 0;
+ psg.ADPCMPendingControl = 0;
+ psg.ADPCMPendingValid = false;
+ memset(psg.CDDACurrentLevel, 0, sizeof(psg.CDDACurrentLevel));
+ memset(psg.CDDAVolumeAccum, 0, sizeof(psg.CDDAVolumeAccum));
+ psg.CDDAVolumeStateVersion = 1;
+ last_pcm_hsync_ts = 0;
 	memset(&psg.vf_xv, 0, sizeof(psg.vf_xv));
 	memset(&psg.vf_yv, 0, sizeof(psg.vf_yv));
 
@@ -397,6 +549,11 @@ void SoundBox_Reset(const v810_timestamp_t timestamp)
 	memset(psg.ADPCMWhichNibble, 0, sizeof(psg.ADPCMWhichNibble));
 	memset(psg.ADPCMHalfWord, 0, sizeof(psg.ADPCMHalfWord));
 	memset(psg.ADPCMHaveHalfWord, 0, sizeof(psg.ADPCMHaveHalfWord));
+ memset(psg.ADPCMInputWord, 0, sizeof(psg.ADPCMInputWord));
+ memset(psg.ADPCMInputValid, 0, sizeof(psg.ADPCMInputValid));
+ psg.ADPCMTransferPhase = 0;
+ psg.ADPCMTransferEstablished = false;
+ psg.ADPCMInputStateVersion = 1;
 	memset(psg.ADPCM_last, 0, sizeof(psg.ADPCM_last));
 
 	SCSICD_SetCDDAVolume(0.50f * psg.CDDAVolume[0] / 63, 0.50f * psg.CDDAVolume[1] / 63);
@@ -409,12 +566,20 @@ void SoundBox_Reset(const v810_timestamp_t timestamp)
 int SoundBox_StateAction(StateMem *sm, int load, int data_only)
 {
 	int ret = 1;
+ psg.CDDAVolumeStateVersion = load ? 0 : 1;
+ psg.ADPCMInputStateVersion = load ? 0 : 1;
 
 	ret &= PCE_PSG_StateAction(pce_psg, sm, load, data_only);
 
 	SFORMAT SoundBox_StateRegs[] =
 	{
 		SFVARN(psg.ADPCMControl, "ADPCMControl"),
+        SFVARN(psg.ADPCMPendingControl, "ADPCMPendingControl"),
+        SFVARN(psg.ADPCMPendingValid, "ADPCMPendingValid"),
+        SFARRAY16N(psg.CDDACurrentLevel, 2, "CDDACurrentLevel"),
+        SFARRAY32N(psg.CDDAVolumeAccum, 2, "CDDAVolumeAccum"),
+        SFVARN(psg.CDDAVolumeStateVersion, "CDDAVolumeStateVersion"),
+        SFVARN(last_pcm_hsync_ts, "PCMHSYNCTimestamp"),
 		SFARRAYN(&psg.ADPCMVolume[0][0], 2 * 2, "ADPCMVolume"),
 		SFARRAYN(psg.CDDAVolume, 2, "CDDAVolume"),
 		SFVARN(psg.bigdiv, "bigdiv"),
@@ -434,6 +599,11 @@ int SoundBox_StateAction(StateMem *sm, int load, int data_only)
 		SFARRAY32N(psg.ADPCMWhichNibble, 2, "ADPCMWNibble"),
 		SFARRAY16N(psg.ADPCMHalfWord, 2, "ADPCMHalfWord"),
 		SFARRAYBN(psg.ADPCMHaveHalfWord, 2, "ADPCMHHW"),
+        SFARRAY16N(psg.ADPCMInputWord, 2, "ADPCMInputWord"),
+        SFARRAYBN(psg.ADPCMInputValid, 2, "ADPCMInputValid"),
+        SFVARN(psg.ADPCMTransferPhase, "ADPCMTransferPhase"),
+        SFVARN(psg.ADPCMTransferEstablished, "ADPCMTransferEstablished"),
+        SFVARN(psg.ADPCMInputStateVersion, "ADPCMInputStateVersion"),
 		SFEND
 	};
  
@@ -452,7 +622,29 @@ int SoundBox_StateAction(StateMem *sm, int load, int data_only)
 			SoundBox_Clamp32(&psg.smalldiv, 1, 8);
 
 		}
-		SCSICD_SetCDDAVolume(0.50f * psg.CDDAVolume[0] / 63, 0.50f * psg.CDDAVolume[1] / 63);
+        if(!psg.CDDAVolumeStateVersion)
+        {
+         /* Old states have only target registers and had immediate volume. */
+         for(unsigned ch=0; ch<2; ch++)
+          psg.CDDACurrentLevel[ch] = (uint16)SoundBox_PCMTarget(psg.CDDAVolume[ch]);
+         memset(psg.CDDAVolumeAccum, 0, sizeof(psg.CDDAVolumeAccum));
+         psg.ADPCMPendingValid = false;
+        }
+        psg.CDDAVolumeStateVersion = 1;
+        if(!psg.ADPCMInputStateVersion)
+        {
+         /* Old states had no KRAM input latch. Preserve the in-progress
+            decoder word and establish a fresh cycle at the next HSYNC. */
+         memset(psg.ADPCMInputWord, 0, sizeof(psg.ADPCMInputWord));
+         memset(psg.ADPCMInputValid, 0, sizeof(psg.ADPCMInputValid));
+         psg.ADPCMTransferPhase = 0;
+         psg.ADPCMTransferEstablished = false;
+        }
+        psg.ADPCMInputStateVersion = 1;
+        psg.ADPCMTransferPhase &= 15u;
+        last_pcm_hsync_ts = 0;
+        SCSICD_SetCDDAVolume(0.50f * psg.CDDACurrentLevel[0] / 1023.0f,
+                              0.50f * psg.CDDACurrentLevel[1] / 1023.0f);
 	}
 	return(ret); 
 }
