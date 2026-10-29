@@ -1,0 +1,11 @@
+--- a/src/main.c
++++ b/src/main.c
+@@ -1224,7 +1224,7 @@
+ 		//eris_king_set_kram_write((OFFSET_PAGE), 1);
+ 		//king_kram_write_buffer(bg_game, SCREEN_WIDTH * SCREEN_HEIGHT); 
+ 		
+-		KingClear();
++		/* Benchmark: no clear */
+ 
+ 		//angle_x = (fixint)((angle_x + 1) & ANGLE_MASK);
+         angle_y = (fixint)((angle_y + 2) & ANGLE_MASK);

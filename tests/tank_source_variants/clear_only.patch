@@ -1,0 +1,11 @@
+--- a/src/main.c
++++ b/src/main.c
+@@ -1238,7 +1238,7 @@
+             0, 0, STARTING_Z_OFFSET
+         );*/
+         
+-		draw_3d_object_quads(
++		if (0) draw_3d_object_quads(
+             tank_vertices, 40,
+             tank_faces,    30,
+             angle_x, angle_y, angle_z,
