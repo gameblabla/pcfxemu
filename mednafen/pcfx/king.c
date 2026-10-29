@@ -3528,7 +3528,8 @@ void KING_Close(void)
  if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
   fprintf(stderr,"RAINBOW v23 MCU luma: columns=%u compare-blocks=%u exact-blocks=%u pixels=%u mismatches=%u\n",
           king->RBMCUColumns,king->RBMCUBlocks,king->RBMCUExactBlocks,king->RBMCUCompared,king->RBMCUDifferences);
- fprintf(stderr,"RAINBOW incremental RLE: blocks=%u tokens=%u\n",
+ if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0"))
+  fprintf(stderr,"RAINBOW incremental RLE: blocks=%u tokens=%u\n",
           king->RBAsyncRLEBlocks,king->RBAsyncRLETotalTokens);
  if(getenv("PCFX_RAINBOW_STATS") && strcmp(getenv("PCFX_RAINBOW_STATS"),"0") && king)
   fprintf(stderr,"RAINBOW grant-fed JPEG input: blocks=%u entropy-bytes=%u stuffed-pairs=%u split-pair-waits=%u\n",
