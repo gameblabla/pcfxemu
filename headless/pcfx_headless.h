@@ -73,6 +73,21 @@ enum
     PCFX_PIXEL_FORMAT_RGB555 = 5
 };
 
+/* Width mode only affects output conversion. Internal 21MHz mixing is lossless. */
+enum { PCFX_OUTPUT_AUTO = 0, PCFX_OUTPUT_DOTS = 1, PCFX_OUTPUT_CLOCK = 2 };
+void pcfx_headless_set_horizontal_width_mode(PCFX_Headless* emu, int mode);
+int pcfx_headless_get_horizontal_width_mode(PCFX_Headless* emu);
+/* Diagnostic analog display filter: 0=off, 1=component, 2=S-Video. Not DAC calibrated. */
+void pcfx_headless_set_analog_mode(PCFX_Headless* emu, int mode);
+int pcfx_headless_get_analog_mode(PCFX_Headless* emu);
+/* VDC HSYNC alignment in TETSU master clocks; default historical 18. */
+void pcfx_headless_set_vdc_phase(PCFX_Headless* emu, int ticks);
+int pcfx_headless_get_vdc_phase(PCFX_Headless* emu);
+/* 0=odd field no offset, 1=even field +half scanline; not analog sync waveform. */
+int pcfx_headless_get_field_half_line_offset(PCFX_Headless* emu);
+const void* pcfx_headless_get_raw_pixels(const PCFX_Headless* emu,
+        int* width, int* height, int* pitch_pixels);
+
 const void* pcfx_headless_get_pixels(const PCFX_Headless* emu, int* width, int* height, int* pitch_pixels, int* pixel_format, int* bytes_per_pixel);
 const uint16_t* pcfx_headless_get_rgb565(const PCFX_Headless* emu, int* width, int* height, int* pitch_pixels);
 void pcfx_headless_get_display_rect(const PCFX_Headless* emu, int* x, int* y, int* width, int* height);

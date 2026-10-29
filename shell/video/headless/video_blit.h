@@ -4,9 +4,9 @@
 #include <stdint.h>
 #include "surface.h"
 
-#define HOST_WIDTH_RESOLUTION 512
+#define HOST_WIDTH_RESOLUTION 1024
 #define HOST_HEIGHT_RESOLUTION 480
-#define BACKBUFFER_WIDTH_RESOLUTION 512
+#define BACKBUFFER_WIDTH_RESOLUTION 1024
 #define BACKBUFFER_HEIGHT_RESOLUTION 480
 
 #ifdef __cplusplus
@@ -31,6 +31,16 @@ void pcfx_headless_video_note_field(int odd);
 int pcfx_headless_video_last_field_is_odd(void);
 int pcfx_headless_video_is_interlaced(void);
 void pcfx_headless_video_set_display_width(int width);
+/* Output: 0=auto native dots with mixed-clock preservation (default),
+ * 1=force 256/341 dots, 2=1024 ticks in 7MHz mode. */
+void pcfx_headless_video_set_width_mode(int mode);
+int pcfx_headless_video_get_width_mode(void);
+/* Approximate bandwidth filter, presentation only. Raw mixer stays untouched. */
+void pcfx_headless_video_set_analog_mode(int mode);
+int pcfx_headless_video_get_analog_mode(void);
+/* +0.5 field-line spacing for the even interlaced field. */
+int pcfx_headless_video_field_half_line_offset(void);
+const MDFN_Pixel* pcfx_headless_video_raw_pixels(int* width, int* height, int* pitch_pixels);
 const MDFN_Pixel* pcfx_headless_video_pixels(int* width, int* height, int* pitch_pixels);
 int pcfx_headless_video_bytes_per_pixel(void);
 int pcfx_headless_video_pixel_format(void);

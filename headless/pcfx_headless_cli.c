@@ -49,9 +49,15 @@ static void usage(const char* argv0)
         "  --commands FILE         Apply controller command list before each matching frame\n"
         "  --auto-run              Pulse RUN/START during early boot; useful for PC-FXGA BIOS CD prompts\n"
         "  --pad BUTTONS           Initial pad state, e.g. START+A or 0x0081\n"
+        "  --horizontal auto|dots|clock  Output 256/341 dots, or 1024-clock mixed mode (default: auto)\n"
+        ""
+        "  --analog off|component|svideo  Approximate output bandwidth (default: off, raw exact)\n"
+        "  --vdc-phase N           Adjustable VDC HSYNC phase in mixer ticks (-64..64, default: 18)\n"
         "  --screenshot FILE.png   Save final screenshot as 8-bit RGBA PNG\n"
         "  --y4m FILE.y4m          Capture every executed frame as YUV4MPEG2 C444\n"
         "  --wav FILE.wav          Capture stereo signed 16-bit PCM audio\n"
+        "  --frame-csv FILE.csv    Per-emulated-frame video-change diagnostic (no timing changes)\n"
+        "  --frame-csv-rect X,Y,W,H  Analyze a display crop, to exclude overlays/HUD\n"
         "  --dump REGION FILE      Dump memory region: ram, saveram, or state\n"
         "  --state-in FILE         Load emulator state before running frames\n"
         "  --state-out FILE        Save emulator state after running frames\n"
@@ -441,6 +447,77 @@ static const char* need_arg(int* i, int argc, char** argv, const char* opt)
     return argv[*i];
 }
 
+/* Video cadence instrumentation is deliberately frontend-only: it does not
+ * alter V810 clocks, TETSU frame pacing, or the rendered framebuffer. */
+struct FrameDiagnostic
+{
+    FILE* output;
+    uint8_t* previous;
+    size_t previous_capacity;
+    int prev_w, prev_h, prev_bpp;
+    uint64_t frame_count;
+    int x,y,w,h;
+};
+
+static int frame_diagnostic_write(struct FrameDiagnostic* d, PCFX_Headless* emu,
+                                  uint64_t frame)
+{
+    int w=0,h=0,pitch=0,format=0,bpp=0;
+    const uint8_t* pixels = (const uint8_t*)pcfx_headless_get_pixels(emu,&w,&h,&pitch,&format,&bpp);
+    if(!pixels || w < 1 || h < 1 || pitch < w || (bpp != 2 && bpp != 4))
+        return 0;
+    int x0=d->x, y0=d->y, x1=w, y1=h;
+    if(d->w > 0 && d->h > 0)
+    {
+        x1=x0+d->w;
+        y1=y0+d->h;
+    }
+    if(x0 < 0) x0=0;
+    if(y0 < 0) y0=0;
+    if(x0 >= w || y0 >= h) return 0;
+    if(x1 > w) x1=w;
+    if(y1 > h) y1=h;
+    if(x1 <= x0 || y1 <= y0) return 0;
+    size_t row_bytes=(size_t)(x1-x0)*(size_t)bpp;
+    size_t capacity=row_bytes*(size_t)(y1-y0);
+    if(capacity > d->previous_capacity)
+    {
+        uint8_t* temp=(uint8_t*)realloc(d->previous, capacity);
+        if(!temp) return 0;
+        d->previous=temp;
+        d->previous_capacity=capacity;
+    }
+    int comparable=(d->frame_count && d->prev_w==(x1-x0) &&
+                    d->prev_h==(y1-y0) && d->prev_bpp==bpp);
+    uint64_t hash=UINT64_C(14695981039346656037);
+    size_t changed=0;
+    for(int y=y0; y<y1; y++)
+    {
+        const uint8_t* src=pixels+((size_t)y*(size_t)pitch+(size_t)x0)*(size_t)bpp;
+        uint8_t* dst=d->previous+(size_t)(y-y0)*row_bytes;
+        for(size_t i=0;i<row_bytes;i++)
+        {
+            hash ^= src[i];
+            hash *= UINT64_C(1099511628211);
+        }
+        for(size_t x=0;x<row_bytes;x+=(size_t)bpp)
+        {
+            int different=0;
+            for(int k=0;k<bpp;k++)
+                different |= (comparable && src[x+k] != dst[x+k]);
+            changed += different;
+        }
+        memcpy(dst,src,row_bytes);
+    }
+    d->prev_w=x1-x0;
+    d->prev_h=y1-y0;
+    d->prev_bpp=bpp;
+    d->frame_count++;
+    return fprintf(d->output,"%llu,%d,%d,%zu,%016llx\n",
+        (unsigned long long)frame, x1-x0, y1-y0, changed,
+        (unsigned long long)hash) >= 0;
+}
+
 int main(int argc, char** argv)
 {
     const char* bios_dir = ".";
@@ -449,11 +526,16 @@ int main(int argc, char** argv)
     const char* screenshot = NULL;
     const char* y4m = NULL;
     const char* wav = NULL;
+    const char* frame_csv = NULL;
+    struct FrameDiagnostic diagnostic = {0};
     const char* state_in = NULL;
     const char* state_out = NULL;
     const char* command_file = NULL;
     const char* game = NULL;
     uint64_t frames = 1;
+    int horizontal_width_mode = PCFX_OUTPUT_AUTO;
+    int analog_mode = 0;
+    int vdc_phase = 18;
     uint16_t initial_pad = 0;
     bool have_initial_pad = false;
     bool auto_run = false;
@@ -480,12 +562,46 @@ int main(int argc, char** argv)
             bios_dir_explicit = true;
         }
         else if(!strcmp(a, "--save-dir")) save_dir = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--horizontal"))
+        {
+            const char* value = need_arg(&i, argc, argv, a);
+            if(!strcmp(value, "auto")) horizontal_width_mode = PCFX_OUTPUT_AUTO;
+            else if(!strcmp(value, "dots")) horizontal_width_mode = PCFX_OUTPUT_DOTS;
+            else if(!strcmp(value, "clock") || !strcmp(value, "1024")) horizontal_width_mode = PCFX_OUTPUT_CLOCK;
+            else { fprintf(stderr, "Invalid --horizontal: %s\n", value); return 2; }
+        }
+        else if(!strcmp(a, "--analog"))
+        {
+            const char* v = need_arg(&i,argc,argv,a);
+            if(!strcmp(v,"off")) analog_mode=0;
+            else if(!strcmp(v,"component")) analog_mode=1;
+            else if(!strcmp(v,"svideo")) analog_mode=2;
+            else { fprintf(stderr,"Invalid analog mode: %s\n",v); return 2; }
+        }
+        else if(!strcmp(a,"--vdc-phase"))
+        {
+            const char* v = need_arg(&i,argc,argv,a);
+            char* end=NULL;
+            long t=strtol(v,&end,10);
+            if(!end || *end || t < -64 || t > 64) { fprintf(stderr,"--vdc-phase must be -64..64 ticks\n"); return 2; }
+            vdc_phase=(int)t;
+        }
         else if(!strcmp(a, "--frames")) frames = strtoull(need_arg(&i, argc, argv, a), NULL, 0);
         else if(!strcmp(a, "--commands")) command_file = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--auto-run")) auto_run = true;
         else if(!strcmp(a, "--screenshot")) screenshot = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--y4m")) y4m = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--wav")) wav = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--frame-csv")) frame_csv = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--frame-csv-rect"))
+        {
+            const char* rect=need_arg(&i,argc,argv,a);
+            char tail;
+            if(sscanf(rect,"%d,%d,%d,%d%c", &diagnostic.x,&diagnostic.y,
+                      &diagnostic.w,&diagnostic.h,&tail)!=4 ||
+               diagnostic.x<0 || diagnostic.y<0 || diagnostic.w<1 || diagnostic.h<1)
+            { fprintf(stderr,"Invalid --frame-csv-rect; use X,Y,W,H with positive W,H\n"); return 2; }
+        }
         else if(!strcmp(a, "--state-in")) state_in = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--state-out")) state_out = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--fast-video")) fast_video = true;
@@ -580,6 +696,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    pcfx_headless_set_horizontal_width_mode(emu, horizontal_width_mode);
+    pcfx_headless_set_analog_mode(emu, analog_mode);
+    pcfx_headless_set_vdc_phase(emu, vdc_phase);
     int status = 1;
     size_t next_cmd = 0;
     if(!(pcfxboot ? pcfx_headless_load_pcfxboot(emu, game) : pcfx_headless_load_cd(emu, game)))
@@ -609,6 +728,14 @@ int main(int argc, char** argv)
         goto out;
     }
 
+    if(frame_csv)
+    {
+        diagnostic.output = fopen(frame_csv,"w");
+        if(!diagnostic.output) { perror(frame_csv); goto out; }
+        if(fputs("frame,region_width,region_height,changed_pixels,fnv64\n", diagnostic.output)<0)
+            goto out;
+    }
+
     for(uint64_t f = 0; f < frames; f++)
     {
         while(next_cmd < commands.count && commands.data[next_cmd].frame == f)
@@ -616,6 +743,11 @@ int main(int argc, char** argv)
         if(!pcfx_headless_run_frame(emu))
         {
             fprintf(stderr, "Run failed at frame %llu: %s\n", (unsigned long long)f, pcfx_headless_last_error(emu));
+            goto out;
+        }
+        if(diagnostic.output && !frame_diagnostic_write(&diagnostic,emu,f))
+        {
+            fprintf(stderr,"Frame diagnostic failed at frame %llu\n", (unsigned long long)f);
             goto out;
         }
     }
@@ -651,6 +783,8 @@ int main(int argc, char** argv)
     status = 0;
 
 out:
+    if(diagnostic.output) fclose(diagnostic.output);
+    free(diagnostic.previous);
     pcfx_headless_destroy(emu);
     free(dumps.data);
     free(commands.data);

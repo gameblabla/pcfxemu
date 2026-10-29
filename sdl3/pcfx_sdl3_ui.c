@@ -25,7 +25,7 @@
 #define PATH_MAX 4096
 #endif
 
-#define EMU_W 512
+#define EMU_W 1024
 #define EMU_H 480
 #define PCFX_FPS (60000.0 / 1001.0)
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -232,6 +232,9 @@ struct App
     bool enable_3d_hardware;
     int system_mode;
     int aspect; /* 0=4:3, 1=integer sharp, 2=stretch */
+    int width_mode;
+    int analog_mode;
+    int vdc_phase;
     int state_slot;
     int controller_type[2]; /* per port: 0=gamepad, 1=mouse */
     int menu_scroll[MENU_TAB_COUNT]; /* first visible content row per tab */
@@ -566,6 +569,12 @@ static void load_sdl3_config(struct App* app, const char* home_dir)
             app->system_mode = parse_int_clamped(val, app->system_mode, PCFX_UI_MODE_PCFX, PCFX_UI_MODE_AUTO);
         else if(!strcmp(key, "aspect"))
             app->aspect = parse_int_clamped(val, app->aspect, 0, 2);
+        else if(!strcmp(key, "horizontal_width"))
+            app->width_mode = parse_int_clamped(val, app->width_mode, PCFX_OUTPUT_AUTO, PCFX_OUTPUT_CLOCK);
+        else if(!strcmp(key, "analog_mode"))
+            app->analog_mode = parse_int_clamped(val, app->analog_mode, 0, 2);
+        else if(!strcmp(key, "vdc_phase"))
+            app->vdc_phase = parse_int_clamped(val, app->vdc_phase, -64, 64);
         else if(!strcmp(key, "state_slot"))
             app->state_slot = parse_int_clamped(val, app->state_slot, 0, 9);
         else if(!strcmp(key, "controller_type"))   /* legacy single-port key */
@@ -617,6 +626,9 @@ static bool save_sdl3_config(const struct App* app, const char* home_dir)
     fprintf(fp, "fast_video=%d\n", app->fast_video ? 1 : 0);
     fprintf(fp, "system_mode=%d\n", app->system_mode);
     fprintf(fp, "aspect=%d\n", app->aspect);
+    fprintf(fp, "horizontal_width=%d\n", app->width_mode);
+    fprintf(fp, "analog_mode=%d\n", app->analog_mode);
+    fprintf(fp, "vdc_phase=%d\n", app->vdc_phase);
     fprintf(fp, "state_slot=%d\n", app->state_slot);
     fprintf(fp, "controller_type_p1=%d\n", app->controller_type[0]);
     fprintf(fp, "controller_type_p2=%d\n", app->controller_type[1]);
@@ -1399,6 +1411,9 @@ static bool recreate_emulator_for_path(struct App* app, const char* selected_pat
         set_message(app, "Failed to recreate emulator core");
         return false;
     }
+    pcfx_headless_set_horizontal_width_mode(app->emu, app->width_mode);
+    pcfx_headless_set_analog_mode(app->emu, app->analog_mode);
+    pcfx_headless_set_vdc_phase(app->emu, app->vdc_phase);
     pcfx_headless_set_audio_callback(app->emu, audio_cb, app->audio_stream);
     apply_all_controller_types(app);
     release_mouse_capture(app);
@@ -1669,7 +1684,7 @@ static int menu_item_count(const struct App* app, int tab)
         case MENU_TAB_MEDIA: return (int)ARRAY_SIZE(k_media_actions);
 #endif
         case MENU_TAB_SYSTEM: return 9;
-        case MENU_TAB_VIDEO: return 5;
+        case MENU_TAB_VIDEO: return 8;
         case MENU_TAB_AUDIO: return 4;
         case MENU_TAB_STATES: return 5;
         case MENU_TAB_CONTROLS: return 11;
@@ -1764,6 +1779,9 @@ static void menu_item_label(const struct App* app, int tab, int index, char* out
                 case 2: snprintf(out, out_size, "Scanlines: %s", app->scanlines ? "on" : "off"); return;
                 case 3: snprintf(out, out_size, "Interlace output: %s", pcfx_interlace_mode_name(app->interlace_mode)); return;
                 case 4: snprintf(out, out_size, "Fullscreen: %s", app->fullscreen ? "on" : "off"); return;
+                case 5: snprintf(out, out_size, "Horizontal output: %s", app->width_mode == PCFX_OUTPUT_AUTO ? "Auto native / mixed clocks" : (app->width_mode == PCFX_OUTPUT_DOTS ? "Physical dots" : "1024 mixer clocks")); return;
+                case 6: snprintf(out, out_size, "Analog filter: %s", app->analog_mode == 0 ? "off" : (app->analog_mode == 1 ? "component estimate" : "S-Video estimate")); return;
+                case 7: snprintf(out, out_size, "VDC HSYNC phase: %d ticks (uncalibrated)", app->vdc_phase); return;
             }
             break;
         case MENU_TAB_AUDIO:
@@ -1993,6 +2011,21 @@ static void activate_menu_item(struct App* app)
                     app->fullscreen = !app->fullscreen;
                     SDL_SetWindowFullscreen(app->window, app->fullscreen);
                     set_message(app, app->fullscreen ? "Fullscreen" : "Windowed");
+                    break;
+                case 5:
+                    app->width_mode = (app->width_mode + 1) % 3;
+                    pcfx_headless_set_horizontal_width_mode(app->emu, app->width_mode);
+                    set_message(app, "Horizontal width: %s", app->width_mode == PCFX_OUTPUT_AUTO ? "automatic" : (app->width_mode == PCFX_OUTPUT_DOTS ? "physical dots" : "1024 clocks"));
+                    break;
+                case 6:
+                    app->analog_mode = (app->analog_mode + 1) % 3;
+                    pcfx_headless_set_analog_mode(app->emu, app->analog_mode);
+                    set_message(app, "Analog filter: %s", app->analog_mode == 0 ? "off" : (app->analog_mode == 1 ? "component estimate" : "S-Video estimate"));
+                    break;
+                case 7:
+                    app->vdc_phase = app->vdc_phase < 24 ? app->vdc_phase + 1 : 12;
+                    pcfx_headless_set_vdc_phase(app->emu, app->vdc_phase);
+                    set_message(app, "VDC HSYNC phase: %d ticks", app->vdc_phase);
                     break;
             }
             break;
@@ -2500,7 +2533,7 @@ static void handle_event(struct App* app, const SDL_Event* e)
 static void print_usage(const char* argv0)
 {
     fprintf(stderr,
-            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--integer-scale|--native-aspect] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--weave|--bob|--raw-interlace|--motion-adaptive|--pair-locked] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
+            "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--integer-scale|--native-aspect] [--horizontal auto|dots|clock] [--analog off|component|svideo] [--vdc-phase -64..64] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--weave|--bob|--raw-interlace|--motion-adaptive|--pair-locked] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
             " [--physical-cd[=DEVICE]]"
 #endif
@@ -2532,6 +2565,9 @@ int main(int argc, char** argv)
     app.menu_hover_tab = -1;
     app.menu_hover_item = -1;
     app.aspect = 0;
+    app.width_mode = PCFX_OUTPUT_AUTO;
+    app.analog_mode = 0;
+    app.vdc_phase = 18;
     app.adpcm_buggy_codec_mode = PCFX_ADPCM_BUGGY_AUTO;
     app.adpcm_suppress_reset_clicks = true;
     app.cd_speed = 2;
@@ -2577,6 +2613,34 @@ int main(int argc, char** argv)
             app.fullscreen = false;
         else if(!strcmp(argv[i], "--integer-scale") || !strcmp(argv[i], "--native-aspect"))
             app.aspect = 1;
+        else if(!strcmp(argv[i], "--horizontal") && i + 1 < argc)
+        {
+            const char* v = argv[++i];
+            if(!strcmp(v, "auto")) app.width_mode = PCFX_OUTPUT_AUTO;
+            else if(!strcmp(v, "dots")) app.width_mode = PCFX_OUTPUT_DOTS;
+            else if(!strcmp(v, "clock") || !strcmp(v, "1024")) app.width_mode = PCFX_OUTPUT_CLOCK;
+            else { fprintf(stderr, "Unknown --horizontal mode: %s\n", v); return 2; }
+        }
+        else if(!strcmp(argv[i], "--analog") && i + 1 < argc)
+        {
+            const char* v = argv[++i];
+            if(!strcmp(v, "off")) app.analog_mode = 0;
+            else if(!strcmp(v, "component")) app.analog_mode = 1;
+            else if(!strcmp(v, "svideo")) app.analog_mode = 2;
+            else { fprintf(stderr, "Unknown --analog mode: %s\n", v); return 2; }
+        }
+        else if(!strcmp(argv[i], "--vdc-phase") && i + 1 < argc)
+        {
+            const char* v = argv[++i];
+            char* end = NULL;
+            long ticks = strtol(v, &end, 10);
+            if(!end || *end || ticks < -64 || ticks > 64)
+            {
+                fprintf(stderr, "Invalid --vdc-phase: %s\n", v);
+                return 2;
+            }
+            app.vdc_phase = (int)ticks;
+        }
         else if(!strcmp(argv[i], "--stretch"))
             app.aspect = 2;
         else if(!strcmp(argv[i], "--nearest"))
@@ -2793,6 +2857,9 @@ int main(int argc, char** argv)
         SDL_Quit();
         return 1;
     }
+    pcfx_headless_set_horizontal_width_mode(app.emu, app.width_mode);
+    pcfx_headless_set_analog_mode(app.emu, app.analog_mode);
+    pcfx_headless_set_vdc_phase(app.emu, app.vdc_phase);
     pcfx_headless_set_audio_callback(app.emu, audio_cb, app.audio_stream);
     apply_all_controller_types(&app);
     if(app.game_path[0])

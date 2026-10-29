@@ -30,6 +30,14 @@ int pcfx_headless_video_pixel_format(void);
 const uint16_t* pcfx_headless_video_rgb565(int* width, int* height, int* pitch_pixels);
 const uint8_t* pcfx_headless_video_rgba8888(int* width, int* height, int* pitch_pixels);
 void pcfx_headless_video_get_display_rect(int* x, int* y, int* width, int* height);
+void pcfx_headless_video_set_width_mode(int mode);
+int pcfx_headless_video_get_width_mode(void);
+void pcfx_headless_video_set_analog_mode(int mode);
+int pcfx_headless_video_get_analog_mode(void);
+int pcfx_headless_video_field_half_line_offset(void);
+void KING_SetVDCHSyncPhase(int ticks);
+int KING_GetVDCHSyncPhase(void);
+const void* pcfx_headless_video_raw_pixels(int* width, int* height, int* pitch_pixels);
 
 extern void Emu_Init(void);
 extern void Load_Configuration(void);
@@ -470,6 +478,51 @@ int pcfx_headless_soft_reset(PCFX_Headless* emu)
     PCFX_SoftReset();
     emu->frame_count = 0;
     return 1;
+}
+
+void pcfx_headless_set_horizontal_width_mode(PCFX_Headless* emu, int mode)
+{
+    (void)emu;
+    pcfx_headless_video_set_width_mode(mode);
+}
+
+int pcfx_headless_get_horizontal_width_mode(PCFX_Headless* emu)
+{
+    (void)emu;
+    return pcfx_headless_video_get_width_mode();
+}
+
+void pcfx_headless_set_vdc_phase(PCFX_Headless* emu, int ticks)
+{
+    (void)emu;
+    KING_SetVDCHSyncPhase(ticks);
+}
+int pcfx_headless_get_vdc_phase(PCFX_Headless* emu)
+{
+    (void)emu;
+    return KING_GetVDCHSyncPhase();
+}
+void pcfx_headless_set_analog_mode(PCFX_Headless* emu, int mode)
+{
+    (void)emu;
+    pcfx_headless_video_set_analog_mode(mode);
+}
+int pcfx_headless_get_analog_mode(PCFX_Headless* emu)
+{
+    (void)emu;
+    return pcfx_headless_video_get_analog_mode();
+}
+int pcfx_headless_get_field_half_line_offset(PCFX_Headless* emu)
+{
+    (void)emu;
+    return pcfx_headless_video_field_half_line_offset();
+}
+
+const void* pcfx_headless_get_raw_pixels(const PCFX_Headless* emu,
+        int* width, int* height, int* pitch_pixels)
+{
+    (void)emu;
+    return pcfx_headless_video_raw_pixels(width, height, pitch_pixels);
 }
 
 const void* pcfx_headless_get_pixels(const PCFX_Headless* emu, int* width, int* height, int* pitch_pixels, int* pixel_format, int* bytes_per_pixel)
