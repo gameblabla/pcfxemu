@@ -17,3 +17,10 @@ Features :
 - Allowing cartridge boot of binary executables (as used for PCFXUploader for instance and related), namely the PCFXBoot images.
 - MCP Server for AI tools, like GearSystem. There's a headless mode that can do some things but not as flexible
 - A proper Qt-like UI, for those that neither like the Web or the basic SDL3 ui.
+
+# Video color output
+
+The final HuC6261 YUV-to-RGB display conversion uses the inverse analog-YUV
+matrix and `lrint()` rounding for its chroma lookup table. The formula and its
+hardware-calibration limits are described in
+[`docs/YUV_INVERSE_MATRIX_V27.md`](docs/YUV_INVERSE_MATRIX_V27.md).
