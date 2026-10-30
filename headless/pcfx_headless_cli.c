@@ -57,6 +57,8 @@ static void usage(const char* argv0)
         "  --y4m FILE.y4m          Capture every executed frame as YUV4MPEG2 C444\n"
         "  --wav FILE.wav          Capture stereo signed 16-bit PCM audio\n"
         "  --frame-csv FILE.csv    Per-emulated-frame video-change diagnostic (no timing changes)\n"
+        "  --ram-csv FILE.csv      Log RAM counter words once per emulated field\n"
+        "  --ram-word OFFSET       Monitor an offset within console RAM (repeatable; hex accepted)\n"
         "  --frame-csv-rect X,Y,W,H  Analyze a display crop, to exclude overlays/HUD\n"
         "  --dump REGION FILE      Dump memory region: ram, saveram, or state\n"
         "  --state-in FILE         Load emulator state before running frames\n"
@@ -527,6 +529,10 @@ int main(int argc, char** argv)
     const char* y4m = NULL;
     const char* wav = NULL;
     const char* frame_csv = NULL;
+    const char* ram_csv = NULL;
+    size_t ram_offsets[16];
+    size_t ram_offset_count = 0;
+    FILE* ram_output = NULL;
     struct FrameDiagnostic diagnostic = {0};
     const char* state_in = NULL;
     const char* state_out = NULL;
@@ -593,6 +599,17 @@ int main(int argc, char** argv)
         else if(!strcmp(a, "--y4m")) y4m = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--wav")) wav = need_arg(&i, argc, argv, a);
         else if(!strcmp(a, "--frame-csv")) frame_csv = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--ram-csv")) ram_csv = need_arg(&i, argc, argv, a);
+        else if(!strcmp(a, "--ram-word"))
+        {
+            const char* val = need_arg(&i, argc, argv, a);
+            char* end = NULL;
+            unsigned long v = strtoul(val, &end, 0);
+            if(!end || *end || ram_offset_count >= 16 || v >= 0x200000 || (v & 3))
+            { fprintf(stderr,"Invalid --ram-word offset: %s\n", val); return 2; }
+            ram_offsets[ram_offset_count++] = (size_t)v;
+        }
+
         else if(!strcmp(a, "--frame-csv-rect"))
         {
             const char* rect=need_arg(&i,argc,argv,a);
@@ -736,6 +753,16 @@ int main(int argc, char** argv)
             goto out;
     }
 
+    if(ram_csv)
+    {
+        if(!ram_offset_count) { fprintf(stderr,"--ram-csv requires --ram-word\n"); goto out; }
+        ram_output=fopen(ram_csv,"w");
+        if(!ram_output) { perror(ram_csv); goto out; }
+        fputs("frame",ram_output);
+        for(size_t j=0;j<ram_offset_count;j++) fprintf(ram_output,",ram_0x%zx",ram_offsets[j]);
+        fputc('\n',ram_output);
+    }
+
     for(uint64_t f = 0; f < frames; f++)
     {
         while(next_cmd < commands.count && commands.data[next_cmd].frame == f)
@@ -744,6 +771,18 @@ int main(int argc, char** argv)
         {
             fprintf(stderr, "Run failed at frame %llu: %s\n", (unsigned long long)f, pcfx_headless_last_error(emu));
             goto out;
+        }
+        if(ram_output)
+        {
+            fprintf(ram_output,"%llu",(unsigned long long)f);
+            for(size_t j=0;j<ram_offset_count;j++)
+            {
+                uint32_t value=0;
+                if(!pcfx_headless_read_ram_u32(emu,ram_offsets[j],&value))
+                { fprintf(stderr,"Invalid RAM word read at 0x%zx\n",ram_offsets[j]); goto out; }
+                fprintf(ram_output,",%u",(unsigned)value);
+            }
+            fputc('\n',ram_output);
         }
         if(diagnostic.output && !frame_diagnostic_write(&diagnostic,emu,f))
         {
@@ -783,6 +822,7 @@ int main(int argc, char** argv)
     status = 0;
 
 out:
+    if(ram_output) fclose(ram_output);
     if(diagnostic.output) fclose(diagnostic.output);
     free(diagnostic.previous);
     pcfx_headless_destroy(emu);

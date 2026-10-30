@@ -1596,7 +1596,7 @@ static void DoREADCDCAP10(const uint8 *cdb)
   }
  }
 
- ret_bl = 2048;
+ ret_bl = (WhichSystem == SCSICD_PCFX) ? PCFXSectorBytes : 2048;
 
  MDFN_en32msb(&data_in[0], ret_lba);
  MDFN_en32msb(&data_in[4], ret_bl);

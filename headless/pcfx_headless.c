@@ -838,6 +838,16 @@ int pcfx_headless_close_wav(PCFX_Headless* emu)
     return ret == 0 ? 1 : set_error(emu, "failed to close WAV file");
 }
 
+int pcfx_headless_read_ram_u32(const PCFX_Headless* emu, size_t offset, uint32_t* value)
+{
+    size_t size = 0;
+    const uint8_t* ram = emu ? PCFX_Headless_CoreRAM(&size) : NULL;
+    if(!ram || !value || offset > size || size - offset < 4) return 0;
+    *value = (uint32_t)ram[offset] | ((uint32_t)ram[offset+1]<<8) |
+             ((uint32_t)ram[offset+2]<<16) | ((uint32_t)ram[offset+3]<<24);
+    return 1;
+}
+
 int pcfx_headless_dump_memory(PCFX_Headless* emu, const char* region, const char* path)
 {
     if(!emu || !region || !path)

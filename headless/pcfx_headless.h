@@ -130,6 +130,8 @@ int pcfx_headless_close_y4m(PCFX_Headless* emu);
 int pcfx_headless_open_wav(PCFX_Headless* emu, const char* path);
 int pcfx_headless_close_wav(PCFX_Headless* emu);
 
+/* Read one RAM word for read-only frame cadence diagnostics. Offset is from RAM start. */
+int pcfx_headless_read_ram_u32(const PCFX_Headless* emu, size_t offset, uint32_t* value);
 int pcfx_headless_dump_memory(PCFX_Headless* emu, const char* region, const char* path);
 int pcfx_headless_save_state(PCFX_Headless* emu, const char* path);
 int pcfx_headless_load_state(PCFX_Headless* emu, const char* path);
