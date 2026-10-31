@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <stdio.h>
 #include "scsicd.h"
 #include "cdromif.h"
 #include "seektime_pcfx.h"
@@ -41,46 +42,129 @@ static void (*CDIRQCallback)(int);
 static void (*CDStuffSubchannels)(uint8, int);
 static PCFX_RawAudioMixer *cdda_mixer;
 static int WhichSystem;
-/* SCSI logical block length selected by the PC-FX initiator.  Changing this
- * alters the bytes exposed per physical sector, never the CD spindle rate. */
-static uint16 PCFXSectorBytes = 2048;
-
-static bool PCFXGetSectorView(const uint8 *raw, unsigned requested,
-                             const uint8 **payload, unsigned *length)
+/* ------------------------------------------------------------------------
+ * PC-FX CD-ROM drive read-format model.
+ *
+ * Source: NEC SCSI documentation (SCSICMD_E.txt: 1-9 MODE SELECT, ch.3
+ * SCSI-2 parameter list, ch.4 vendor-unique parameter list) and the NEC
+ * CDR-75/77 manual (error judgement follows the sector header).
+ *
+ *  - MODE SELECT with PF=0 uses the 10-byte vendor-unique list: byte 4 =
+ *    XA|SH|0|0|0|EC|EJ(2), byte 9 = retry count.  Parameter list length 0
+ *    restores the defaults.
+ *  - MODE SELECT with PF=1 uses the SCSI-2 list: 4-byte header, optional
+ *    8-byte block descriptor (density at +0, block length at +5..+7), pages.
+ *  - Defaults depend on the DISC ID in TOC point A0 (PSEC): ID 20h (CD-ROM
+ *    XA) -> XA=1,SH=1,EJ=01, anything else -> XA=0,SH=0,EJ=00.  Retry = 15.
+ *  - Defaults are restored by power-on, SCSI bus reset and disc change.
+ *
+ * Nothing here is derived from emulator folklore: block lengths that the
+ * drive does not list (for example 2352, or 2324 under density 00h) are
+ * refused with CHECK CONDITION.  Set PCFXEMU_CD_LEGACY=1 to restore the
+ * earlier permissive behaviour for A/B comparisons.
+ * ---------------------------------------------------------------------- */
+typedef struct
 {
-    const bool mode1 = raw[15] == 1;
-    const bool mode2 = raw[15] == 2;
-    const bool form2 = mode2 && (raw[18] & 0x20) != 0;
+	uint8  xa, sh, ec, ej;		/* vendor-unique list byte 4 */
+	uint8  retry;			/* vendor-unique list byte 9 */
+	uint8  scsi2;			/* set through PF=1 block descriptor */
+	uint8  density;			/* SCSI-2 density code (00h / 81h) */
+	uint16 block_len;		/* SCSI-2 block length */
+} PCFXReadMode;
 
-    if(!mode1 && !mode2)
-        return false;
-    switch(requested)
-    {
-        case 2048:
-            *payload = raw + (mode2 ? 24 : 16);
-            *length = 2048;
-            return true;
-        case 2324:
-            if(!form2) return false;
-            *payload = raw + 24;
-            *length = 2324;
-            return true;
-        case 2336:
-            if(!mode2) return false;
-            *payload = raw + 16;
-            *length = 2336;
-            return true;
-        case 2340:
-            *payload = raw + 12;
-            *length = 2340;
-            return true;
-        case 2352:
-            *payload = raw;
-            *length = 2352;
-            return true;
-        default:
-            return false;
-    }
+static PCFXReadMode PCFXMode;
+/* Transfer length of the current mode.  Kept as a separate variable because
+ * it is also what READ CAPACITY / MODE SENSE report (and what old savestates
+ * stored). */
+static uint16 PCFXSectorBytes = 2048;
+static bool PCFXLegacyCD;	/* PCFXEMU_CD_LEGACY=1 */
+static bool PCFXCDTrace;	/* PCFXEMU_CD_TRACE=1 */
+
+#define PCFXCDTRACE(...) do { if(PCFXCDTrace) { fprintf(stderr, "[CD] " __VA_ARGS__); fputc('\n', stderr); } } while(0)
+
+static bool PCFXScsi2Valid(unsigned density, unsigned len)
+{
+	if(density == 0x00)
+		return len == 2048 || len == 2336 || len == 2340;
+	if(density == 0x81)
+		return len == 2048 || len == 2056 || len == 2324 || len == 2332 || len == 2336 || len == 2340;
+	return false;
+}
+
+/* Where in the 2352-byte raw sector the transferred window starts, and how
+ * long it is, for the current mode.  False for combinations the drive does
+ * not support. */
+static bool PCFXModeView(const PCFXReadMode *m, unsigned *offset, unsigned *length)
+{
+	if(m->scsi2)
+	{
+		const unsigned len = m->block_len;
+
+		if(!PCFXScsi2Valid(m->density, len))
+			return false;
+		*length = len;
+		switch(len)
+		{
+			case 2048: *offset = (m->density == 0x81) ? 24 : 16; break;
+			case 2324: *offset = 24; break;
+			case 2340: *offset = 12; break;
+			default:   *offset = 16; break;	/* 2056, 2332, 2336 */
+		}
+		return true;
+	}
+
+	switch(m->ej & 3)
+	{
+		case 0:
+		case 1:
+			if(!m->xa)
+			{
+				*offset = 16; *length = 2048;	/* Mode 1 and Mode 2 are not told apart */
+			}
+			else if(m->sh)
+			{
+				*offset = 24; *length = 2048;	/* subheader skipped: Form 1 user data */
+			}
+			else
+			{
+				*offset = 16; *length = 2056;	/* subheader + Form 1 user data */
+			}
+			return true;
+		case 2:
+			*offset = 16; *length = 2336;
+			return true;
+		default:
+			*offset = 12; *length = 2340;
+			return true;
+	}
+}
+
+static bool PCFXModeIsXA(const PCFXReadMode *m)
+{
+	return m->scsi2 ? (m->density == 0x81) : (m->xa != 0);
+}
+
+static void PCFXModeRefresh(void)
+{
+	unsigned off = 0, len = 2048;
+
+	if(PCFXModeView(&PCFXMode, &off, &len))
+		PCFXSectorBytes = (uint16)len;
+	else
+		PCFXSectorBytes = 2048;
+}
+
+static void PCFXModeDefaults(uint8 disc_type)
+{
+	memset(&PCFXMode, 0, sizeof(PCFXMode));
+	PCFXMode.retry = 15;
+	if(disc_type == 0x20)
+	{
+		PCFXMode.xa = 1;
+		PCFXMode.sh = 1;
+		PCFXMode.ej = 1;
+	}
+	PCFXModeRefresh();
 }
 
 static CDIF *Cur_CDIF;
@@ -324,7 +408,10 @@ static void FixOPV(void)
 static void VirtualReset(void)
 {
 	InitModePages();
-	PCFXSectorBytes = 2048;
+	PCFXModeDefaults((Cur_CDIF && !TrayOpen) ? toc.disc_type : 0);
+	PCFXCDTRACE("drive reset: disc id %02x -> XA=%u SH=%u EC=%u EJ=%u retry=%u (%u-byte blocks)",
+	            (Cur_CDIF && !TrayOpen) ? toc.disc_type : 0, PCFXMode.xa, PCFXMode.sh, PCFXMode.ec,
+	            PCFXMode.ej, PCFXMode.retry, PCFXSectorBytes);
 
 	SCSI_FIFO_Flush(din);
 
@@ -681,6 +768,11 @@ void SCSICD_SetDisc(bool new_tray_open, CDIF *cdif, bool no_emu_side_effects)
 		if(cdif)
 		{
 			CDIF_ReadTOC_C(cdif, &toc);
+			/* A new disc restores the MODE SELECT defaults, which depend on
+			 * the DISC ID in the TOC (A0 PSEC). */
+			PCFXModeDefaults(toc.disc_type);
+			PCFXCDTRACE("disc loaded: disc id %02x -> default XA=%u SH=%u EJ=%u", toc.disc_type,
+			            PCFXMode.xa, PCFXMode.sh, PCFXMode.ej);
 
 			if(!no_emu_side_effects)
 			{
@@ -768,16 +860,90 @@ static bool ValidateRawDataSector(uint8 *data)
 	return(true);
 }
 
-static void DoMODESELECT6(const uint8 *cdb)
+/* Error judgement for one raw sector, following the sector header exactly
+ * as NEC describes it: "Makes error judgement with the information of the
+ * disk header. In Mode 1 an error check is made by [EDC/]ECC. No error check
+ * is made in Mode 2" -- and in the XA modes a Form 1 sector is EDC-checked
+ * while a Form 2 sector is not.  The drive reads by header address, so a
+ * sector whose sync pattern or MSF does not match the LBA cannot be read at
+ * all.  Returns true when the sector is deliverable. */
+static bool PCFXJudgeSector(const uint8 *raw, uint32 lba)
 {
-	if(cdb[4])
+	static const uint8 sync[12] = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00 };
+	uint8 m, s2, f;
+
+	if(memcmp(raw, sync, 12))
 	{
-		cd.data_out_pos = 0;
-		cd.data_out_size = cdb[4];
-		ChangePhase(PHASE_DATA_OUT);
+		PCFXCDTRACE("LBA %u: no sync pattern (audio, pregap silence or unwritten sector)", lba);
+		CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_HEADER_READ_ERROR);
+		return false;
+	}
+
+	LBA_to_AMSF(lba, &m, &s2, &f);
+	if(raw[12] != U8_to_BCD(m) || raw[13] != U8_to_BCD(s2) || raw[14] != U8_to_BCD(f))
+	{
+		PCFXCDTRACE("LBA %u: header %02x:%02x:%02x does not match address %02x:%02x:%02x", lba,
+		            raw[12], raw[13], raw[14], U8_to_BCD(m), U8_to_BCD(s2), U8_to_BCD(f));
+		CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_HEADER_READ_ERROR);
+		return false;
+	}
+
+	if(raw[15] == 1)
+	{
+		if(!edc_check(raw, false))
+		{
+			PCFXCDTRACE("LBA %u: Mode 1 EDC failure (uncorrectable)", lba);
+			CommandCCError(SENSEKEY_MEDIUM_ERROR, AP_LEC_UNCORRECTABLE_ERROR);
+			return false;
+		}
+	}
+	else if(raw[15] == 2)
+	{
+		if(PCFXModeIsXA(&PCFXMode) && !(raw[18] & 0x20) && !edc_check(raw, true))
+		{
+			PCFXCDTRACE("LBA %u: XA Form 1 EDC failure (uncorrectable)", lba);
+			CommandCCError(SENSEKEY_MEDIUM_ERROR, AP_LEC_UNCORRECTABLE_ERROR);
+			return false;
+		}
 	}
 	else
+	{
+		PCFXCDTRACE("LBA %u: unknown data mode %02x", lba, raw[15]);
+		CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_HEADER_READ_ERROR);
+		return false;
+	}
+	return true;
+}
+
+static void DoMODESELECT6(const uint8 *cdb)
+{
+	const bool PF = (cdb[1] & 0x10) != 0;
+	const unsigned len = cdb[4];
+
+	PCFXCDTRACE("MODE SELECT(6) PF=%u list length=%u", PF, len);
+
+	/* Parameter list length 0: no DATA OUT phase, "all parameters take their
+	 * initial values" (NEC SCSICMD_E.txt, vendor-unique list defaults). */
+	if(!len)
+	{
+		if(WhichSystem == SCSICD_PCFX)
+			PCFXModeDefaults(toc.disc_type);
 		SendStatusAndMessage(STATUS_GOOD, 0x00);
+		return;
+	}
+
+	/* PF=0: the vendor-unique list is exactly 10 bytes (NEC: "Byte 4 must be
+	 * set to 0Ah").  A real drive does not guess at other lengths. */
+	if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD && !PF && len != 10)
+	{
+		PCFXCDTRACE("  rejected: vendor-unique list must be 10 bytes, got %u", len);
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+		return;
+	}
+
+	cd.data_out_pos = 0;
+	cd.data_out_size = len;
+	ChangePhase(PHASE_DATA_OUT);
 }
 
 /*
@@ -985,7 +1151,33 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 {
 	uint8 mode_data_length, medium_type, device_specific, block_descriptor_length;
 	uint32 offset = 0;
-	uint16 pending_sector_bytes = PCFXSectorBytes;
+	PCFXReadMode pending_mode = PCFXMode;
+	const bool PF = (cd.command_buffer[1] & 0x10) != 0;
+
+	/* PF=0: NEC vendor-unique parameter list (10 bytes). */
+	if(WhichSystem == SCSICD_PCFX && !PF && !PCFXLegacyCD)
+	{
+		if(data_len != 10 || data[3] != 0 || (data[4] & 0x38) || (data[9] & 0xF0))
+		{
+			PCFXCDTRACE("  rejected vendor-unique list: len=%u bdl=%02x b4=%02x b9=%02x",
+			            data_len, data[3], data[4], data[9]);
+			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+			return;
+		}
+		PCFXMode.scsi2 = 0;
+		PCFXMode.density = 0;
+		PCFXMode.block_len = 0;
+		PCFXMode.xa = (data[4] >> 7) & 1;
+		PCFXMode.sh = (data[4] >> 6) & 1;
+		PCFXMode.ec = (data[4] >> 2) & 1;
+		PCFXMode.ej = data[4] & 3;
+		PCFXMode.retry = data[9] & 0x0F;
+		PCFXModeRefresh();
+		PCFXCDTRACE("  vendor-unique list: XA=%u SH=%u EC=%u EJ=%u retry=%u -> %u-byte blocks",
+		            PCFXMode.xa, PCFXMode.sh, PCFXMode.ec, PCFXMode.ej, PCFXMode.retry, PCFXSectorBytes);
+		SendStatusAndMessage(STATUS_GOOD, 0x00);
+		return;
+	}
 
 	if(data_len < 4)
 	{
@@ -1015,23 +1207,37 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 		return;
 	}
 
-	/* Standard 8-byte MODE SELECT(6) descriptor: 24-bit block length at
-         bytes 9..11, after the four-byte parameter header.  Commit only
-         after every mode page has passed validation. */
-    if(WhichSystem == SCSICD_PCFX && block_descriptor_length == 8)
-    {
-        const uint32 requested = ((uint32)data[9] << 16) |
-                                 ((uint32)data[10] << 8) | data[11];
-        switch(requested)
-        {
-            case 2048: case 2324: case 2336: case 2340: case 2352:
-                pending_sector_bytes = (uint16)requested;
-                break;
-            default:
-                CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
-                return;
-        }
-    }
+	/* SCSI-2 8-byte block descriptor: density code at +0, 24-bit block
+	 * length at +5..+7 (bytes 9..11 of the list).  Commit only after every
+	 * mode page has passed validation. */
+	if(WhichSystem == SCSICD_PCFX && block_descriptor_length == 8)
+	{
+		const uint32 requested = ((uint32)data[9] << 16) | ((uint32)data[10] << 8) | data[11];
+
+		pending_mode.scsi2 = 1;
+		pending_mode.density = data[4];
+		pending_mode.block_len = (uint16)requested;
+		PCFXCDTRACE("  SCSI-2 block descriptor: density %02x block length %u", data[4], requested);
+
+		if(PCFXLegacyCD)
+		{
+			/* Old behaviour: density ignored, 2352 accepted. */
+			switch(requested)
+			{
+				case 2048: case 2324: case 2336: case 2340: case 2352:
+					break;
+				default:
+					CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+					return;
+			}
+		}
+		else if(requested > 0xFFFF || !PCFXScsi2Valid(data[4], requested))
+		{
+			PCFXCDTRACE("  rejected: density %02x / %u-byte blocks is not a supported combination", data[4], requested);
+			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+			return;
+		}
+	}
 	offset += block_descriptor_length;
 
 	// Now handle mode pages
@@ -1101,8 +1307,15 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 	 }
 	}
 
-    if(WhichSystem == SCSICD_PCFX)
-        PCFXSectorBytes = pending_sector_bytes;
+	if(WhichSystem == SCSICD_PCFX)
+	{
+		PCFXMode = pending_mode;
+		if(PCFXLegacyCD && PCFXMode.scsi2)
+			PCFXSectorBytes = PCFXMode.block_len;
+		else
+			PCFXModeRefresh();
+		PCFXCDTRACE("  mode now: %s density %02x, %u-byte blocks", PCFXMode.scsi2 ? "SCSI-2" : "vendor", PCFXMode.density, PCFXSectorBytes);
+	}
 	SendStatusAndMessage(STATUS_GOOD, 0x00);
 }
 
@@ -1140,7 +1353,13 @@ static void DoMODESENSE6(const uint8 *cdb)
   memset(data_in, 0, 0xA);
   data_in[0] = 0x09;
   data_in[2] = 0x80;
-  data_in[9] = 0x0F;
+  if(WhichSystem == SCSICD_PCFX)
+  {
+   data_in[4] = (PCFXMode.xa << 7) | (PCFXMode.sh << 6) | (PCFXMode.ec << 2) | (PCFXMode.ej & 3);
+   data_in[9] = PCFXMode.retry;
+  }
+  else
+   data_in[9] = 0x0F;
 
   if(AllocSize > 0xA)
    AllocSize = 0xA;
@@ -1157,13 +1376,28 @@ static void DoMODESENSE6(const uint8 *cdb)
 
  if(!DBD)
  {
-  data_in[index++] = 0x00;	// Density code.
-  MDFN_en24msb(&data_in[index], 0x6E); // Number of blocks?
-  index += 3;
- 
-  data_in[index++] = 0x00;	// Reserved
-  MDFN_en24msb(&data_in[index], (WhichSystem == SCSICD_PCFX && PC == 0) ? PCFXSectorBytes : 2048); // Block length;
-  index += 3;
+  {
+   /* Report the density / block length the drive is really using, so that
+    * a "save mode, change mode, restore mode" sequence (the BIOS Photo CD
+    * probe does exactly this) puts the drive back where it was. */
+   uint8 density = 0x00;
+   unsigned block_len = 2048;
+
+   if(WhichSystem == SCSICD_PCFX && PC == 0)
+   {
+    density = PCFXModeIsXA(&PCFXMode) ? 0x81 : 0x00;
+    if(PCFXMode.scsi2)
+     density = PCFXMode.density;
+    block_len = PCFXSectorBytes;
+   }
+   data_in[index++] = density;
+   MDFN_en24msb(&data_in[index], 0x6E); // Number of blocks?
+   index += 3;
+
+   data_in[index++] = 0x00;	// Reserved
+   MDFN_en24msb(&data_in[index], block_len); // Block length;
+   index += 3;
+  }
  }
 
  PageMatchOR = 0x00;
@@ -1373,6 +1607,8 @@ static void DoNEC_GETDIRINFO(const uint8 *cdb)
     if(!match || match == 0xA0)
     {
      EncodeM3TOC(&data_in[offset], 0xA0, lilba, toc.first_track * 75 * 60 - 150, toc.tracks[toc.first_track].control);
+     /* A0 PSEC carries the DISC ID (00h CD-DA/CD-ROM, 10h CD-i, 20h CD-ROM XA). */
+     data_in[offset + 0x8] = toc.disc_type;
      lilba++;
      offset += 0xA;
     }
@@ -2815,20 +3051,46 @@ static inline void RunCDRead(int32 run_time)
 					cd.data_transfer_done = false;
 					CommandCCError(SENSEKEY_ILLEGAL_REQUEST);
 				}
-				else if(ValidateRawDataSector(tmp_read_buf))
+				else if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD &&
+				        !(toc.tracks[TOC_FindTrackByLBA(&toc, SectorAddr)].control & 0x4))
+				{
+					/* A READ may not run from a data track into an audio track. */
+					SCSI_FIFO_Flush(din);
+					cd.data_transfer_done = false;
+					PCFXCDTRACE("LBA %u: READ reached an audio track", SectorAddr);
+					CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_NOT_DATA_TRACK);
+				}
+				else if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD &&
+				        !PCFXJudgeSector(tmp_read_buf, SectorAddr))
+				{
+					/* PCFXJudgeSector() already raised CHECK CONDITION. */
+					SCSI_FIFO_Flush(din);
+					cd.data_transfer_done = false;
+				}
+				else if(WhichSystem != SCSICD_PCFX || PCFXLegacyCD ? ValidateRawDataSector(tmp_read_buf) : true)
 				{
 					memcpy(cd.SubPWBuf, tmp_read_buf + 2352, 96);
 
                     const uint8 *payload = NULL;
-                    unsigned payload_size = 0;
-                    const unsigned requested = (WhichSystem == SCSICD_PCFX) ? PCFXSectorBytes : 2048;
-                    if(!PCFXGetSectorView(tmp_read_buf, requested, &payload, &payload_size))
+                    unsigned payload_off = 0, payload_size = 0;
+                    if(WhichSystem != SCSICD_PCFX)
+                    {
+                        payload_off = (tmp_read_buf[15] == 2) ? 24 : 16;
+                        payload_size = 2048;
+                    }
+                    else if(PCFXLegacyCD && PCFXMode.scsi2 && PCFXSectorBytes == 2352)
+                    {
+                        payload_off = 0;
+                        payload_size = 2352;
+                    }
+                    else if(!PCFXModeView(&PCFXMode, &payload_off, &payload_size))
                     {
                         SCSI_FIFO_Flush(din);
                         cd.data_transfer_done = false;
                         CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
                         return;
                     }
+                    payload = tmp_read_buf + payload_off;
                     SCSI_FIFO_Write(din, payload, payload_size);
 
 					GenSubQFromSubPW();
@@ -2947,6 +3209,12 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 			   {
 			bool prev_ps = (cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING);
 
+				if(PCFXCDTrace)
+				{
+					fprintf(stderr, "[CD] cdb:");
+					for(int q = 0; q < 12; q++) fprintf(stderr, " %02x", cd.command_buffer[q]);
+					fprintf(stderr, "  (%s)\n", cmd_info_ptr->pretty_name);
+				}
 				cmd_info_ptr->func(cd.command_buffer);
 
 			bool new_ps = (cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING);
@@ -3110,6 +3378,13 @@ void SCSICD_Init(int type, int cdda_time_div, PCFX_RawAudioMixer *audio_mixer, u
 	Cur_CDIF = NULL;
 	TrayOpen = true;
 
+	{
+		const char *e = getenv("PCFXEMU_CD_LEGACY");
+		PCFXLegacyCD = e && *e && *e != '0';
+		e = getenv("PCFXEMU_CD_TRACE");
+		PCFXCDTrace = e && *e && *e != '0';
+	}
+
 	//assert(SystemClock < 30000000);	// 30 million, sanity check.
 
 	monotonic_timestamp = 0;
@@ -3229,6 +3504,27 @@ int SCSICD_StateAction(StateMem* sm, const unsigned load, const bool data_only, 
 	};
 
 	int ret = MDFNSS_StateAction(sm, load, data_only, StateRegs, sname, 0);
+
+	{
+		SFORMAT ModeRegs[] =
+		{
+			SFVARN(PCFXMode.xa, "pfx_xa"),
+			SFVARN(PCFXMode.sh, "pfx_sh"),
+			SFVARN(PCFXMode.ec, "pfx_ec"),
+			SFVARN(PCFXMode.ej, "pfx_ej"),
+			SFVARN(PCFXMode.retry, "pfx_retry"),
+			SFVARN(PCFXMode.scsi2, "pfx_scsi2"),
+			SFVARN(PCFXMode.density, "pfx_density"),
+			SFVARN(PCFXMode.block_len, "pfx_blocklen"),
+			SFEND
+		};
+		char mname[64];
+		snprintf(mname, sizeof(mname), "%s_MODE", sname);
+		/* Optional: savestates from before the drive-mode model lack it. */
+		MDFNSS_StateAction(sm, load, data_only, ModeRegs, mname, true);
+		if(load)
+			PCFXModeRefresh();
+	}
 
 	if(load)
 	{

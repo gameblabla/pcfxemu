@@ -31,6 +31,7 @@ typedef enum
     TRACK_MODE1_2352,
     TRACK_MODE1_2048,
     TRACK_MODE2_2352,
+    TRACK_MODE2_2336,
     TRACK_UNKNOWN
 } TrackFormat;
 
@@ -57,6 +58,10 @@ typedef struct CDTrack
     int32_t postgap;
     int32_t index[100];      /* absolute LBA after parse, INT32_MAX if absent */
     int32_t file_index1;     /* sector offset in file for INDEX 01 */
+    int32_t cue_idx0;        /* CUE: file-relative INDEX 00 (-1 if absent) */
+    int32_t cue_idx1;        /* CUE: file-relative INDEX 01 */
+    int32_t cue_pregap;      /* CUE: PREGAP command (silence not stored in the file) */
+    int cue_file_id;         /* CUE: which FILE entry the track belongs to */
     int32_t chd_file_offset; /* sector offset in CHD logical stream */
     int sector_size;
     TrackFormat format;
@@ -77,6 +82,7 @@ struct CDIF
     int first_track;
     int last_track;
     int32_t total_sectors;
+    int cue_disc_id;         /* -1 = not specified */
     bool is_chd;
 #ifdef PCFX_ENABLE_PHYSICAL_CD
     bool is_physical;
@@ -335,6 +341,12 @@ static TrackFormat parse_track_format(const char *line, int *sector_size, uint8_
         *control = SUBQ_CTRLF_DATA;
         return TRACK_MODE2_2352;
     }
+    if(strstr(line, "MODE2/2336"))
+    {
+        *sector_size = 2336;
+        *control = SUBQ_CTRLF_DATA;
+        return TRACK_MODE2_2336;
+    }
     return TRACK_UNKNOWN;
 }
 
@@ -344,6 +356,8 @@ static void generate_toc(CDIF *cdif)
     cdif->disc_toc.first_track = (uint8_t)cdif->first_track;
     cdif->disc_toc.last_track = (uint8_t)cdif->last_track;
     cdif->disc_toc.disc_type = DISC_TYPE_CDDA_OR_M1;
+    if(cdif->cue_disc_id >= 0)
+        cdif->disc_toc.disc_type = (uint8_t)cdif->cue_disc_id;
     for(int i = cdif->first_track; i <= cdif->last_track; i++)
     {
         CDTrack *t = &cdif->tracks[i];
@@ -370,8 +384,10 @@ static bool parse_cue(CDIF *cdif, const char *path)
     bool cur_file_is_wave = false;
     char linebuf[4096];
     int current_track = 0;
+    int cur_file_id = 0;
 
     memset(cdif, 0, sizeof(*cdif));
+    cdif->cue_disc_id = -1;
     cdif->first_track = 1;
     for(int i = 0; i < 101; i++)
         for(int j = 0; j < 100; j++)
@@ -388,6 +404,7 @@ static bool parse_cue(CDIF *cdif, const char *path)
             if(file_arg_and_type(line, leaf, sizeof(leaf), file_type, sizeof(file_type)))
             {
                 path_join(cur_file, sizeof(cur_file), base_dir, leaf);
+                cur_file_id++;
                 cur_file_is_wave = ends_with_ci(leaf, ".wav") || !strcasecmp(file_type, "WAVE");
             }
         }
@@ -401,11 +418,15 @@ static bool parse_cue(CDIF *cdif, const char *path)
                 memset(t, 0, sizeof(*t));
                 for(int j = 0; j < 100; j++) t->index[j] = -1;
                 t->number = tn;
+                t->cue_idx0 = -1;
+                t->cue_idx1 = -1;
+                t->cue_file_id = cur_file_id;
                 t->format = parse_track_format(line, &t->sector_size, &t->subq_control);
                 if(t->format == TRACK_AUDIO) t->di_format = DI_FORMAT_AUDIO;
                 else if(t->format == TRACK_MODE1_2048) t->di_format = DI_FORMAT_MODE1;
                 else if(t->format == TRACK_MODE1_2352) t->di_format = DI_FORMAT_MODE1_RAW;
                 else if(t->format == TRACK_MODE2_2352) t->di_format = DI_FORMAT_MODE2_RAW;
+                else if(t->format == TRACK_MODE2_2336) t->di_format = DI_FORMAT_MODE2;
                 snprintf(t->path, sizeof(t->path), "%s", cur_file);
                 t->file_is_wave = cur_file_is_wave && t->format == TRACK_AUDIO;
                 t->file_data_offset = 0;
@@ -437,40 +458,57 @@ static bool parse_cue(CDIF *cdif, const char *path)
                     cdif->tracks[current_track].index[(int)idx_l] = parse_msf(msf);
             }
         }
+        else if(!strncasecmp(line, "PREGAP", 6) && current_track > 0)
+        {
+            char *p = line + 6;
+            while(*p && isspace((unsigned char)*p)) p++;
+            cdif->tracks[current_track].cue_pregap = parse_msf(p);
+        }
+        else if(!strncasecmp(line, "REM", 3) && isspace((unsigned char)line[3]))
+        {
+            /* REM PCFX_DISC_ID 00|10|20 (hex): the DISC ID the burner wrote in
+             * TOC point A0 (00 = CD-DA/CD-ROM, 10 = CD-i, 20 = CD-ROM XA). */
+            char key[64];
+            unsigned id;
+            if(sscanf(line + 3, "%63s %x", key, &id) == 2 &&
+               (!strcasecmp(key, "PCFX_DISC_ID") || !strcasecmp(key, "DISC_ID")) && id <= 0xFF)
+                cdif->cue_disc_id = (int)id;
+        }
     }
     fclose(cue);
 
+    {
+        const char *e = getenv("PCFXEMU_CD_DISC_ID");
+        unsigned id;
+        if(e && *e && sscanf(e, "%x", &id) == 1 && id <= 0xFF)
+            cdif->cue_disc_id = (int)id;
+    }
+
     if(cdif->num_tracks <= 0) return false;
 
-    int32_t running_lba = 0;
+    /*
+     * Lay the tracks out on the disc.  CUE INDEX times are relative to the
+     * FILE they appear under:
+     *   - a FILE that holds several tracks (single BIN) keeps one running
+     *     file offset, so INDEX 01 of track N is file_base + offset;
+     *   - a FILE per track starts where the previous file ended;
+     *   - INDEX 00 .. INDEX 01 is the track's pregap *stored in the file*
+     *     (readable, but the TOC entry is INDEX 01);
+     *   - PREGAP is silence/zero data that is not stored in any file and is
+     *     inserted in front of the file's first sector.
+     * TOC track start = INDEX 01, exactly as a burner must write it.
+     */
+    int32_t disc_pos = 0;
+    int32_t file_base = 0;
+    int32_t file_end = 0;
+    int cur_id = -1;
     for(int tn = cdif->first_track; tn <= cdif->last_track; tn++)
     {
         CDTrack *t = &cdif->tracks[tn];
         if(t->number == 0) continue;
-        if(t->index[1] < 0) t->index[1] = 0;
-
-        /*
-         * Multi-BIN CUE sheets may store the pregap in the same file as the
-         * following track, represented as INDEX 00 .. INDEX 01.  N-nyuu is an
-         * important PC-FXGA example: the bootable data track is track 2 and its
-         * first 225 sectors live before INDEX 01.  The old file-backed CUE path
-         * treated that range as synthesized silence/empty sectors, while the
-         * CHD path correctly exposed the pregap payload.  Split the CUE pregap
-         * into an on-disc/file-backed portion (pregap_dv) and a synthesized
-         * portion (pregap) so BIN/CUE and CHD layouts are read consistently.
-         */
-        t->file_index1 = t->index[1];
-        if(t->index[0] >= 0 && t->index[0] <= t->index[1])
-        {
-            t->pregap_dv = t->index[1] - t->index[0];
-            t->pregap = t->index[0];
-        }
-        else
-        {
-            t->pregap_dv = 0;
-            t->pregap = t->index[1];
-        }
-        t->lba = running_lba + t->pregap + t->pregap_dv;
+        if(t->index[1] < 0) return false;	/* every track needs INDEX 01 */
+        t->cue_idx1 = t->index[1];
+        t->cue_idx0 = t->index[0];
 
         int64_t fsize = file_size_bytes(t->path);
         if(fsize < 0 || t->sector_size <= 0) return false;
@@ -480,19 +518,67 @@ static bool parse_cue(CDIF *cdif, const char *path)
                 return false;
             fsize = t->file_data_bytes;
         }
-        int32_t file_sectors = (int32_t)(fsize / t->sector_size);
-        t->sectors = file_sectors - t->file_index1;
-        if(t->sectors < 0) t->sectors = 0;
+        const int32_t file_sectors = (int32_t)(fsize / t->sector_size);
 
-        int32_t base = t->index[1];
+        if(t->cue_file_id != cur_id)
+        {
+            cur_id = t->cue_file_id;
+            file_base = disc_pos + (t->cue_pregap > 0 ? t->cue_pregap : 0);
+            if(tn == cdif->first_track && t->cue_idx1 > 0 && t->cue_pregap <= 0)
+                file_base = -t->cue_idx1;	/* hidden pregap stored in the first file: INDEX 01 is LBA 0 */
+            file_end = file_base + file_sectors;
+            disc_pos = file_end;
+        }
+
+        const int32_t idx1_disc = file_base + t->cue_idx1;
+        const bool has_idx0 = t->cue_idx0 >= 0 && t->cue_idx0 <= t->cue_idx1;
+        t->lba = idx1_disc;
+        t->file_index1 = t->cue_idx1;
+        t->pregap_dv = has_idx0 ? (t->cue_idx1 - t->cue_idx0) : 0;
+        t->pregap = (t->cue_pregap > 0) ? t->cue_pregap : 0;
+        t->sectors = 0;	/* resolved below once the next track is known */
+        t->postgap = 0;
+        /* Remember where this track's file ends for the second pass. */
+        t->chd_file_offset = file_end;
+    }
+
+    /* Second pass: a track ends where the next track's pregap/INDEX 01 begins
+     * (if it lives in the same file) or where its file ends. */
+    int prev_tn = 0;
+    for(int tn = cdif->first_track; tn <= cdif->last_track; tn++)
+    {
+        CDTrack *t = &cdif->tracks[tn];
+        if(t->number == 0) continue;
+        if(prev_tn)
+        {
+            CDTrack *pt = &cdif->tracks[prev_tn];
+            int32_t end = pt->chd_file_offset;
+            if(pt->cue_file_id == t->cue_file_id)
+                end = t->lba - t->pregap_dv;
+            pt->sectors = end - pt->lba;
+            if(pt->sectors < 0) pt->sectors = 0;
+        }
+        prev_tn = tn;
+    }
+    if(prev_tn)
+    {
+        CDTrack *pt = &cdif->tracks[prev_tn];
+        pt->sectors = pt->chd_file_offset - pt->lba;
+        if(pt->sectors < 0) pt->sectors = 0;
+    }
+
+    for(int tn = cdif->first_track; tn <= cdif->last_track; tn++)
+    {
+        CDTrack *t = &cdif->tracks[tn];
+        if(t->number == 0) continue;
+        const int32_t base = t->lba;
         for(int i = 0; i < 100; i++)
         {
             if(i == 0 || t->index[i] < 0) t->index[i] = INT32_MAX;
-            else t->index[i] = t->lba + (t->index[i] - base);
+            else t->index[i] = base + (t->index[i] - t->cue_idx1);
         }
-        running_lba = t->lba + t->sectors;
     }
-    cdif->total_sectors = running_lba;
+    cdif->total_sectors = disc_pos;
     generate_toc(cdif);
     return true;
 }
@@ -1070,6 +1156,12 @@ bool CDIF_ReadRawSector_C(CDIF *cdif, uint8_t *buf, int32_t lba)
     {
         ok = fread(buf + 16, 1, 2048, fp) == 2048;
         if(ok) encode_mode1_sector((uint32_t)(lba + 150), buf);
+    }
+    else if(t->format == TRACK_MODE2_2336)
+    {
+        /* Header-less Mode 2: synthesise sync + header, keep the 2336 bytes. */
+        ok = fread(buf + 16, 1, 2336, fp) == 2336;
+        if(ok) encode_mode2_sector((uint32_t)(lba + 150), buf);
     }
     else
         ok = false;
