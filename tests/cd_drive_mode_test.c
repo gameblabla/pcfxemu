@@ -25,6 +25,8 @@ static void ssc_cb(uint8_t a, int b) { (void)a; (void)b; }
 static uint32_t ts;
 
 static void run(unsigned n) { ts += n; SCSICD_Run(ts); }
+/* let the drive finish initialising after a reset (1.3 s of emulated time) */
+static void settle(void) { for(int i = 0; i < 13; i++) run(2147727); }
 
 #define PH_MASK (SCSICD_MSG_mask | SCSICD_CD_mask | SCSICD_IO_mask)
 
@@ -240,11 +242,17 @@ static void load(const char *cue)
 	uint8_t tur[6] = { 0 };
 	scsi(tur, 6, NULL, 0, NULL, 0, NULL);
 	assert(scsi(tur, 6, NULL, 0, NULL, 0, NULL) == 0);
+	settle();
 }
 
 static void reset_bus(void)
 {
+	uint8_t tur[6] = { 0 };
 	SCSICD_SetRST(true); run(64); SCSICD_SetRST(false); run(64);
+	/* real drive (measured): UNIT ATTENTION on the first command, then ~1 s of END OF VOLUME for
+	 * address-bearing commands; the initiator waits that out before using the drive again */
+	scsi(tur, 6, NULL, 0, NULL, 0, NULL);
+	settle();
 }
 
 int main(void)
@@ -346,8 +354,13 @@ int main(void)
 	puts("ok  2336 mode returns the raw Mode 2 user bytes (formless Mode 2: no error judgement)");
 
 	assert(scsi2_select(0x81, 2048) == 0);		/* the BIOS Photo CD probe's select */
-	assert(do_read(640, 1, buf, sizeof(buf), &n) == 0 && n == 2048 && buf[0] == 0x80);	/* Form 1 data at byte 24 */
-	puts("ok  density 81h / 2048 reads XA Form 1 data from byte 24");
+	assert(do_read(600, 1, buf, sizeof(buf), &n) == 0 && n == 2048 && buf[0] == 0x48);	/* Mode 1: data window starts at byte 24 (0x40 + 8) */
+	puts("ok  density 81h / 2048 reads data from byte 24");
+	/* measured on a real PC-FX: a Mode 2 sector that is not a valid Form 1 sector (Form 2, formless) cannot be
+	 * delivered through the 2048/2056-byte error-correcting windows: ~4.5 s of retries, then DATA FIELD UNCORRECT */
+	assert(do_read(640, 1, buf, sizeof(buf), &n) == 0 && n == 2048 && buf[0] == 0x80);	/* genuine XA Form 1 is correctable */
+	assert(do_read(680, 1, buf, sizeof(buf), &n) != 0 && sense_key() == 3);			/* formless Mode 2 is not */
+	puts("ok  formless Mode 2 through an error-correcting window -> DATA FIELD UNCORRECT (measured); Form 1 reads fine");
 
 	/* ---------- 8. EDC judgement follows the header ---------- */
 	assert(vendor_select(0x00, 0) == 0);

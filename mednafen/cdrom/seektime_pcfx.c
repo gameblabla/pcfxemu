@@ -7,6 +7,7 @@
  * model used by PC Engine emulation.
  */
 #include <stdlib.h>
+#include <stdio.h>
 #include "seektime_pcfx.h"
 
 typedef struct
@@ -83,7 +84,51 @@ static float pcfx_track_delta(int start_sector, int target_sector)
  * hardware in the Queen of Queens side-by-side comparison. The read-delay
  * plumbing applies this only to image-backed PC-FX drives.
  */
+/* ---- measured seek model ---------------------------------------------------------------------
+ * DIAG5 lab on a real PC-FX (NEC CD-ROM DRIVE:FX 1.1), 8-sector reads inside the 1350..17500 area.  Total
+ * read time minus ~16 fields of command latency minus the transfer gives the positioning time below, in
+ * fields (1/60 s).  The drive is MUCH slower than the earlier retail calibration (long forward seeks
+ * 1.5-2.6 s; short backward seeks ~0.1 s; outward seeks slower than inward ones).  Points are
+ * (sector distance, fields); linear in between.  PCFXEMU_CD_SEEK_OLD=1 selects the old calibration. */
+typedef struct { float d; float f; } SeekNode;
+static const SeekNode seek_fwd[] = {            /* target ahead of the head */
+    { 0, 0 }, { 64, 0 }, { 90, 12 }, { 1000, 50 }, { 4000, 95 }, { 8000, 95 }, { 16100, 100 }, { 120000, 190 }, { 330000, 320 } };
+static const SeekNode seek_back[] = {           /* target behind the head (also: re-reading what was just read) */
+    { 0, 4.5f }, { 1, 4.5f }, { 300, 12 }, { 8000, 33 }, { 12300, 40 }, { 16200, 30 }, { 120000, 90 }, { 330000, 150 } };
+
+static float seek_interp(const SeekNode *n, int count, float d)
+{
+    for(int i = 1; i < count; i++)
+        if(d <= n[i].d)
+            return n[i - 1].f + (n[i].f - n[i - 1].f) * (d - n[i - 1].d) / (n[i].d - n[i - 1].d);
+    return n[count - 1].f;
+}
+
+static float PCFX_CDSeekMS_Old(int start_sector, int target_sector);
+
 float PCFX_CDSeekMS(int start_sector, int target_sector)
+{
+    static int model = -1;
+    if(model < 0)
+    {
+        const char *e = getenv("PCFXEMU_CD_SEEK_OLD");
+        model = (e && e[0] && e[0] != '0') ? 0 : 1;
+    }
+    if(!model)
+        return PCFX_CDSeekMS_Old(start_sector, target_sector);
+
+    const int delta = target_sector - start_sector;
+    float fields;
+    if(delta > 0)
+        fields = seek_interp(seek_fwd, (int)(sizeof(seek_fwd) / sizeof(seek_fwd[0])), (float)delta);
+    else
+        fields = seek_interp(seek_back, (int)(sizeof(seek_back) / sizeof(seek_back[0])), (float)(-delta));
+    static float scale = -1.0f;
+    if(scale < 0.0f) { const char *e = getenv("PCFXEMU_CD_SEEK_SCALE"); scale = (e && e[0]) ? (float)atof(e) / 100.0f : 0.90f; }
+    return fields * scale * (1000.0f / 60.0f);
+}
+
+static float PCFX_CDSeekMS_Old(int start_sector, int target_sector)
 {
     const int sector_delta = abs(target_sector - start_sector);
     const int target_group = pcfx_find_sector_group(target_sector);

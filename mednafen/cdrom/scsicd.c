@@ -291,6 +291,49 @@ static void InitModePages(void);
 
 static scsicd_timestamp_t lastts;
 static int64 monotonic_timestamp;
+
+/* ---- Behaviour measured on a real PC-FX (NEC CD-ROM DRIVE:FX 1.1) with the DIAG5 lab ----------------
+ *  * every command has a firmware latency before it answers (TEST UNIT READY costs ~16 fields in total,
+ *    of which ~9 are the player's own polling);
+ *  * after a SCSI bus reset the drive answers its next command with UNIT ATTENTION (sub-error 29h) and,
+ *    for about a second, rejects address-bearing commands with END OF VOLUME (25h);
+ *  * Mode 2 sectors read through a 2048/2056-byte (error correcting) window never succeed: the drive
+ *    retries for ~4.5 s and then reports DATA FIELD UNCORRECT (11h); the 2324/2332/2336/2340 windows
+ *    deliver them (Form 2 and formless alike) without any error judgement;
+ *  * the first media access after the motor idled pays a ~1.2 s spin-up;
+ *  * READ HEADER on an audio sector never completes.
+ * PCFXEMU_CD_LEGACY=1 disables all of it. */
+#define PCFX_FIELD_MS 16.6667f
+#ifndef PCFX_CMD_LATENCY_FIELDS
+#define PCFX_CMD_LATENCY_FIELDS 7.0f
+#endif
+static int32 PCFXCmdTimer;
+static uint8 PCFXCmdCdb[16];
+static void (*PCFXCmdFunc)(const uint8 *);
+static bool PCFXCmdIsRequestSense;
+static int32 PCFXDeferCCTimer;
+static int PCFXDeferKey, PCFXDeferAsc, PCFXDeferAscq;
+static bool PCFXUnitAttention;
+static int32 PCFXInitTimer;
+static int64 PCFXIdleClocks;
+static bool PCFXEccStalled;
+static float PCFXLatencyFields(void)
+{
+	static float v = -1.0f;
+	if(v < 0.0f) { const char *e = getenv("PCFXEMU_CD_LATENCY"); v = (e && e[0]) ? (float)atof(e) : PCFX_CMD_LATENCY_FIELDS; }
+	return v;
+}
+static bool PCFXEnvFlag(const char *name)
+{
+	const char *e = getenv(name);
+	return e && e[0] && e[0] != '0';
+}
+static int PCFXSectorSlowPercent(void)
+{
+	static int v = -1;
+	if(v < 0) { const char *e = getenv("PCFXEMU_CD_SECTOR_SLOW"); v = (e && e[0]) ? atoi(e) : 100; }
+	return v;
+}
 static int64 pce_lastsapsp_timestamp;
 
 scsicd_t cd;
@@ -406,6 +449,10 @@ static void FixOPV(void)
 	}
 }
 
+static int32 PCFX_MSToClocks(float ms);
+static void PCFX_DeferCC(float ms, int key, int asc, int ascq);
+static bool PCFXEccWindowMode2(const uint8 *raw);
+
 static void VirtualReset(void)
 {
 	InitModePages();
@@ -418,6 +465,15 @@ static void VirtualReset(void)
 
 	cdda.CDDADivAcc = (int64)System_Clock * 65536 / 44100;
 	CDReadTimer = 0;
+	PCFXCmdTimer = 0;
+	PCFXDeferCCTimer = 0;
+	PCFXEccStalled = false;
+	if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD)
+	{
+		PCFXUnitAttention = !PCFXEnvFlag("PCFXEMU_CD_NO_RESET_MODEL");
+		PCFXInitTimer = PCFXEnvFlag("PCFXEMU_CD_NO_RESET_MODEL") ? 0 : PCFX_MSToClocks(1000.0f);
+		PCFXIdleClocks = (int64)1 << 40;	/* motor state unknown after a reset: first read pays the spin-up */
+	}
 	PCFXSeekTimer = 0;
 	PCFXAudioDelay = 0;
 	PCFXSeekTarget = 0;
@@ -547,6 +603,7 @@ static void GenSubQFromSubPW(void)
 #define NSE_INVALID_COMMAND		0x20
 #define NSE_INVALID_ADDRESS		0x21
 #define NSE_INVALID_PARAMETER		0x22
+#define NSE_UNIT_ATTENTION_RESET	0x29		// UNIT ATTENTION: power-on / bus reset
 #define NSE_INVALID_PARAMETER_LIST	0x2A		// MODE SELECT list refused (measured on real hardware, DIAG4 T2: K5 A2A)
 #define NSE_END_OF_VOLUME		0x25
 #define NSE_INVALID_REQUEST_IN_CDB	0x27
@@ -869,6 +926,20 @@ static bool ValidateRawDataSector(uint8 *data)
  * while a Form 2 sector is not.  The drive reads by header address, so a
  * sector whose sync pattern or MSF does not match the LBA cannot be read at
  * all.  Returns true when the sector is deliverable. */
+static bool PCFXEccWindowMode2(const uint8 *raw)
+{
+	static const uint8 sync[12] = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00 };
+	unsigned off, len;
+
+	if(memcmp(raw, sync, 12) || raw[15] != 2)
+		return false;
+	if(!PCFXModeView(&PCFXMode, &off, &len) || (len != 2048 && len != 2056))
+		return false;
+	/* A genuine XA Form 1 sector (valid EDC) is correctable and reads fine; Form 2 (no ECC) and formless
+	 * Mode 2 are what the drive cannot deliver through an error-correcting window (measured). */
+	return (raw[18] & 0x20) || !edc_check(raw, true);
+}
+
 static bool PCFXJudgeSector(const uint8 *raw, uint32 lba)
 {
 	static const uint8 sync[12] = { 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00 };
@@ -901,12 +972,9 @@ static bool PCFXJudgeSector(const uint8 *raw, uint32 lba)
 	}
 	else if(raw[15] == 2)
 	{
-		if(PCFXModeIsXA(&PCFXMode) && !(raw[18] & 0x20) && !edc_check(raw, true))
-		{
-			PCFXCDTRACE("LBA %u: XA Form 1 EDC failure (uncorrectable)", lba);
-			CommandCCError(SENSEKEY_MEDIUM_ERROR, AP_LEC_UNCORRECTABLE_ERROR);
-			return false;
-		}
+		/* Measured: Mode 2 / Form 1-looking / Form 2 sectors read fine in every window that carries
+		 * more than 2048/2056 bytes; the error-correcting 2048/2056 windows are handled (as a
+		 * timeout + DATA FIELD UNCORRECT) before this function is reached. */
 	}
 	else
 	{
@@ -1503,7 +1571,7 @@ static const uint8 InqData[0x24] =
 
  // 32-35, product revision level
  // 1.0 
- 0x31, 0x2E, 0x30, 0x20
+ 0x31, 0x2E, 0x31, 0x20
 };
 
 static void DoINQUIRY(const uint8 *cdb)
@@ -1865,7 +1933,8 @@ static void DoREADHEADER10(const uint8 *cdb)
 
  if(HeaderLBA >= toc.tracks[100].lba)
  {
-  CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+  /* measured: END OF VOLUME (A25) */
+  CommandCCError(SENSEKEY_ILLEGAL_REQUEST, (WhichSystem == SCSICD_PCFX && !PCFXLegacyCD) ? NSE_END_OF_VOLUME : NSE_INVALID_PARAMETER);
   return;
  }
 
@@ -1873,6 +1942,18 @@ static void DoREADHEADER10(const uint8 *cdb)
  {
   CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
   return;
+ }
+
+ if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD)
+ {
+  const int hdr_track = TOC_FindTrackByLBA(&toc, HeaderLBA);
+  if(hdr_track && !(toc.tracks[hdr_track].control & 0x4))
+  {
+   /* measured (DIAG5 lab): READ HEADER on an audio sector never completes (>5 s, the initiator gives up) */
+   PCFXCDTRACE("READ HEADER at audio LBA %u: no answer", HeaderLBA);
+   PCFX_DeferCC(20000.0f, SENSEKEY_MEDIUM_ERROR, NSE_NOT_DATA_TRACK, 0);
+   return;
+  }
  }
 
  CDIF_ReadRawSector_C(Cur_CDIF, raw_buf, HeaderLBA);	//, HeaderLBA + 1);
@@ -2345,6 +2426,13 @@ static void DoREADBase(uint32 sa, uint32 sc)
 		CDReadTimer = PCFX_SectorClocks();
 		if(PCFX_ShouldEmulateSeek())
 			CDReadTimer += PCFX_MSToClocks(PCFX_CDSeekMS((int)pcfx_head_pos, (int)sa));
+		if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD)
+		{
+			PCFXEccStalled = false;
+			if(!PCFXEnvFlag("PCFXEMU_CD_NO_SPINUP") && PCFXIdleClocks > PCFX_MSToClocks(1500.0f))	/* motor idled: ~0.6 s spin-up (measured: first read 93 fields) */
+				CDReadTimer += PCFX_MSToClocks(35.0f * PCFX_FIELD_MS);
+			PCFXIdleClocks = 0;
+		}
 	}
 	else
 	{
@@ -2813,6 +2901,76 @@ static inline int32 scale_cdda_delta(int32 v)
 	return (v >= 0) ? ((v + 8) / 16) : ((v - 8) / 16);
 }
 
+static void PCFX_DeferCC(float ms, int key, int asc, int ascq)
+{
+	PCFXDeferCCTimer = PCFX_MSToClocks(ms);
+	PCFXDeferKey = key;
+	PCFXDeferAsc = asc;
+	PCFXDeferAscq = ascq;
+}
+
+/* A command whose firmware latency has elapsed: apply the post-reset behaviour, then run it. */
+static void PCFXRunDeferredCommand(void)
+{
+	const uint8 cmd = PCFXCmdCdb[0];
+	const bool media_address = (cmd == 0x08 || cmd == 0x28 || cmd == 0xA8 || cmd == 0x44 ||
+	                            cmd == 0x0B || cmd == 0x2B || cmd == 0x34);
+
+	if(cmd != 0x12 && cmd != 0x03 && PCFXUnitAttention)
+	{
+		PCFXUnitAttention = false;
+		PCFXCDTRACE("UNIT ATTENTION after bus reset");
+		CommandCCError(SENSEKEY_UNIT_ATTENTION, NSE_UNIT_ATTENTION_RESET);
+		return;
+	}
+	if(media_address && PCFXInitTimer > 0)
+	{
+		PCFXCDTRACE("drive still initialising after reset: END OF VOLUME");
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_END_OF_VOLUME);
+		return;
+	}
+
+	{
+		const bool prev_ps = (cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING);
+		PCFXCmdFunc(PCFXCmdCdb);
+		const bool new_ps = (cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING);
+		if(!prev_ps && new_ps)
+		{
+			memset(cdda.sr, 0, sizeof(cdda.sr));
+			memset(cdda.DeemphState, 0, sizeof(cdda.DeemphState));
+		}
+	}
+}
+
+static inline void RunPCFXLatency(int32 run_time)
+{
+	if(WhichSystem != SCSICD_PCFX || PCFXLegacyCD)
+		return;
+
+	if(PCFXIdleClocks < ((int64)1 << 40))
+		PCFXIdleClocks += run_time;
+	if(PCFXInitTimer > 0)
+		PCFXInitTimer -= run_time;
+
+	if(PCFXDeferCCTimer > 0)
+	{
+		PCFXDeferCCTimer -= run_time;
+		if(PCFXDeferCCTimer <= 0)
+		{
+			SCSI_FIFO_Flush(din);
+			cd.data_transfer_done = false;
+			CDReadTimer = 0;
+			CommandCCError_Impl(PCFXDeferKey, PCFXDeferAsc, PCFXDeferAscq);
+		}
+	}
+	if(PCFXCmdTimer > 0)
+	{
+		PCFXCmdTimer -= run_time;
+		if(PCFXCmdTimer <= 0)
+			PCFXRunDeferredCommand();
+	}
+}
+
 static inline void RunPCFXDelayedStatus(int32 run_time)
 {
 	/* Disabling the option while a command is waiting completes it immediately. */
@@ -3062,6 +3220,17 @@ static inline void RunCDRead(int32 run_time)
 					PCFXCDTRACE("LBA %u: READ reached an audio track", SectorAddr);
 					CommandCCError(SENSEKEY_MEDIUM_ERROR, NSE_NOT_DATA_TRACK);
 				}
+				else if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD && PCFXEccWindowMode2(tmp_read_buf))
+				{
+					/* Measured: a Mode 2 sector read through a 2048/2056-byte (error correcting) window is
+					 * retried for ~4.5 s and then reported as DATA FIELD UNCORRECT. */
+					PCFXCDTRACE("LBA %u: Mode 2 sector through a %u-byte error-correcting window: retrying", SectorAddr,
+					            PCFXSectorBytes);
+					SCSI_FIFO_Flush(din);
+					cd.data_transfer_done = false;
+					CDReadTimer = 0;
+					PCFX_DeferCC(270.0f * PCFX_FIELD_MS, SENSEKEY_MEDIUM_ERROR, 0x11, 0x00);
+				}
 				else if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD &&
 				        !PCFXJudgeSector(tmp_read_buf, SectorAddr))
 				{
@@ -3101,6 +3270,7 @@ static inline void RunCDRead(int32 run_time)
 
 					if(PCFX_ShouldEmulateSeek())
 						pcfx_head_pos = SectorAddr;
+					PCFXIdleClocks = 0;
 					SectorAddr++;
 					SectorCount--;
 
@@ -3110,7 +3280,7 @@ static inline void RunCDRead(int32 run_time)
 					if(SectorCount)
 					{
 						cd.data_transfer_done = false;
-						CDReadTimer += (uint64) 1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE;
+						CDReadTimer += (uint64) 1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE * ((WhichSystem == SCSICD_PCFX && !PCFXLegacyCD) ? PCFXSectorSlowPercent() : 100) / 100;
 					}
 					else
 					{
@@ -3132,6 +3302,7 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 	lastts = system_timestamp;
 
 	RunPCFXDelayedStatus(run_time);
+	RunPCFXLatency(run_time);
 	RunCDRead(run_time);
 	RunCDDA(system_timestamp, run_time);
 
@@ -3217,7 +3388,20 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 					for(int q = 0; q < 12; q++) fprintf(stderr, " %02x", cd.command_buffer[q]);
 					fprintf(stderr, "  (%s)\n", cmd_info_ptr->pretty_name);
 				}
-				cmd_info_ptr->func(cd.command_buffer);
+				if(WhichSystem == SCSICD_PCFX && !PCFXLegacyCD && cd.command_buffer[0] != 0x12 && cd.command_buffer[0] != 0x03)
+				{
+					/* Real firmware latency (see the measurements note above): the target stays in COMMAND
+					 * phase, REQ low, until it has decided what to do with the CDB. */
+					memcpy(PCFXCmdCdb, cd.command_buffer, sizeof(PCFXCmdCdb));
+					PCFXCmdFunc = cmd_info_ptr->func;
+					PCFXCmdTimer = PCFX_MSToClocks(PCFXLatencyFields() * PCFX_FIELD_MS);
+					if(PCFXCmdTimer < 1)
+						PCFXCmdTimer = 1;	/* zero latency: run on the next scheduler step */
+				}
+				else
+				{
+					cmd_info_ptr->func(cd.command_buffer);
+				}
 
 			bool new_ps = (cdda.CDDAStatus == CDDASTATUS_PLAYING || cdda.CDDAStatus == CDDASTATUS_SCANNING);
 
@@ -3346,6 +3530,12 @@ uint32 SCSICD_Run(scsicd_timestamp_t system_timestamp)
 
 	if(PCFXSeekTimer > 0 && PCFXSeekTimer < next_time)
 		next_time = PCFXSeekTimer;
+
+	if(PCFXCmdTimer > 0 && PCFXCmdTimer < next_time)
+		next_time = PCFXCmdTimer;
+
+	if(PCFXDeferCCTimer > 0 && PCFXDeferCCTimer < next_time)
+		next_time = PCFXDeferCCTimer;
 
 	if(PCFXAudioDelay > 0 && PCFXAudioDelay < next_time)
 		next_time = PCFXAudioDelay;
