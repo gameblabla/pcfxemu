@@ -1329,6 +1329,43 @@ uint16 FXVCE_Read16(uint32 A)
    fx_vce.palette_rw_latch = fx_vce.palette_table[fx_vce.palette_rw_offset];
    return ret;
   }
+  /* REGRESSION FIX.  Commit 6a49317 made every other register read back 0xFFFF ("open bus").  Real software
+   * reads these registers back: Team Innocent does a read-modify-write on R00 (clear one layer-enable bit at a
+   * time).  Reading 0xFFFF starts that sequence from "everything on", so the VDC prompt and BGs stayed visible
+   * on top of the FMV, with doubled text.  Returning the stored value (the long-standing behaviour, and what
+   * the game evidently sees on hardware) restores correct output.  R02 stays write-only, as the documentation
+   * says.  PCFX_VCE_OPEN_BUS=1 selects the 0xFFFF behaviour for experiments. */
+  {
+   static int open_bus = -1;
+   if(open_bus < 0) { const char *e = getenv("PCFX_VCE_OPEN_BUS"); open_bus = (e && e[0] && e[0] != '0') ? 1 : 0; }
+   if(!open_bus)
+   {
+    switch(fx_vce.AR)
+    {
+     case 0x00: return(fx_vce.picture_mode);
+     case 0x01: return(fx_vce.palette_rw_offset);
+     case 0x04: return(fx_vce.palette_offset[0]);
+     case 0x05: return(fx_vce.palette_offset[1]);
+     case 0x06: return(fx_vce.palette_offset[2]);
+     case 0x07: return(fx_vce.palette_offset[3]);
+     case 0x08: return(fx_vce.priority[0]);
+     case 0x09: return(fx_vce.priority[1]);
+     case 0x0a: return(fx_vce.ChromaKeyY);
+     case 0x0b: return(fx_vce.ChromaKeyU);
+     case 0x0c: return(fx_vce.ChromaKeyV);
+     case 0x0d: return(fx_vce.CCR);
+     case 0x0e: return(fx_vce.BLE);
+     case 0x0f: return(fx_vce.SPBL);
+     case 0x10: return(fx_vce.coefficients[0]);
+     case 0x11: return(fx_vce.coefficients[1]);
+     case 0x12: return(fx_vce.coefficients[2]);
+     case 0x13: return(fx_vce.coefficients[3]);
+     case 0x14: return(fx_vce.coefficients[4]);
+     case 0x15: return(fx_vce.coefficients[5]);
+     default: break;
+    }
+   }
+  }
   return 0xFFFF;  /* Unknown open-bus electrical value, not hardware-guaranteed. */
  }
 
@@ -4752,6 +4789,17 @@ static void MixLayers(void)
     // Rainbow layer disabled?
     if(rb_type == -1 || RAINBOWLayerDisable)
      priority_remap[LAYER_RAINBOW] = 0;
+    {   /* debug: PCFX_DEBUG_HIDE_LAYERS=<bitmask>: 1 VDC BG, 2 VDC sprites, 4..32 KING BG0..3, 64 RAINBOW */
+        static int hide = -1;
+        if(hide < 0) { const char *e = getenv("PCFX_DEBUG_HIDE_LAYERS"); hide = (e && e[0]) ? (int)strtol(e, NULL, 0) : 0; }
+        if(hide)
+        {
+            if(hide & 1) priority_remap[LAYER_VDC_BG] = 0;
+            if(hide & 2) priority_remap[LAYER_VDC_SPR] = 0;
+            for(int b = 0; b < 4; b++) if(hide & (4 << b)) priority_remap[LAYER_BG0 + b] = 0;
+            if(hide & 64) priority_remap[LAYER_RAINBOW] = 0;
+        }
+    }
 
     ble_cache[LAYER_NONE] = 0;
     for(uint_fast8_t x = 0; x < 4; x++)
