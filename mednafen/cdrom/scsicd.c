@@ -78,6 +78,7 @@ static PCFXReadMode PCFXMode;
  * stored). */
 static uint16 PCFXSectorBytes = 2048;
 static bool PCFXLegacyCD;	/* PCFXEMU_CD_LEGACY=1 */
+bool SCSICD_LegacyBehaviour(void) { return PCFXLegacyCD; }
 static bool PCFXCDTrace;	/* PCFXEMU_CD_TRACE=1 */
 
 #define PCFXCDTRACE(...) do { if(PCFXCDTrace) { fprintf(stderr, "[CD] " __VA_ARGS__); fputc('\n', stderr); } } while(0)
@@ -546,6 +547,7 @@ static void GenSubQFromSubPW(void)
 #define NSE_INVALID_COMMAND		0x20
 #define NSE_INVALID_ADDRESS		0x21
 #define NSE_INVALID_PARAMETER		0x22
+#define NSE_INVALID_PARAMETER_LIST	0x2A		// MODE SELECT list refused (measured on real hardware, DIAG4 T2: K5 A2A)
 #define NSE_END_OF_VOLUME		0x25
 #define NSE_INVALID_REQUEST_IN_CDB	0x27
 #define NSE_DISC_CHANGED		0x28		// Used with SENSEKEY_UNIT_ATTENTION
@@ -1161,7 +1163,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 		{
 			PCFXCDTRACE("  rejected vendor-unique list: len=%u bdl=%02x b4=%02x b9=%02x",
 			            data_len, data[3], data[4], data[9]);
-			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 			return;
 		}
 		PCFXMode.scsi2 = 0;
@@ -1181,7 +1183,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 
 	if(data_len < 4)
 	{
-		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 		return;
 	}
 
@@ -1197,13 +1199,13 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 
 	if(block_descriptor_length & 0x7)
 	{
-		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 		return;
 	}
 
 	if((offset + block_descriptor_length) > data_len)
 	{
-		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+		CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 		return;
 	}
 
@@ -1227,14 +1229,14 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 				case 2048: case 2324: case 2336: case 2340: case 2352:
 					break;
 				default:
-					CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+					CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 					return;
 			}
 		}
 		else if(requested > 0xFFFF || !PCFXScsi2Valid(data[4], requested))
 		{
 			PCFXCDTRACE("  rejected: density %02x / %u-byte blocks is not a supported combination", data[4], requested);
-			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+			CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 			return;
 		}
 	}
@@ -1251,7 +1253,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 	 {
 	  if((offset + 0x5) > data_len)
 	  {
-           CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+           CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 	   return;
 	  }
 
@@ -1263,7 +1265,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 
 	 if(offset >= data_len)
 	 {
-          CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+          CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 	  return;
 	 }
 
@@ -1279,13 +1281,13 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 	
 	   if(param_len != mp->param_length)
 	   {
-            CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+            CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
             return;
 	   }
 
 	   if((param_len + offset) > data_len)
 	   {
-            CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+            CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
             return;
 	   }
 
@@ -1302,7 +1304,7 @@ static void FinishMODESELECT6(const uint8 *data, const uint32 data_len)
 
 	 if(!page_found)
 	 {
-	  CommandCCError(SENSEKEY_ILLEGAL_REQUEST, NSE_INVALID_PARAMETER);
+	  CommandCCError(SENSEKEY_ILLEGAL_REQUEST, PCFXLegacyCD ? NSE_INVALID_PARAMETER : NSE_INVALID_PARAMETER_LIST);
 	  return;
 	 }
 	}

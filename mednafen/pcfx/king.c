@@ -2619,10 +2619,22 @@ void KING_Write8(const v810_timestamp_t timestamp, uint32 A, uint8 V)
  KING_Write16(timestamp, A & 0x706, V << ((A & 1) ? 8 : 0));
 }
 
+extern bool SCSICD_LegacyBehaviour(void);
+
 static inline void SCSI_Reg0_Write(uint8 V, bool delay_run)
 {
  king->Reg00 = V;
- SCSICD_SetDB(V);
+ /* The KING does not drive the SCSI data lines while the target-command register (reg 3) disagrees
+  * with the bus phase (the phase-match condition used for the DMA paths above): the target then reads
+  * an undriven bus, i.e. 0.  Measured on real hardware (DIAG4): a MODE SELECT sent with reg 3 left at
+  * COMMAND during DATA OUT reached the drive as an invalid list (PF=1) / an all-zero list (PF=0).
+  * Initiator-driven phases only (the target is not sending: IO=0). */
+ if(!SCSICD_LegacyBehaviour() && !SCSICD_GetIO() &&
+    (SCSICD_GetCD()  != ((king->Reg03 >> 1) & 1) ||
+     SCSICD_GetMSG() != ((king->Reg03 >> 2) & 1)))
+  SCSICD_SetDB(0);
+ else
+  SCSICD_SetDB(V);
 
  KINGDBG("WriteDB: %02x\n", V);
 
