@@ -1034,6 +1034,10 @@
 	{
 	 int iNum = ilevel;
 
+	 { static int trace_irq = -1; static unsigned long n_irq;
+	   if(trace_irq < 0) { const char *e = getenv("PCFXEMU_IRQ_TRACE"); trace_irq = (e && *e == '1'); }
+	   if(trace_irq && V810_GetPC() < 0xFFF00000u && (n_irq++ < 60)) { extern unsigned short PCFXIRQ_Read16(unsigned int); fprintf(stderr, "[IRQ] level %d at pc %08x psw %08x ts %d asserted %04x mask %04x\n", iNum, V810_GetPC(), S_REG[PSW], (int)v810_timestamp, PCFXIRQ_Read16(0), PCFXIRQ_Read16(0x40)); } }
+
 	 S_REG[EIPC]  = V810_GetPC();
 	 S_REG[EIPSW] = S_REG[PSW];
 

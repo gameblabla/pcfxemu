@@ -661,6 +661,8 @@ typedef struct
 	uint16 MPROGAddress;
 	uint16 MPROGData[0x10];
 	v810_timestamp_t KRAMWriteBusyUntil;
+	v810_timestamp_t KRAMReadBusyUntil;   /* DIAG7: consecutive KRAM reads are >= 16 clk apart */
+	v810_timestamp_t VCEWriteBusyUntil;   /* DIAG7: a HuC6261 register write keeps the VCE port busy ~6 clk */
         /* v13: optional single-entry posted CPU KRAM write: address and data
          * remain invisible to KRAM consumers until the modeled drain time. */
         uint8 KRAMWritePending;
@@ -1503,6 +1505,8 @@ void KING_EndFrame(v810_timestamp_t timestamp)
  scsicd_ne = SCSICD_Run(timestamp);
  /* CPU/device timestamps restart at zero for the next field.  Keep only the
   * outstanding portion of the posted-write drain across that rebase. */
+ if(king->KRAMReadBusyUntil > timestamp) king->KRAMReadBusyUntil -= timestamp; else king->KRAMReadBusyUntil = 0;
+ if(king->VCEWriteBusyUntil > timestamp) king->VCEWriteBusyUntil -= timestamp; else king->VCEWriteBusyUntil = 0;
  if(king->KRAMWriteBusyUntil > timestamp)
   king->KRAMWriteBusyUntil -= timestamp;
  else
@@ -2405,7 +2409,52 @@ static void KING_ADPCMEnableAtHSync(void)
  SoundBox_SetKINGADPCMControl(king->ADPCMControl);
 }
 
+
+/* Debug: ring buffer of the CPU's KING SCSI-register accesses (PCFXEMU_KING_TRACE=1), dumped at exit. */
+typedef struct { v810_timestamp_t ts; uint16 A, AR, V; char rw; } KTrEv;
+static KTrEv ktr_ring[4096];
+static unsigned ktr_n;
+static int ktr_on = -1;
+static uint16 ktr_last602 = 0xFFFF;
+extern void SCSICD_DebugDump(void);
+static void ktr_dump(void)
+{
+ SCSICD_DebugDump();
+ fprintf(stderr, "[KING] DMAStatus %04x size %u flip %d recv %d retire %d bounded %d addr %05x\n", king->DMAStatus, (unsigned)king->DMATransferSize, (int)king->DMATransferFlipFlop, (int)king->dma_receive_active, (int)king->DMARetirePending, (int)king->DMACountBounded, (unsigned)king->DMATransferAddr);
+ unsigned n = ktr_n < 4096 ? ktr_n : 4096, i, first = ktr_n < 4096 ? 0 : ktr_n % 4096;
+ unsigned from = n > 300 ? n - 300 : 0;
+ for(i = from; i < n; i++)
+ {
+  const KTrEv *e = &ktr_ring[(first + i) % 4096];
+  fprintf(stderr, "[KTR] %10d %c A=%03x AR=%02x V=%04x\n", (int)e->ts, e->rw, e->A, e->AR, e->V);
+ }
+}
+static unsigned ktr_frames;
+static void ktr_frame(void)
+{
+ if(ktr_on < 0) { const char *e = getenv("PCFXEMU_KING_TRACE"); ktr_on = (e && *e == '1'); }
+ if(!ktr_on) return;
+ if(++ktr_frames == (unsigned)(getenv("PCFXEMU_KING_TRACE_FRAME") ? atoi(getenv("PCFXEMU_KING_TRACE_FRAME")) : 0)) ktr_dump();
+}
+static void ktr_log(char rw, const v810_timestamp_t ts, uint32 A, uint16 V)
+{
+ if(ktr_on < 0) { const char *e = getenv("PCFXEMU_KING_TRACE"); ktr_on = (e && *e == '1'); }
+ if(!ktr_on) return;
+ if((A & 0x704) == 0x600 && (A & 2) && rw == 'R') { if(V == ktr_last602) return; ktr_last602 = V; }
+ else if((A & 0x704) == 0x600 && !(A & 2) && rw == 'R') return;
+ else if((A & 0x704) == 0x604 && king->AR > 0x0F) return;
+ KTrEv *e = &ktr_ring[ktr_n++ % 4096];
+ e->ts = ts; e->A = (uint16)A; e->AR = king->AR; e->V = V; e->rw = rw;
+}
+
+static uint16 KING_Read16_impl(const v810_timestamp_t timestamp, uint32 A);
 uint16 KING_Read16(const v810_timestamp_t timestamp, uint32 A)
+{
+ uint16 v = KING_Read16_impl(timestamp, A);
+ ktr_log('R', timestamp, A, v);
+ return v;
+}
+static uint16 KING_Read16_impl(const v810_timestamp_t timestamp, uint32 A)
 {
  int msh = A & 2;
  uint16 ret = 0;
@@ -2701,9 +2750,16 @@ static inline void SCSI_Reg2_Write(uint8 V, bool delay_run)
  if(!(V & 0x2) && (king->Reg02 & 0x2))
  {
 
-  { // HACK(probably)
-   king->CDInterrupt = FALSE;
-   RedoKINGIRQCheck();
+  { // HACK(probably).  Real hardware (DIAG9 K14, 2026-11-01): after the player turned DMA mode off the SCSI interrupt
+    // latch (KING SR bit 14) was STILL set and the KING IRQ line stayed asserted for minutes.  Default now follows the
+    // hardware; PCFXEMU_KING_SCSIIRQ_CLEAR_ON_MODE=1 restores the old clearing.
+    static int clr = -1;
+    if(clr < 0) { const char *e = getenv("PCFXEMU_KING_SCSIIRQ_CLEAR_ON_MODE"); clr = (e && *e == '1') ? 1 : 0; }
+    if(clr)
+    {
+     king->CDInterrupt = FALSE;
+     RedoKINGIRQCheck();
+    }
   }
 
   SCSICD_SetACK(0);
@@ -2885,14 +2941,35 @@ static void kbt_report(unsigned long long frames)
  * previous one drains. This is now the sole timing path.
  * Source-defined request categories are tracked below; exact silicon phase
  * and request-to-grant latency are not in the manual. */
+/* DIAG7/DIAG9 K2 with all 8 slots busy (2544.6 ns/write on a console vs 2113 here): writes only get through in the
+ * horizontal blank, and the console's usable window is ~60 clk shorter than "everything after the 1024-clk active picture",
+ * i.e. BG fetch keeps its slot pattern for a little while past the right edge (line-ahead prefetch).  The tail only matters
+ * when most slots are busy.  PCFXEMU_KRAM_BG_TAIL=<clk> overrides (0 = old model). */
+static uint32 king_bg_tail_clocks(void)
+{
+ static int cached = -1;
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFXEMU_KRAM_BG_TAIL");
+  cached = e && *e ? atoi(e) : 60;
+  if(cached < 0) cached = 0;
+ }
+ return (uint32)cached;
+}
+
 static v810_timestamp_t KING_KBusGrantDeadline(v810_timestamp_t accepted,
                                                v810_timestamp_t now,
-                                               unsigned bank, unsigned required_grants)
+                                               unsigned bank, unsigned required_grants,
+                                               unsigned mbank)
 {
  /* Each KING dot lasts four V810 clocks. Estimate completion after four
   * grantable KING dots. HPhaseCounter is the remaining active-picture
   * clock count at `now`, as updated by KING_Update(). */
- const bool active = HPhase == HPHASE_ACTIVE && !fx_vce.in_hblank;
+ /* DIAG7 K2 (real console): BG fetch only steals KRAM bus slots in the ACTIVE display lines (raster 22..261): a
+  * write in blanking costs the same as with no microprogram at all, and a microprogram in bank A never slows writes to
+  * bank B (bank = KRAM address bit 17, which is also what picks the microprogram half).  Both were missing before. */
+ const bool active = HPhase == HPHASE_ACTIVE && !fx_vce.in_hblank &&
+                     fx_vce.raster_counter >= 22 && fx_vce.raster_counter < 262;
  const uint32 remaining = active && HPhaseCounter > 0 ? (uint32)HPhaseCounter : 0u;
  const uint32 elapsed = active && remaining <= 1024u ? 1024u - remaining : 0u;
  const uint32 start = (uint32)(accepted - now);
@@ -2902,15 +2979,15 @@ static v810_timestamp_t KING_KBusGrantDeadline(v810_timestamp_t accepted,
   * Outside active video no BG fetch slots are reserved in this model. */
  if(active)
   delta += (4u - ((elapsed + start) & 3u)) & 3u;
- else
-  delta += (4u - (start & 3u)) & 3u;
+ /* else: outside the active picture there is no slot grid to align to (the old (start & 3) alignment was relative to
+  * the write's own timestamp and added ~1.5 clocks of phase noise; K2 blanking = 566.7 ns on hardware). */
  for(unsigned guard = 0; guard < 512 && grants < required_grants; guard++, delta += 4)
  {
   bool bg_request = false;
-  if(active && delta < remaining && (king->MPROGControl & 1u))
+  if(active && delta < remaining + king_bg_tail_clocks() && (king->MPROGControl & 1u))
   {
    const unsigned slot = ((elapsed + delta) / 4u) & 7u;
-   const uint16 mp = king->MPROGData[(bank & 1u) * 8u + slot];
+   const uint16 mp = king->MPROGData[(mbank & 1u) * 8u + slot];
    if(!(mp & 0x100u))
    {
     const unsigned bg = (mp >> 6) & 3u;
@@ -2930,10 +3007,53 @@ static v810_timestamp_t KING_KBusGrantDeadline(v810_timestamp_t accepted,
  return now + delta;
 }
 
-static v810_timestamp_t KING_KRAMSlotDrainDeadline(v810_timestamp_t accepted,
-                                                      v810_timestamp_t now, unsigned bank)
+/* CPU KRAM write cost, fitted to the DIAG7 K1/K2 photos of a real console (2026-11-01).  Measured per dense OUT.H:
+ *   no BG fetch                 567.4 ns (12.2 clk), flat up to 4 NOPs of spacing, hidden by a 16-NOP gap (posted write)
+ *   BG fetch slots 0..n-1 busy  n=1 598.8   n=2 698.4   n=4 714.7   n=8 2544.6 ns, active display only, same bank only
+ * which a "one free dot grant (4 clk) to start, then the latch recovers 2 more dots (8 clk) whatever the BG does" model
+ * reproduces (n=0 12 clk, n=1 12.8, n=2/4 15.0 clk).  The earlier "4 grants" model gave 761 ns and 18.8 clk at n=4.
+ * PCFXEMU_KRAM_DRAIN_GRANTS=4 (+ recovery 0) restores the old behaviour. */
+static unsigned king_kram_drain_grants(void)
 {
- return KING_KBusGrantDeadline(accepted, now, bank, 4);
+ static int cached = -1;
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFXEMU_KRAM_DRAIN_GRANTS");
+  cached = (e && e[0] >= '1' && e[0] <= '8' && e[1] == '\0') ? (e[0] - '0') : 1;
+ }
+ return (unsigned)cached;
+}
+
+static unsigned king_kram_recovery_clocks(void)
+{
+ static int cached = -1;
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFXEMU_KRAM_DRAIN_GRANTS");
+  cached = (e && e[0] == '4' && e[1] == '\0') ? 0 : 8;
+ }
+ return (unsigned)cached;
+}
+
+/* Set by the memory-mapped (ST.H/ST.W to 0xBC000000) store path.  The 12-clk figure above was measured with OUT.H only;
+ * the 3D tank demo, which stores through the mapped window, runs 18-19 FPS on a console and 20-22 with the old
+ * 16-clk model, so the mapped path keeps the old model until DIAG8 measures ST.H / ST.W / OUT.W directly. */
+int king_kram_write_mapped;
+
+static v810_timestamp_t KING_KRAMSlotDrainDeadline(v810_timestamp_t accepted,
+                                                      v810_timestamp_t now, unsigned bank, unsigned mbank)
+{
+ static int mapped_fast = -1;
+ if(mapped_fast < 0) mapped_fast = getenv("PCFXEMU_KRAM_MAPPED_FAST") ? 1 : 0;
+ /* DIAG9 K11/K12 on a console (2026-11-01): ST.H / ST.W / ST.B through the 0xBC000000 window cost exactly what OUT.H /
+  * OUT.W / OUT.B cost, dense (ST.H 567.2 ns, ST.W 1134.6, ST.B 567.3 vs OUT.H 567.4, OUT.W 1135.0, OUT.B 567.2) and under BG
+  * load (K12: ST.H 566/599/698/712, OUT.H 567/599/698/713 at 0/1/2/4 busy slots).  The old 4-grant model for the window
+  * (kept so the 3D tank demo matched its 18-19 FPS) is retired; PCFXEMU_KRAM_MAPPED_OLD=1 restores it. */
+ static int mapped_old = -1;
+ if(mapped_old < 0) mapped_old = getenv("PCFXEMU_KRAM_MAPPED_OLD") ? 1 : 0;
+ if(king_kram_write_mapped && mapped_old && !mapped_fast)
+  return KING_KBusGrantDeadline(accepted, now, bank, 4, mbank);
+ return KING_KBusGrantDeadline(accepted, now, bank, king_kram_drain_grants(), mbank) + king_kram_recovery_clocks();
 }
 
 /* A KRAM write enters KING's input latch and releases the CPU while that
@@ -2942,6 +3062,24 @@ static v810_timestamp_t KING_KRAMSlotDrainDeadline(v810_timestamp_t accepted,
  * already charged four clocks by the time this callback sees the write, so
  * 12 remain in this timestamp domain.  A second write before then holds the
  * CPU in WAIT until the latch is free. */
+
+/* DIAG7 K3 (VW;VW = 565.4 ns for two writes, KW;VW = VW;KW = 567.4 ns = fully overlapped): the VCE port is its own
+ * device, busy ~6 clk (282.7 ns) per posted register write, independent of the KRAM latch. */
+uint32 KING_VCEWriteWaitCycles(const v810_timestamp_t timestamp)
+{
+ uint32 wait = 0;
+ if(king->VCEWriteBusyUntil > timestamp) wait = (uint32)(king->VCEWriteBusyUntil - timestamp);
+ king->VCEWriteBusyUntil = timestamp + wait + 6;
+ return wait;
+}
+
+static uint64_t kst_w[2][2], kst_wait[2][2];   /* [bank][active] */
+static void kst_dump(void)
+{
+ for(int b=0;b<2;b++) for(int a=0;a<2;a++)
+  fprintf(stderr,"[KRAMW] bank %c %s: writes %llu wait %llu clk (%.2f/write)\n", 'A'+b, a?"active":"blank ",
+    (unsigned long long)kst_w[b][a], (unsigned long long)kst_wait[b][a], kst_w[b][a]?(double)kst_wait[b][a]/kst_w[b][a]:0.0);
+}
 
 uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A)
 {
@@ -2956,8 +3094,13 @@ uint32 KING_KRAMWriteWaitCycles(const v810_timestamp_t timestamp, uint32 A)
  if(ready > timestamp)
   wait = (uint32)(ready - timestamp);
 
+ {
+  static int st=-1; if(st<0){ const char*e=getenv("PCFXEMU_KRAMW_STATS"); st=(e&&*e=='1'); if(st) atexit(kst_dump);} 
+  if(st){ const unsigned b=(king->KRAMWA>>17)&1u; const unsigned a=(HPhase == HPHASE_ACTIVE && !fx_vce.in_hblank && fx_vce.raster_counter>=22 && fx_vce.raster_counter<262); kst_w[b][a]++; kst_wait[b][a]+=wait; if(kst_w[0][1]==3000000){ fprintf(stderr,"[KRAMW] MPROGControl %04x priority %04x bgmode %04x MPROG:", king->MPROGControl, king->priority, king->bgmode); for(int i=0;i<16;i++) fprintf(stderr," %03x", king->MPROGData[i]); fprintf(stderr,"\n"); } }
+ }
  king->KRAMWriteBusyUntil = KING_KRAMSlotDrainDeadline(timestamp + wait, timestamp,
-                                                     KING_KRAMPage((king->KRAMWA >> 31) & 1u));
+                                                     KING_KRAMPage((king->KRAMWA >> 31) & 1u),
+                                                     (king->KRAMWA >> 17) & 1u);
 #ifdef V810_PROFILE
  kbt_write_count++;
  { unsigned b=kbt_source_bucket();
@@ -3017,9 +3160,13 @@ uint32 KING_KRAMReadWaitCycles(v810_timestamp_t timestamp, uint32 A)
  if(!(A & 0x4) || king->AR != 0x0E) return 0;
  KING_Update(timestamp);
  const unsigned bank=KING_KRAMPage((king->KRAMRA >> 31) & 1u);
- const v810_timestamp_t ready=king->KRAMWriteBusyUntil > timestamp ?
+ v810_timestamp_t ready=king->KRAMWriteBusyUntil > timestamp ?
                                  king->KRAMWriteBusyUntil : timestamp;
- const v810_timestamp_t completed=KING_KBusGrantDeadline(ready,timestamp,bank,1);
+ if(king->KRAMReadBusyUntil > ready) ready = king->KRAMReadBusyUntil;
+ /* DIAG7 K1/K3: back-to-back KRAM reads come 16.5 clk apart (773.5 ns dense; KR;KR 1537 ns) although each returns its
+  * data to the CPU after ~12 clk (KR;KW = 24.3 clk = 12.1 + a 12.2 clk write). */
+ king->KRAMReadBusyUntil = ready + 16;
+ const v810_timestamp_t completed=KING_KBusGrantDeadline(ready,timestamp,bank,1,(king->KRAMRA >> 17) & 1u);
  const uint32 wait=(uint32)(completed-timestamp+1);
 #ifdef V810_PROFILE
  kbt_read_count++;
@@ -3033,6 +3180,7 @@ static void KING_RefreshBGModeAtCurrentDot(void);
 void KING_Write16(const v810_timestamp_t timestamp, uint32 A, uint16 V)
 {
  int msh = A & 0x2;
+ ktr_log('W', timestamp, A, V);
 
  //printf("Write16: %08x %04x\n", A, V);
 
@@ -3724,6 +3872,45 @@ static inline void DRAWBG8x1_16M(uint32 *target, const uint16 *cgptr, const uint
 
 //static bool bgmode_warning = 0; // Debug
 
+/* BAT-referenced CG fetch latency (HuC6272 manual 3.6.7.4(B)).
+ *
+ * The BAT-referenced CG reads of one 8-dot cell have to be written at least two cycles after the cycle that reads
+ * the BAT word (counting 7 -> 0 only while working out "two cycles after"), i.e. in cycles ((bat + 2) & 7) .. 7.
+ * A CG read written outside that window is not rejected: it silently returns the CG word of the cell eight dots to
+ * the LEFT.  Confirmed on real hardware by Super Mario Bros PC-FX (commit 3d7fca35): its world-3 HUD, with the BAT
+ * read at cycle 2 and the first BAT-CG read at cycle 3, came out with half of every row taken from the neighbouring
+ * cell, while emulators that fetch the whole cell at once drew it correctly.
+ *
+ * PCFXEMU_KING_BATCG_LATENCY=0 restores the old "always correct" fetch. */
+static bool king_batcg_latency_enabled(void)
+{
+ static int cached = -1;
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFXEMU_KING_BATCG_LATENCY");
+  cached = (e && e[0] == '0' && e[1] == '\0') ? 0 : 1;
+ }
+ return cached != 0;
+}
+
+/* TENTATIVE strict-affine model, OFF unless PCFXEMU_KING_STRICT_AFFINE=1 (see DrawBG). */
+static bool king_strict_affine_enabled(void)
+{
+ static int cached = -1;
+ if(cached < 0)
+ {
+  const char *e = getenv("PCFXEMU_KING_STRICT_AFFINE");
+  cached = (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+ }
+ return cached != 0;
+}
+
+/* Is a BAT-referenced CG read in `cg_cycle` too early for a BAT read in `bat_cycle` (both 0..7)? */
+static inline bool king_batcg_too_early(int bat_cycle, int cg_cycle)
+{
+ return cg_cycle < ((bat_cycle + 2) & 7);
+}
+
 #include "king-bgfast.inc"
 
 static inline int32 max(int32 a, int32 b)
@@ -3875,6 +4062,11 @@ static void DrawBG(uint32 *target, int n)
  memset(cg_sub_remap, 0, sizeof(cg_sub_remap));
  memset(cg_sub_ofbat, 0, sizeof(cg_sub_ofbat));
 
+ /* Which basic-cycle (0..7) each CG read / the BAT read sits in, for the BAT->CG latency rule. */
+ int cg_cycle[8] = { 0 }, cg_sub_cycle[8] = { 0 };
+ int bat_cycle = -1, bat_sub_cycle = -1;
+ bool cg_late[8] = { false }, cg_sub_late[8] = { false };
+
  if(king->MPROGControl & 0x1)
  {
   int remap_thing = 0;
@@ -3894,6 +4086,7 @@ static void DrawBG(uint32 *target, int n)
     cg_mask[remap_thing] = 0xFFFF;
     cg_remap[remap_thing] = mpd & 0x7;
     cg_ofbat[remap_thing] = mpd & 0x8;
+    cg_cycle[remap_thing] = x;
 
     if((bool)(mpd & 0x20) != rotate_mode)
     {
@@ -3909,6 +4102,7 @@ static void DrawBG(uint32 *target, int n)
     cg_sub_mask[remap_sub_thing] = 0xFFFF;
     cg_sub_remap[remap_sub_thing] = mpd & 0x7;
     cg_sub_ofbat[remap_sub_thing] = mpd & 0x8;
+    cg_sub_cycle[remap_sub_thing] = x;
 
     if((bool)(mpd & 0x20) != rotate_mode)
     {
@@ -3919,18 +4113,54 @@ static void DrawBG(uint32 *target, int n)
    }
   }
 
+  int bat_fetches = 0, bat_sub_fetches = 0;
   for(uint_fast8_t x = 0; x < 8; x++)
   {
    uint16 mpd;
 
    mpd = king->MPROGData[((bat_offset & 0x20000) ? 0x8 : 0x0) + x];
    if(((mpd >> 6) & 0x3) == n && !(mpd & 0x100) && (mpd & 0x010) && (bool)(mpd & 0x020) == rotate_mode)
+   {
     BATFetchCycle = TRUE;
+    if(!bat_fetches++) bat_cycle = x;
+   }
 
    mpd = king->MPROGData[((bat_sub_offset & 0x20000) ? 0x8 : 0x0) + x];
    if(((mpd >> 6) & 0x3) == n && !(mpd & 0x100) && (mpd & 0x010) && (bool)(mpd & 0x020) == rotate_mode)
+   {
     BATSubFetchCycle = TRUE;
+    if(!bat_sub_fetches++) bat_sub_cycle = x;
+   }
   }
+
+  /* BAT->CG latency.  Only the single-BAT (external block-sequential) schedule has a defined window; with several
+   * BAT reads per cell (external dot-sequential) each one has its own two-cycle window and is not modelled. */
+  if(!rotate_mode && (bgmode & 0x8) && king_batcg_latency_enabled())
+  {
+   for(int i = 0; i < remap_thing; i++)
+    if(cg_ofbat[i] && bat_fetches == 1 && king_batcg_too_early(bat_cycle, cg_cycle[i])) cg_late[i] = true;
+   for(int i = 0; i < remap_sub_thing; i++)
+    if(cg_sub_ofbat[i] && bat_sub_fetches == 1 && king_batcg_too_early(bat_sub_cycle, cg_sub_cycle[i])) cg_sub_late[i] = true;
+  }
+ }
+
+ /* TENTATIVE, default OFF (PCFXEMU_KING_STRICT_AFFINE=1): a rotated plane is drawn only if the microprogram really has
+  * the fetches the manual demands -- 8 rotated CG accesses (and 8 rotated BAT accesses for external-BAT modes) for this
+  * plane in the bank its CG (BAT) base selects.  Otherwise it is blank.  The default (always draw from the base
+  * registers) is the historical behaviour; what silicon does with a missing/partial microprogram is not yet measured
+  * (DIAG7 lab K7).  Found by tests/king_mprog_fuzz_test.c (CENSUS). */
+ if(rotate_mode && king_strict_affine_enabled())
+ {
+  int rot_cg = 0, rot_bat = 0;
+  for(uint_fast8_t x = 0; x < 8; x++)
+  {
+   uint16 mpd = king->MPROGData[((cg_offset & 0x20000) ? 0x8 : 0x0) + x];
+   if(((mpd >> 6) & 0x3) == n && !(mpd & 0x100) && !(mpd & 0x010) && (mpd & 0x20)) rot_cg++;
+   mpd = king->MPROGData[((bat_offset & 0x20000) ? 0x8 : 0x0) + x];
+   if(((mpd >> 6) & 0x3) == n && !(mpd & 0x100) && (mpd & 0x010) && (mpd & 0x20)) rot_bat++;
+  }
+  if(!(king->MPROGControl & 1) || rot_cg != 8 || ((bgmode & 0x8) && rot_bat != 8))
+   return;
  }
 
  int bat_y = (YOffset >> 3) & bat_bitsize_mask;
@@ -4085,6 +4315,7 @@ static void DrawBG(uint32 *target, int n)
   else switch(bgmode & 0x7)
   {
 #define DRAWBG8x1_MAC(cg_needed, blit_suffix, pbn_arg)	\
+			 do { const uint16 *prev_bat_cg = NULL; /* previous cell's BAT-referenced CG row (TENTATIVE latency model) */ \
 			 for(uint_fast16_t x = 0; x < 256 + 8; x+= 8)     	\
                          {                                      	\
                           if(bat_x < bat_width && bat_y < bat_height)	\
@@ -4113,7 +4344,12 @@ static void DrawBG(uint32 *target, int n)
 				& 0x1FFFF];							\
 													\
 		           for(int cow = 0; cow < cg_needed; cow++)					\
-		            cg[cow] = cgptr[cg_ofbat[cow]][cg_remap[cow]] & cg_mask[cow];		\
+		           {										\
+		            const uint16 *src_ = cgptr[cg_ofbat[cow]];					\
+		            if(cg_late[cow] && prev_bat_cg) src_ = prev_bat_cg;				\
+		            cg[cow] = src_[cg_remap[cow]] & cg_mask[cow];				\
+		           }										\
+		           prev_bat_cg = cgptr[1];							\
 													\
 		           DRAWBG8x1_##blit_suffix(target + x, cg, palette_ptr + pbn_arg, layer_or);	\
 			  }                                     					\
@@ -4143,12 +4379,17 @@ static void DrawBG(uint32 *target, int n)
                                 & 0x1FFFF];                                                 \
                                                                                                         \
                            for(int cow = 0; cow < cg_needed; cow++)                                     \
-                            cg[cow] = cgptr[cg_sub_ofbat[cow]][cg_sub_remap[cow]] & cg_sub_mask[cow];   \
+                           {                                                                            \
+                            const uint16 *src_ = cgptr[cg_sub_ofbat[cow]];                              \
+                            if(cg_sub_late[cow] && prev_bat_cg) src_ = prev_bat_cg;                     \
+                            cg[cow] = src_[cg_sub_remap[cow]] & cg_sub_mask[cow];                       \
+                           }                                                                            \
+                           prev_bat_cg = cgptr[1];                                                      \
                                                                                                         \
                            DRAWBG8x1_##blit_suffix(target + x, cg, palette_ptr + pbn_arg, layer_or);    \
 			  }										\
                           bat_x = (bat_x + 1) & bat_bitsize_mask; 					\
-                         }
+                         } } while(0)
 
 
    case 0x01: // 4 color, 1/4 byte per pixel :b
@@ -5197,6 +5438,7 @@ static void MDFN_FASTCALL KING_RunGfx(int32 clocks)
 
 			if(!fx_vce.raster_counter)
 			{
+			 ktr_frame();
 			 V810_Exit();
 			}
 
@@ -5414,6 +5656,8 @@ int KING_StateAction(StateMem *sm, int load, int data_only)
   SFVARN(king->dma_send_active, "dma_send_active"),
   SFVARN(king->dma_cycle_counter, "dma_cycle_counter"),
   SFVARN(king->KRAMWriteBusyUntil, "KRAMWriteBusyUntil"),
+  SFVARN(king->KRAMReadBusyUntil, "KRAMReadBusyUntil"),
+  SFVARN(king->VCEWriteBusyUntil, "VCEWriteBusyUntil"),
   SFVARN(king->KRAMWritePending, "KRAMWritePending"),
   SFVARN(king->KRAMWritePendingPage, "KRAMWritePendingPage"),
   SFVARN(king->KRAMWritePendingAddress, "KRAMWritePendingAddress"),

@@ -3159,6 +3159,7 @@ static inline void RunCDRead(int32 run_time)
 				          (unsigned)din->in_count);
 				CDReadTimer += (uint64) 1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE;
 				//CDReadTimer += (uint64) 1 * 128 * System_Clock / CD_DATA_TRANSFER_RATE;
+				if(CDReadTimer <= 0) CDReadTimer = 1;	// see the catch-up note at the sector-delivery site below
 			}
 			else
 			{
@@ -3281,6 +3282,12 @@ static inline void RunCDRead(int32 run_time)
 					{
 						cd.data_transfer_done = false;
 						CDReadTimer += (uint64) 1 * 2048 * System_Clock / CD_DATA_TRANSFER_RATE * ((WhichSystem == SCSICD_PCFX && !PCFXLegacyCD) ? PCFXSectorSlowPercent() : 100) / 100;
+						/* Catch-up: this routine only runs while CDReadTimer > 0 and SCSICD_Run() is called when the CPU
+						 * touches the drive.  If the CPU went a long time without doing so (a 700-word KRAM copy, the
+						 * header parse) the timer was overshot by more than one sector period, so the sum above is still
+						 * <= 0 and the pump would never run again: the drive sat in DATA IN with REQ low, with 26 sectors
+						 * still to deliver, forever (DIAG9 PLAY, emulator only).  Deliver the next sector at once instead. */
+						if(CDReadTimer <= 0) CDReadTimer = 1;
 					}
 					else
 					{
@@ -3726,4 +3733,13 @@ int SCSICD_StateAction(StateMem* sm, const unsigned load, const bool data_only, 
 	}
 
 	return (ret);
+}
+
+
+/* Debug: PCFXEMU_KING_TRACE=1 dumps this at exit (see king.c ktr_dump). */
+void SCSICD_DebugDump(void)
+{
+ fprintf(stderr, "[SCSICD] phase %u REQ %d ACK %d BSY %d CDReadTimer %d SectorCount %u SectorAddr %u fifo_in %u done %d\n",
+         CurrentPhase, (int)REQ_signal, (int)ACK_signal, (int)BSY_signal, (int)CDReadTimer, (unsigned)SectorCount,
+         (unsigned)SectorAddr, (unsigned)din->in_count, (int)cd.data_transfer_done);
 }

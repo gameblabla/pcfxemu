@@ -143,6 +143,7 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t *timestamp, uint32 A, uint
   else if(A >= 0x300 && A <= 0x3FF) // FXVCE
   {
    (*timestamp) += 2;
+   (*timestamp) += KING_VCEWriteWaitCycles(*timestamp);
    FXVCE_Write16(A, V);
   }
   else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
@@ -151,6 +152,8 @@ static void MDFN_FASTCALL port_wbyte(v810_timestamp_t *timestamp, uint32 A, uint
 
    if(!(A & 4))
     Last_VDC_AR[(A >> 8) & 0x1] = V;
+   { static int tr = -1; static unsigned n; if(tr < 0) { const char *e = getenv("PCFXEMU_VDC_TRACE"); tr = (e && *e == '1'); }
+     if(tr && (A & 4) && (Last_VDC_AR[(A >> 8) & 0x1] & 0x1F) == 5 && (unsigned)V810_GetPC() < 0xFFF00000u && n++ < 300) fprintf(stderr, "[VDCCR] chip %d CR=%04x pc %08x\n", (A >> 8) & 1, V, (unsigned)V810_GetPC()); }
 
    VDC_Write16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, V);
   }
@@ -212,6 +215,7 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t *timestamp, uint32 A, uin
   else if(A >= 0x300 && A <= 0x3FF)
   {
    (*timestamp) += 2;
+   (*timestamp) += KING_VCEWriteWaitCycles(*timestamp);
    FXVCE_Write16(A, V);
   }
   else if(A >= 0x400 && A <= 0x5FF) // 0x400-0x4FF: VDC-A ; 0x500-0x5FF: VDC-B
@@ -220,6 +224,8 @@ static void MDFN_FASTCALL port_whword(v810_timestamp_t *timestamp, uint32 A, uin
 
    if(!(A & 4))
     Last_VDC_AR[(A >> 8) & 0x1] = V;
+   { static int tr = -1; static unsigned n; if(tr < 0) { const char *e = getenv("PCFXEMU_VDC_TRACE"); tr = (e && *e == '1'); }
+     if(tr && (A & 4) && (Last_VDC_AR[(A >> 8) & 0x1] & 0x1F) == 5 && (unsigned)V810_GetPC() < 0xFFF00000u && n++ < 300) fprintf(stderr, "[VDCCR] chip %d CR=%04x pc %08x\n", (A >> 8) & 1, V, (unsigned)V810_GetPC()); }
 
    VDC_Write16(fx_vdc_chips[(A >> 8) & 0x1], (A & 4) >> 2, V);
   }

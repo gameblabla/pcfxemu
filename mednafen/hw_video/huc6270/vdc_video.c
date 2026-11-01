@@ -378,6 +378,8 @@ void VDC_IncRCR(VDC *vdc)
 
 void VDC_DoVBIRQTest(VDC *vdc)
 {
+ { static int tr = -1; static unsigned n; if(tr < 0) { const char *e = getenv("PCFXEMU_VDC_TRACE"); tr = (e && *e == '2'); }
+   if(tr && n++ < 4000) fprintf(stderr, "[VDCVB] chip %p CR=%04x\n", (void*)vdc, (unsigned)CR); }
  if(CR & 0x08)
  {
   //VDC_DEBUG("VBlank IRQ");

@@ -15,6 +15,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include "pcfx.h"
 #include "interrupt.h"
 #include "../state_helpers.h"
@@ -57,6 +58,9 @@ void PCFXIRQ_Assert(int source, bool assert)
 {
    //assert(source >= 0 && source <= 7);
 
+   { static int tr = -1; static unsigned long n; if(tr < 0) { const char *e = getenv("PCFXEMU_IRQ_TRACE"); tr = (e && *e == '1') ? 1 : ((e && *e == '2') ? 2 : 0); }
+     if(tr == 1 && assert && n++ < 40) fprintf(stderr, "[IRQSRC] assert src %d mask %04x prio %04x/%04x\n", source, InterruptMask, InterruptPriority[0], InterruptPriority[1]);
+     if(tr == 2 && (source == 4 || source == 5 || source == 6) && n++ >= (unsigned long)(getenv("PCFXEMU_IRQ_TRACE_FROM") ? atol(getenv("PCFXEMU_IRQ_TRACE_FROM")) : 0) && n < 100000) fprintf(stderr, "[IRQSRC] src %d %s mask %04x\n", source, assert ? "ASSERT" : "clear", InterruptMask); }
    InterruptAsserted &= ~(1 << (7 - source));
 
    if(assert)

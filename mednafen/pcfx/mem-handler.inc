@@ -60,6 +60,12 @@ static uint8 MDFN_FASTCALL mem_rbyte(v810_timestamp_t *timestamp, uint32 A)
   (*timestamp) += 2;
   return(BIOSROM[A & 0xFFFFF]);
  }
+ else if(A >= 0xAC000000 && A <= 0xAFFFFFFF)
+ {
+  /* DIAG9 K10: LD.B from the KING data-port window returns the low byte of the next KRAM word and consumes the whole word
+     (the next read returns the following word), exactly like IN.B from 0x604 / 0x605. */
+  return(port_rbyte(timestamp, 0x604 | (A & 1)));
+ }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
  {
 
@@ -208,6 +214,13 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t *timestamp, uint32 A, uint8
   (*timestamp) += 2;
   PCFXGA_PIOWrite8(A, V);
  }
+ else if(A >= 0xBC000000 && A <= 0xBFFFFFFF)
+ {
+  /* DIAG9 K10 on a console: ST.B to the KING data-port window writes ONE KRAM word with the byte in its lane and zero in
+     the other (ST.B 0xCC -> 0x00CC, at an odd address 0x99 -> 0x9900) and advances the KRAM pointer, i.e. it is OUT.B to
+     0x604 / 0x605.  The window offset only picks the lane. */
+  port_wbyte(timestamp, 0x604 | (A & 1), V);
+ }
  else if(A >= 0xE0000000 && A <= 0xE7FFFFFF && !(A & 1))
  {
   if(BackupControl & 0x1)
@@ -265,6 +278,7 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
  else if(A >= 0xB0000000 && A <= 0xB3FFFFFF)
  {
   (*timestamp) += 2;
+  (*timestamp) += KING_VCEWriteWaitCycles(*timestamp);
   FXVCE_Write16(0x4, V);
  }
  else if(A >= 0xB4000000 && A <= 0xB7FFFFFF)
@@ -281,7 +295,9 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
  {
   uint32 wait;
   (*timestamp) += 2;
+  king_kram_write_mapped = 1;
   wait = KING_KRAMWriteWaitCycles(*timestamp, 0x604);
+  king_kram_write_mapped = 0;
   (*timestamp) += wait;
   KING_Write16((*timestamp), 0x604, V);
  }

@@ -104,6 +104,7 @@ static bool CanDrawBG_Fast(int n)
  {
   int remap_thing = 0;
   bool bat_fetch = FALSE;
+  int bat_fetches = 0, bat_cycle = 0, cg_cycles[8] = { 0 };
 
   for(int x = 0; x < 16; x++)
   {
@@ -140,6 +141,8 @@ static bool CanDrawBG_Fast(int n)
     }
 
     bat_fetch = TRUE;
+    bat_fetches++;
+    bat_cycle = x & 7;
    }
    else // CG fetch:
    {
@@ -163,10 +166,23 @@ static bool CanDrawBG_Fast(int n)
      CDBG_REASON("Skewed CG fetch order");
      return(FALSE);
     }
+    if(remap_thing < 8) cg_cycles[remap_thing] = x & 7;
     remap_thing++;
    }
   }
- 
+
+  // BAT->CG latency (TENTATIVE, see king_batcg_too_early): a BAT-referenced CG read written too early returns the
+  // neighbouring cell's data, which only the slow path models.
+  if((bgmode & 0x8) && bat_fetches == 1 && king_batcg_latency_enabled())
+  {
+   for(int i = 0; i < remap_thing && i < 8; i++)
+    if(king_batcg_too_early(bat_cycle, cg_cycles[i]))
+    {
+     CDBG_REASON("BAT-CG read inside the two-cycle latency");
+     return(FALSE);
+    }
+  }
+
   // CG fetch count mismatch
   if(remap_thing != cg_per_mode[bgmode & 0x7])
   {

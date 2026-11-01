@@ -448,7 +448,6 @@ static void CalcHappyColor(void)
  HappyColor = (y_c << 16) | (u_c << 8) | (v_c << 0);
 }
 
-#include "rainbow_confetti.inc"
 
 static uint32 get_ac_coeff(const HuffmanQuickLUT *table, int32 *zeroes)
 {
@@ -606,7 +605,6 @@ bool RAINBOW_Fast_Init(bool arg_ChromaIP)
  GarbageData = FALSE;
  FirstDecode = TRUE;
  RasterReadPos = 0;
- RB_ConfettiReset();
 
  return(1);
 }
@@ -684,7 +682,6 @@ void RAINBOW_Fast_RLEBegin(bool first)
  {
   FirstDecode = true;
   GarbageData = false;
-  RB_ConfettiBeginFrame();
  }
  DecodeFormat[DecodeBufferWhichRead ^ 1] = 0;
 }
@@ -696,7 +693,6 @@ void RAINBOW_Fast_RLEEmit(unsigned x, unsigned count, uint8 color)
 }
 void RAINBOW_Fast_RLEEnd(void)
 {
- RB_ConfettiAdvanceRow();
 }
 
 void RAINBOW_Fast_DecodeBlock(bool arg_FirstDecode, bool Skip)
@@ -717,7 +713,6 @@ void RAINBOW_Fast_DecodeBlock(bool arg_FirstDecode, bool Skip)
    {
     FirstDecode = TRUE;
     GarbageData = FALSE;
-    RB_ConfettiBeginFrame();
    }
 
    if(GarbageData)
@@ -942,8 +937,6 @@ void RAINBOW_Fast_DecodeBlock(bool arg_FirstDecode, bool Skip)
      }
     } // End chroma interpolation
 
-    if(!Skip)
-     RB_ConfettiRepair(dest_base, HappyColor, rb_starve_bytes);
    } // end jpeg-like decoding
    else 
    {
@@ -998,7 +991,6 @@ void RAINBOW_Fast_DecodeBlock(bool arg_FirstDecode, bool Skip)
    // KING_RB_Fetch();
 
   BufferNoDecode: ;
-  RB_ConfettiAdvanceRow();
 }
 
 void KING_Moo(void);
@@ -1090,7 +1082,6 @@ void RAINBOW_Fast_Reset(void)
  memset(QuantTables, 0, sizeof(QuantTables));
  memset(QuantTablesBase, 0, sizeof(QuantTablesBase));
  DecodeFormat[0] = DecodeFormat[1] = -1;
- RB_ConfettiReset();
 
  CalcHappyColor();
 }

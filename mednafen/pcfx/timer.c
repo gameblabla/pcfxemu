@@ -46,11 +46,12 @@ v810_timestamp_t FXTIMER_Update(const v810_timestamp_t timestamp)
       while(counter <= 0)
       {
          counter += EFF_PERIOD;
+         /* Hardware (DIAG9 K14, 2026-11-01): the timer ran with control = 0x02 (enabled, interrupt NOT enabled) and read
+            back 0x06 -- the zero flag (D2) sets on every underflow whether or not D0 is set.  Only the IRQ line needs D0
+            (K14 saw the timer source never asserted). */
+         control |= 0x4;
          if(control & 0x1)
-         {
-            control |= 0x4;
             PCFXIRQ_Assert(PCFXIRQ_SOURCE_TIMER, TRUE);
-         }
       }
    }
 
@@ -105,7 +106,7 @@ void FXTIMER_Write16(uint32 A, uint16 V, const v810_timestamp_t timestamp)
          /*if(V & 0x4)
             FXDBG("Timer control write with D2 set?");*/
 
-         PCFXIRQ_Assert(PCFXIRQ_SOURCE_TIMER, (bool)(control & 0x4));
+         PCFXIRQ_Assert(PCFXIRQ_SOURCE_TIMER, (bool)((control & 0x4) && (control & 0x1)));
          PCFX_SetEvent(PCFX_EVENT_TIMER, CalcNextEventTS(timestamp));
          break;
 

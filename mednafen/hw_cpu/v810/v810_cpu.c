@@ -152,6 +152,8 @@ static void V810_ColdInit(void)
 static inline void V810_RecalcIPendingCache(void)
 {
  IPendingCache = 0;
+ { static int tr = -1; static unsigned long n; if(tr < 0) { const char *e = getenv("PCFXEMU_PSW_TRACE"); tr = (e && *e == '2'); }
+   if(tr && ilevel >= 0 && n++ >= (unsigned long)(getenv("PCFXEMU_PSW_TRACE_FROM") ? atol(getenv("PCFXEMU_PSW_TRACE_FROM")) : 0) && n < 100000) fprintf(stderr, "[RECALC] ilevel %d psw %08x halted %d\n", ilevel, S_REG[PSW], (int)Halted); }
 
  // Of course don't generate an interrupt if there's not one pending!
  if(ilevel < 0)
@@ -577,6 +579,8 @@ static inline void V810_SetSREG(v810_timestamp_t *timestamp, unsigned int which,
 		break;
 
 	 case PSW:
+	      { static int tr = -1; static unsigned long n; if(tr < 0) { const char *e = getenv("PCFXEMU_PSW_TRACE"); tr = (e && *e == '1'); }
+	        if(tr && (value & 0x1000) != (S_REG[PSW] & 0x1000) && n++ < 400) fprintf(stderr, "[PSW] %08x -> %08x at pc %08x\n", S_REG[PSW], value, (unsigned)V810_GetPC()); }
               	S_REG[which] = value & 0xFF3FF;
 		V810_RecalcIPendingCache();
 		break;
