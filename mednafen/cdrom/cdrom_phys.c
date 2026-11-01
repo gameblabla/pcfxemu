@@ -467,9 +467,23 @@ void CDPhys_Close(CDPhys *p)
     free(p);
 }
 
+static void formatted_subq_to_raw_pw(uint8_t *raw_pw, const uint8_t *subq)
+{
+    memset(raw_pw, 0, 96);
+    if(subq[2] == 0)
+        for(int i = 0; i < 96; i++)
+            raw_pw[i] |= 0x80;
+
+    for(int i = 0; i < 12; i++)
+        for(int bit = 0; bit < 8; bit++)
+            if(subq[i] & (0x80u >> bit))
+                raw_pw[i * 8 + bit] |= 0x40;
+}
+
 bool CDPhys_ReadRawSector(CDPhys *p, uint8_t *buf, int32_t lba)
 {
     uint8_t cdb[12];
+    char raw_pw_error[sizeof(cdphys_last_error)];
     if(!p || !buf)
         return false;
     memset(cdb, 0, sizeof(cdb));
@@ -480,7 +494,37 @@ bool CDPhys_ReadRawSector(CDPhys *p, uint8_t *buf, int32_t lba)
     cdb[9] = 0xF8;       /* Sync + all headers + user data + EDC/ECC. */
     cdb[10] = 0x01;      /* Raw P-W subchannel, Mednafen-compatible. */
     memset(buf, 0, 2352 + 96);
-    return native_scsi_read(p, cdb, sizeof(cdb), buf, 2352 + 96, 10);
+    if(native_scsi_read(p, cdb, sizeof(cdb), buf, 2352 + 96, 10))
+        return true;
+
+    snprintf(raw_pw_error, sizeof(raw_pw_error), "%s", CDPhys_LastError());
+
+    /* Some MMC drives reject raw P-W subchannel reads on Mode 2 tracks even
+     * though they can return the full 2352-byte main channel. Retry using the
+     * formatted 16-byte P/Q response and expand its Q channel into the raw
+     * interleaved P-W representation expected by the CDIF/SCSI-CD layers. */
+    {
+        uint8_t pq_cdb[12];
+        uint8_t pq_data[2352 + 16];
+        memcpy(pq_cdb, cdb, sizeof(pq_cdb));
+        pq_cdb[10] = 0x02; /* Formatted P/Q subchannel. */
+        memset(pq_data, 0, sizeof(pq_data));
+        if(native_scsi_read(p, pq_cdb, sizeof(pq_cdb), pq_data, sizeof(pq_data), 10))
+        {
+            memcpy(buf, pq_data, 2352);
+            formatted_subq_to_raw_pw(buf + 2352, pq_data + 2352);
+            cdphys_last_error[0] = 0;
+            return true;
+        }
+    }
+
+    {
+        char pq_error[sizeof(cdphys_last_error)];
+        snprintf(pq_error, sizeof(pq_error), "%s", CDPhys_LastError());
+        set_last_error("READ CD raw P-W failed (%s); formatted P/Q fallback failed (%s)",
+                       raw_pw_error, pq_error);
+    }
+    return false;
 }
 
 #else

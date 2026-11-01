@@ -2521,15 +2521,39 @@ static void print_usage(const char* argv0)
     fprintf(stderr,
             "Usage: %s [--bios-dir DIR|BIOS] [--save-dir DIR] [--fast-video|--no-fast-video] [--disable-3d-hardware|--enable-3d-hardware] [--auto] [--pcfx] [--pcfxga] [--fullscreen|--windowed] [--integer-scale|--native-aspect] [--horizontal auto|dots|clock] [--analog off|component|svideo] [--vdc-phase -64..64] [--stretch] [--nearest|--linear] [--scanlines|--no-scanlines] [--weave|--bob|--raw-interlace|--motion-adaptive|--pair-locked] [--mouse|--gamepad] [--mouse-p2|--gamepad-p2] [--cd-speed N] [--seek-audio-delay|--no-seek-audio-delay] [--adpcm-buggy=auto|off|on] [--bios-patches LIST]"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
-            " [--physical-cd[=DEVICE]]"
+            " [--physical-cd[=DEVICE]|--cdrom [INDEX]]"
 #endif
             " game.cue|game.chd|game.zip|homebrew_dir|program.EX\n\n"
 #ifdef PCFX_ENABLE_PHYSICAL_CD
-            "Physical CD-ROM: --physical-cd opens the default drive; --physical-cd=/dev/sr0 opens an explicit Linux drive.\n"
+            "Physical CD-ROM: --physical-cd opens the default drive; --cdrom [INDEX] opens the default drive or Linux /dev/srINDEX (0 selects /dev/sr0); --cdrom=/dev/sr0 selects a device path.\n"
 #endif
             "Keyboard P1: arrows, Z/X/C, A/S/D, Enter, Right Shift. P2: IJKL, numpad 1-8. Hotkeys: Esc/F1 menu, F5 save, F7 load, F6/F8 slot, F9 screenshot, F10 3D status, F11 fullscreen, F12 swap disc.\n",
             argv0);
 }
+
+#ifdef PCFX_ENABLE_PHYSICAL_CD
+static bool is_decimal_cdrom_index(const char* value)
+{
+    if(!value || !value[0])
+        return false;
+    for(const unsigned char* p = (const unsigned char*)value; *p; p++)
+        if(*p < '0' || *p > '9')
+            return false;
+    return true;
+}
+
+static void set_cdrom_cli_path(char* out, size_t out_size, const char* device_or_index)
+{
+    if(!out || !out_size)
+        return;
+    if(!device_or_index || !device_or_index[0])
+        snprintf(out, out_size, "cdrom:");
+    else if(is_decimal_cdrom_index(device_or_index))
+        snprintf(out, out_size, "cdrom:/dev/sr%s", device_or_index);
+    else
+        snprintf(out, out_size, "cdrom:%s", device_or_index);
+}
+#endif
 
 int main(int argc, char** argv)
 {
@@ -2684,6 +2708,16 @@ int main(int argc, char** argv)
         else if(!strncmp(argv[i], "--bios-patches=", 15))
             app.bios_patch_flags = parse_bios_patch_flags(argv[i] + 15);
 #ifdef PCFX_ENABLE_PHYSICAL_CD
+        else if(!strcmp(argv[i], "--cdrom"))
+        {
+            const char* device_or_index = NULL;
+            if(i + 1 < argc && strncmp(argv[i + 1], "--", 2) &&
+               (is_decimal_cdrom_index(argv[i + 1]) || !strncmp(argv[i + 1], "/dev/", 5)))
+                device_or_index = argv[++i];
+            set_cdrom_cli_path(app.game_path, sizeof(app.game_path), device_or_index);
+        }
+        else if(!strncmp(argv[i], "--cdrom=", 8))
+            set_cdrom_cli_path(app.game_path, sizeof(app.game_path), argv[i] + 8);
         else if(!strcmp(argv[i], "--physical-cd"))
         {
             if(i + 1 < argc && strncmp(argv[i + 1], "--", 2))
