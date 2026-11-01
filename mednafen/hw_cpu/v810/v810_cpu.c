@@ -298,6 +298,22 @@ static const uint8 op_writes_flags[256] = {
 };
 #endif
 
+/* DRAM / uncached-fetch model, fitted to the DIAG11 tank speed test on a real console (2026-11-01, TENTATIVE):
+ *   uncached fetch costs nothing beyond the instruction's base clocks (UNC1 = UNC2 = 0; the old model added 2 per 32-bit opcode),
+ *   the penalty is the DRAM page change (core.c: 4 clk, was 3; stores are posted: 0 clk but still move the page),
+ *   and a cache refill costs 7 clk (was 2).  Env knobs PCFXEMU_V810_UNC1/UNC2/REFILL, PCFXEMU_RAM_PAGE_PEN/WRITE_PEN/WRITE_SETS/SPLIT
+ *   restore the old model (UNC2=2 REFILL=2 PAGE_PEN=3 WRITE_PEN=3). */
+int v810_ifetch_flag = 0;                 /* 1 while the access in flight is an instruction fetch (read by core.c RAMLPCHECK) */
+static int v810_unc_first = 0, v810_unc_second = 0, v810_refill = 7, v810_knobs_init = 0;
+static void v810_init_knobs(void)
+{
+ const char *e;
+ v810_knobs_init = 1;
+ if((e = getenv("PCFXEMU_V810_UNC1"))) v810_unc_first = atoi(e);
+ if((e = getenv("PCFXEMU_V810_UNC2"))) v810_unc_second = atoi(e);
+ if((e = getenv("PCFXEMU_V810_REFILL"))) v810_refill = atoi(e);
+}
+
 static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 {
  const int CI = (addr >> 3) & 0x7F;
@@ -311,7 +327,8 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
    v810_prof_cache(V810_PROF_MISS_SUB, addr);
    v810p_ram_ifetch = 1;
 #endif
-   (*timestamp) += 2;       // or higher?  Penalty for cache miss seems to be higher than having cache disabled.
+   if(!v810_knobs_init) v810_init_knobs(); (*timestamp) += v810_refill;       // or higher?  Penalty for cache miss seems to be higher than having cache disabled.
+   v810_ifetch_flag = 1;
    if(MemReadBus32[addr >> 24])
     Cache[CI].data[SBI] = MemRead32(timestamp, addr & ~0x3);
    else
@@ -328,6 +345,7 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 #ifdef V810_PROFILE
    v810p_ram_ifetch = 0;
 #endif
+   v810_ifetch_flag = 0;
    Cache[CI].data_valid[SBI] = TRUE;
   }
 #ifdef V810_PROFILE
@@ -342,7 +360,8 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 #endif
   Cache[CI].tag = addr >> 10;
 
-  (*timestamp) += 2;	// or higher?  Penalty for cache miss seems to be higher than having cache disabled.
+  if(!v810_knobs_init) v810_init_knobs(); (*timestamp) += v810_refill;	// or higher?  Penalty for cache miss seems to be higher than having cache disabled.
+  v810_ifetch_flag = 1;
   if(MemReadBus32[addr >> 24])
    Cache[CI].data[SBI] = MemRead32(timestamp, addr & ~0x3);
   else
@@ -356,6 +375,7 @@ static inline uint32 V810_RDCACHE(v810_timestamp_t *timestamp, uint32 addr)
 
    Cache[CI].data[SBI] = tmp;
   }
+  v810_ifetch_flag = 0;
   //Cache[CI].data[SBI] = MemRead32(timestamp, addr & ~0x3);
 #ifdef V810_PROFILE
   v810p_ram_ifetch = 0;
@@ -387,8 +407,11 @@ static inline uint16 V810_RDOP(v810_timestamp_t *timestamp, uint32 addr, uint32 
  }
  else
  {
-  (*timestamp) += meow; //++;
+  if(!v810_knobs_init) v810_init_knobs();
+  (*timestamp) += (meow == 0) ? v810_unc_first : (meow == 2) ? v810_unc_second : meow;
+  v810_ifetch_flag = 1;
   ret = MemRead16(timestamp, addr);
+  v810_ifetch_flag = 0;
  }
  return(ret);
 }

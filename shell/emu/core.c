@@ -115,6 +115,18 @@ static void PCFX_PIOCloseAll(void);
 static bool PCFX_PIOTrap(uint32 trap_id);
 
 static uint32 RAM_LPA;		// Last page access
+static uint32 RAM_LPA_CODE;	// last page of an instruction fetch, only when PCFXEMU_RAM_SPLIT=1
+extern int v810_ifetch_flag;
+static int g_ram_pen = 4, g_ram_split = 0, g_ram_knobs = 0, g_ram_wpen = 0, g_ram_wsets = 1;   /* DIAG11 fit, see v810_cpu.c */
+static void ram_init_knobs(void)
+{
+ const char *e;
+ g_ram_knobs = 1;
+ if((e = getenv("PCFXEMU_RAM_PAGE_PEN"))) g_ram_pen = atoi(e);
+ if((e = getenv("PCFXEMU_RAM_SPLIT"))) g_ram_split = atoi(e);
+ if((e = getenv("PCFXEMU_RAM_WRITE_PEN"))) g_ram_wpen = atoi(e);
+ if((e = getenv("PCFXEMU_RAM_WRITE_SETS"))) g_ram_wsets = atoi(e);
+}
 
 static const int RAM_PageSize = 2048;
 static const int RAM_PageNOTMask = ~(RAM_PageSize - 1);
@@ -393,13 +405,27 @@ extern void v810_prof_report(unsigned long long frames);
 #define RAMLPCHECK	\
 {					\
   RAMLP_PROFILE				\
-  if((A & RAM_PageNOTMask) != RAM_LPA)	\
+  uint32 *lpa_ = &RAM_LPA;		\
+  if(!g_ram_knobs) ram_init_knobs();	\
+  if(g_ram_split && v810_ifetch_flag) lpa_ = &RAM_LPA_CODE; \
+  if((A & RAM_PageNOTMask) != *lpa_)	\
   {					\
-   (*timestamp) += 3;			\
-   RAM_LPA = A & RAM_PageNOTMask;	\
+   (*timestamp) += g_ram_pen;		\
+   *lpa_ = A & RAM_PageNOTMask;		\
    RAMLP_PROFILE_PEN			\
   }					\
   RAMLP_PROFILE_TAIL			\
+}
+
+/* RAM writes: optionally a different page-change penalty, and optionally they do not move the open page (DIAG11 H fit) */
+#define RAMLPCHECK_W	\
+{					\
+  if(!g_ram_knobs) ram_init_knobs();	\
+  if((A & RAM_PageNOTMask) != RAM_LPA)	\
+  {					\
+   (*timestamp) += (g_ram_wpen >= 0) ? g_ram_wpen : g_ram_pen; \
+   if(g_ram_wsets) RAM_LPA = A & RAM_PageNOTMask; \
+  }					\
 }
 
 static v810_timestamp_t next_pad_ts, next_timer_ts, next_adpcm_ts, next_king_ts;
@@ -607,6 +633,7 @@ static void PCFX_Reset(void)
  PCFX_Event_Reset();
 
  RAM_LPA = 0;
+ RAM_LPA_CODE = 0;
 
  ExBusReset = 0;
  BackupControl = 0;

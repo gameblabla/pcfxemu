@@ -202,12 +202,12 @@ static void MDFN_FASTCALL mem_wbyte(v810_timestamp_t *timestamp, uint32 A, uint8
 {
  if(A <= 0x001FFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
   RAM[A] = V;
  }
  else if(A <= 0x00FFFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
  }
  else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
  {
@@ -247,12 +247,12 @@ static void MDFN_FASTCALL mem_whword(v810_timestamp_t *timestamp, uint32 A, uint
 {
  if(A <= 0x001FFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
   *(uint16*)&RAM[A] = htole16(V);
  }
  else if(A <= 0x00FFFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
  }
  else if(A >= 0xF8000000 && A <= 0xFFEFFFFF)
  {
@@ -325,12 +325,12 @@ static void MDFN_FASTCALL mem_wword(v810_timestamp_t *timestamp, uint32 A, uint3
 #endif
  if(A <= 0x001FFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
   *(uint32*)&RAM[A] = htole32(V);
  }
  else if(A <= 0x00FFFFFF)
  {
-  RAMLPCHECK;
+  RAMLPCHECK_W;
  }
  else if(A >= 0xA0000000 && A <= 0xAFFFFFFF) // Read only
  {
