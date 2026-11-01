@@ -1,3 +1,4 @@
+#include <stdlib.h>
 /* K-BUS manual-priority regression using the actual KING source. */
 #include <assert.h>
 #include <stdio.h>
@@ -7,7 +8,10 @@ void SoundBox_SetKINGADPCMControl(uint32 value) {(void)value;}
 static king_t test;
 int main(void)
 {
+ setenv("PCFXEMU_KRAM_MAPPED_OLD","1",1);   /* the mapped-window 4-grant model is retired (DIAG9 K11/K12 measured ST = OUT) but selectable */
+ setenv("PCFXEMU_KRAM_BG_TAIL","0",1);            /* these pin the slot scheduler itself, without the BG-fetch tail fitted to K2 n=8 */
  king=&test; king->KRAM_Mode=1;
+ king_kram_write_mapped=1;	/* the 4-grant model: this test is about which K-BUS client keeps a slot */
  HPhase=HPHASE_HBLANK_PART1; HPhaseCounter=48; fx_vce.in_hblank=1;
  assert(KING_KBusPriority(KBUS_REFRESH,1)>KING_KBusPriority(KBUS_ADPCM,1));
  assert(KING_KBusPriority(KBUS_ADPCM,1)>KING_KBusPriority(KBUS_RAINBOW,1));
@@ -28,15 +32,15 @@ int main(void)
  }
  assert(!king->KBusSlotSource[1][100/4]);
  /* A CPU writer must wait for those four reserved grant slots. */
- assert(KING_KRAMSlotDrainDeadline(100,100,0)==132);
- assert(KING_KRAMSlotDrainDeadline(100,100,1)==116);
+ assert(KING_KRAMSlotDrainDeadline(100,100,0,0)==132);
+ assert(KING_KRAMSlotDrainDeadline(100,100,1,1)==116);
  /* A documented five-refresh sequence is reserved independently on both
   * physical banks; its intra-HBlank electrical phase is not specified. */
  memset(king->KBusSlotSource,0,sizeof(king->KBusSlotSource));
  for(unsigned i=0;i<5;i++) for(unsigned b=0;b<2;b++)
   KING_KBusReserve(b,KBUS_REFRESH,100);
- assert(KING_KRAMSlotDrainDeadline(100,100,0)==136);
- assert(KING_KRAMSlotDrainDeadline(100,100,1)==136);
+ assert(KING_KRAMSlotDrainDeadline(100,100,0,0)==136);
+ assert(KING_KRAMSlotDrainDeadline(100,100,1,1)==136);
  /* Active BG slots on A preempt RAINBOW; B remains independent. */
  memset(king->KBusSlotSource,0,sizeof(king->KBusSlotSource));
  memset(king->MPROGData,0xff,sizeof(king->MPROGData));

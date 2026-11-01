@@ -23,6 +23,9 @@ static void irq_cb(int v) { (void)v; }
 static void ssc_cb(uint8_t a, int b) { (void)a; (void)b; }
 
 static uint32_t ts;
+/* Optional initiator stall inside DATA IN: after every g_gap_every bytes the "CPU" goes away for g_gap_clocks clocks
+ * (a long KRAM copy, a header parse) without touching the drive. */
+static unsigned g_gap_every, g_gap_clocks;
 
 static void run(unsigned n) { ts += n; SCSICD_Run(ts); }
 /* let the drive finish initialising after a reset (1.3 s of emulated time) */
@@ -66,6 +69,8 @@ static int scsi(const uint8_t *cdb, unsigned cdblen, const uint8_t *out, unsigne
 			uint8_t b = SCSICD_GetDB();
 			if(in && ii < inmax) in[ii] = b;
 			ii++;
+			if(g_gap_every && (ii % g_gap_every) == 0)
+				run(g_gap_clocks);
 		}
 		else if(ph == (SCSICD_IO_mask | SCSICD_CD_mask))	/* STATUS */
 			status = SCSICD_GetDB();
@@ -390,6 +395,25 @@ int main(void)
 	assert(vendor_select(0x00, 15) == 0);
 	assert(do_read(600, 1, buf, sizeof(buf), &n) == 0 && buf[0] == 0x40);
 	puts("ok  an explicit XA=0 list recovers it");
+
+	/* ---------- 11. a stalled initiator must not stall the drive ---------- */
+	/* DIAG9 PLAY stalled in the emulator, and only for some code layouts: the player's CPU did not touch the drive for more
+	 * than one sector period (the 654-word guard restore), CDReadTimer was overshot by more than a period, the sum after the
+	 * delivery was still <= 0 and the read pump never ran again -- the drive sat in DATA IN, REQ low, 26 sectors short. */
+	{
+		static uint8_t big[8 * 2336 + 64];
+		assert(vendor_select(0x00, 0) == 0);
+		assert(vendor_select(0x06, 3) == 0);		/* 2336 */
+		g_gap_every = 2336; g_gap_clocks = 6000000;	/* ~0.28 s of nothing between sectors */
+		assert(do_read(640, 8, big, sizeof(big), &n) == 0);
+		g_gap_every = g_gap_clocks = 0;
+		assert(n == 8 * 2336);
+		puts("ok  a read whose initiator pauses 0.28 s after every sector still delivers all 8 sectors (read pump catch-up)");
+		g_gap_every = 8 * 2336; g_gap_clocks = 60000000;	/* one 2.8 s gap after the whole read has been transferred */
+		assert(do_read(640, 8, big, sizeof(big), &n) == 0 && n == 8 * 2336);
+		g_gap_every = g_gap_clocks = 0;
+		assert(vendor_select(0x00, 15) == 0);
+	}
 
 	printf("PASS cd_drive_mode_test (%s)\n", dir);
 	return 0;
